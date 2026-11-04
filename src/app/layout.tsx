@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Plus_Jakarta_Sans, DM_Sans, Permanent_Marker, Noto_Sans_Devanagari } from "next/font/google";
+import localFont from "next/font/local";
 import { getLocale } from "@/lib/i18n/server";
 import { RoughFilter } from "@/components/art/Graffiti";
 import { getSettings } from "@/lib/settings";
@@ -7,11 +7,13 @@ import "./globals.css";
 
 export const dynamic = "force-dynamic";
 
-// Licensed under the SIL Open Font License (see brand/BRAND_GUIDELINES.md §Typography).
-const display = Plus_Jakarta_Sans({ subsets: ["latin"], weight: ["500", "700", "800"], variable: "--font-display", display: "swap" });
-const body = DM_Sans({ subsets: ["latin"], variable: "--font-body", display: "swap" });
-const marker = Permanent_Marker({ subsets: ["latin"], weight: "400", variable: "--font-marker", display: "swap" }); // graffiti accents only
-const deva = Noto_Sans_Devanagari({ subsets: ["devanagari", "latin"], weight: ["400", "600", "700"], variable: "--font-deva", display: "swap" });
+// Fonts: SIL OFL 1.1 (Permanent Marker: Apache 2.0) — see brand/BRAND_GUIDELINES.md §Typography.
+// Self-hosted (src/app/fonts) so the build never fetches from Google Fonts — see fonts/LICENSES.md.
+const display = localFont({ src: "./fonts/plus-jakarta-sans-latin-wght-normal.woff2", weight: "200 800", variable: "--font-display", display: "swap" });
+const body = localFont({ src: "./fonts/dm-sans-latin-wght-normal.woff2", weight: "100 1000", variable: "--font-body", display: "swap" });
+const marker = localFont({ src: "./fonts/permanent-marker-latin-400-normal.woff2", weight: "400", variable: "--font-marker", display: "swap", preload: false }); // graffiti accents only
+// Devanagari glyphs only; Latin characters fall through to --font-body (see tailwind `deva` + .lang-ne).
+const deva = localFont({ src: "./fonts/noto-sans-devanagari-devanagari-wght-normal.woff2", weight: "100 900", variable: "--font-deva", display: "swap", preload: false, adjustFontFallback: false, fallback: [] });
 
 export async function generateMetadata(): Promise<Metadata> {
   const s = await getSettings();
