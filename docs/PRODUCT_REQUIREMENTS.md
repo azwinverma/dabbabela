@@ -56,3 +56,26 @@ delivery %, unpaid/failed payments, open tickets. Formulas are shown next to eac
 Auto-renewing plans with stored payment tokens, route optimisation engine, native mobile apps, loyalty /
 referrals (only after fraud rules), Bikram Sambat calendar display (flag exists, off until a tested library
 is added), API refunds through gateways (refunds are processed in merchant portals and recorded with proof).
+
+## Scope extension: Super Admin Control Center (2026-11-04)
+The owner's "Super Admin, CMS, Business ERP & Frontend Integration" brief extends v1 within the **same single application,
+database and permission system** (no separate admin app). Phase 0 deliverables:
+* [FEATURE_AUDIT.md](FEATURE_AUDIT.md): what exists vs. the brief, section by section, with evidence.
+* [SUPER_ADMIN_ARCHITECTURE.md](SUPER_ADMIN_ARCHITECTURE.md): target design for granular RBAC with custom roles and scopes, revenue
+  bases (bookings / cash / recognised / deferred) and the plan run-rate, estimated-vs-actual profitability, alerts, CMS page
+  builder, inventory lots and transfers, and finance payables.
+* [ADMIN_IMPLEMENTATION_TRACKER.md](ADMIN_IMPLEMENTATION_TRACKER.md): work packages WP-00…WP-20 and status.
+
+The following move from "Out of scope for v1" into planned scope:
+- loyalty and referrals (WP-15, with fraud rules);
+- a rider date picker (WP-13);
+- expenses and profitability (WP-09).
+
+These remain out of scope or blocked:
+- auto-renew with stored tokens;
+- route optimisation;
+- push notifications;
+- GPS tracking (not advertised);
+- gateway API refunds (⛔ merchant approval).
+
+Acceptance is brief §26 (an 18-step end-to-end flow), verified by `e2e/acceptance.spec.ts` (WP-20).

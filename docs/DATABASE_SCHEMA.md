@@ -66,3 +66,28 @@ Ingredient 1─* StockMovement *─1 Kitchen
 |---|---|
 | `20261103091318_init` | Full schema |
 | `20261104043242_user_allergies_default` | `User.allergies` default `[]` (Better Auth inserts without it) |
+
+## Planned: Super Admin foundation migration (not applied yet)
+Status: **planned**. It's tracked as WP-00 in [ADMIN_IMPLEMENTATION_TRACKER.md](ADMIN_IMPLEMENTATION_TRACKER.md), with field-level detail there.
+It's additive only (new tables, nullable or defaulted columns, new enum values `StockMovementType.TRANSFER_OUT/TRANSFER_IN`).
+
+| Area | Planned models | Planned columns on existing models |
+|---|---|---|
+| RBAC & sessions | `StaffRole`, `StaffScope`, `LoginEvent` | `User.staffRoleId` |
+| Attribution | — | `User.acquisitionSource`, `User.attribution`; `Order.attribution`, `Order.campaignId`; `Subscription.campaignId` |
+| Audit | — | `AuditLog.requestId`, `userAgent`, `approvedById` |
+| Menu | `MealCategory`, `KitchenAvailability`, `WeeklyMenuRevision` | `LunchBox.categoryId/shortDescription(+Ne)/isFeatured/isVisible/maxDailyQty/packagingCost`; `WeeklyMenu.kind/publishAt/version`; `MenuDay.cutoffOverride`; `MenuDayItem.replacementBoxId` |
+| Builder | `CustomizationPortion` | `CustomizationGroup.dietRule` |
+| Plans | `MealPlanPrice` | `MealPlan.minWeeks/maxWeeks/skipPolicy/cancelPolicy/renewalReminderDays`; `Subscription.priceId/renewedFromId` |
+| Orders | — | `Order.packagingCost` |
+| Kitchen | — | `Kitchen.managerId/openTime/closeTime/workingDays/status/statusNote` |
+| Inventory | `UnitConversion`, `InventoryLocation`, `StockLot`, `StockTransfer`, `StockTransferLine` | `Ingredient.category/purchaseUnit/purchaseFactor/reorderPoint`; `StockMovement.lotId/locationId/transferId` |
+| Finance | `ExpenseCategory`, `Expense`, `SupplierInvoice`, `SupplierPayment`, `DailySettlement`, `GatewayStatementLine`, `AccountingPeriod` | `Payment.gatewayFee/feeActual` |
+| Delivery | `RiderProfile` | `DeliveryRoute.cost`; `DeliveryZone.distanceRules` |
+| Corporate | `DepartmentBudget`, `CompanyMenuItem` | `Company.deliveryInstructions`; `CompanyMember.mealEligible/eligibleDays`; `CorporateContract.version/minMealsPerMonth/creditTermsDays/boxPrices/supersedesId` |
+| Marketing | `Campaign`, `CampaignSpend`, `ReferralCode`, `Referral` | `Coupon.freeDelivery/boxIds/campaignId/stackable` |
+| Alerts | `Alert` | — |
+| CMS | `CmsPage`, `CmsPageVersion`, `Redirect`, `NavItem`, `PageRevision` | — |
+| Admin UX | `SavedView` | — |
+
+Revenue-recognition and metric definitions that rely on these tables are in [SUPER_ADMIN_ARCHITECTURE.md §4](SUPER_ADMIN_ARCHITECTURE.md).
