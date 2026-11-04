@@ -28,11 +28,14 @@ Hosting: **Vercel** (functions pinned to `sin1`, Singapore) + **Neon Postgres** 
 ## Cron
 | Schedule (UTC) | Kathmandu | Path |
 |---|---|---|
-| `50 3 * * *` | 09:35 | `/api/cron/daily?job=cutoff` — lock today, expire unpaid |
+| `0 4 * * *` | 09:45 | `/api/cron/daily?job=cutoff` — lock today, expire unpaid |
 | `15 0 * * *` | 06:00 | `/api/cron/daily?job=housekeeping` — reconcile gateways, finish plans, reminders, retry outbox |
 
 If you change the order cut-off in Settings, move the `cutoff` cron to a few minutes after it.
-Hobby plans run crons once a day max; on Pro add `*/10 * * * *` housekeeping for quicker retries.
+Hobby plans run each cron once a day and only within the scheduled hour (any minute), so the cut-off job is
+scheduled at 04:00 UTC: on Hobby it lands between 09:45 and 10:44 Kathmandu, always after the 09:30 cut-off
+(an early run would do nothing). On Pro it runs at 09:45 exactly; add `*/10 * * * *` housekeeping for quicker retries.
+Staff can always lock a day by hand in Admin → Kitchen.
 
 ## Migrations & rollback
 * Schema changes: `npx prisma migrate dev --name <change>` locally → commit → deploy runs

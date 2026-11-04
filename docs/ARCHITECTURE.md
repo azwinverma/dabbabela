@@ -68,7 +68,7 @@ Allocation uses largest-remainder so per-order amounts always sum to the total.
 
 | Cron (UTC) | Kathmandu | Job |
 |---|---|---|
-| `50 3 * * *` | 09:35 | `cutoff`: lock today per kitchen (SCHEDULED → CONFIRMED), cancel unpaid orders past cut-off |
+| `0 4 * * *` | 09:45 | `cutoff`: lock today per kitchen (SCHEDULED → CONFIRMED), cancel unpaid orders past cut-off |
 | `15 0 * * *` | 06:00 | `housekeeping`: reconcile gateway attempts, complete finished plans, plan reminders, retry outbox |
 
 Vercel Hobby allows daily crons only; on Pro add `*/10 * * * *` for faster outbox retries.

@@ -36,9 +36,10 @@
     ".next-f3/types/**/*.ts",
     ".next-f4/types/**/*.ts",
     ".next-f5/types/**/*.ts",
+    ".next-verify/types/**/*.ts",
     ".next/types/**/*.ts",
     "next-env.d.ts",
-    ".next-verify/types/**/*.ts"
+    ".next-emptycheck/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"
