@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
-import { dateOnly, isoDate } from "@/lib/dates";
+import { addDays, dateOnly, isoDate, ktmNow } from "@/lib/dates";
 import { placeCartOrder, quoteCart, cancelOrder, setOrderStatus, lockDay, OrderError } from "@/server/orders";
 import { createSubscription, quoteSubscription, skipMeal, unskipMeal, pauseSubscription, resumeSubscription, cancelSubscription } from "@/server/subscriptions";
 import { markPaymentPaid, handleEsewaReturn, startPayment, requestRefund, approveRefund, processRefund } from "@/server/payments";
@@ -292,6 +292,30 @@ describe("meal plans", () => {
     expect(c.credit).toBeGreaterThan(0);
     expect(await walletBalance(user.id)).toBe(before + c.credit);
     expect(c.credit).toBeLessThanOrEqual(sub.payment.amount);
+  });
+
+  it("resumes a paused plan around days the kitchen has already locked", async () => {
+    const { user, addressId } = await addr(C);
+    const plan = await db.mealPlan.findUniqueOrThrow({ where: { slug: "hapta" } });
+    const sub = await createSubscription(user, { planId: plan.id, startDate: serviceDay(4), days: ["SUN", "MON", "TUE", "WED", "THU", "FRI"], addressId, method: "ESEWA" });
+    await markPaymentPaid(sub.payment.id, { amount: sub.payment.amount });
+    const total = sub.subscription.mealsTotal;
+    const actor = { id: user.id, isStaff: false };
+    const kitchenId = (await db.order.findFirstOrThrow({ where: { subscriptionId: sub.subscription.id } })).kitchenId;
+    await pauseSubscription(sub.subscription.id, actor, { userId: user.id });
+    // the next three days get locked while the plan is paused (e.g. the cut-off passed)
+    const locked = [1, 2, 3].map((n) => addDays(ktmNow().date, n));
+    await db.dayLock.createMany({ data: locked.map((d) => ({ kitchenId, date: dateOnly(d), orderCount: 0 })), skipDuplicates: true });
+    try {
+      await resumeSubscription(sub.subscription.id, actor, { userId: user.id });
+      const s = await db.subscription.findUniqueOrThrow({ where: { id: sub.subscription.id } });
+      expect(s.status).toBe("ACTIVE");
+      const live = await db.order.findMany({ where: { subscriptionId: sub.subscription.id, status: "SCHEDULED" }, select: { deliveryDate: true } });
+      expect(live.length).toBe(total);
+      expect(live.map((o) => isoDate(o.deliveryDate)).filter((d) => locked.includes(d))).toEqual([]);
+    } finally {
+      await db.dayLock.deleteMany({ where: { kitchenId, date: { in: locked.map(dateOnly) } } });
+    }
   });
 });
 

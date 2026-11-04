@@ -87,11 +87,12 @@ export async function planDates(start: string, weeks: number, days: Weekday[], s
 
 /** Next `count` service dates strictly after `after` on the given weekdays. */
 export async function nextServiceDates(after: string, count: number, days: Weekday[], settings: SiteSettings, kitchenId?: string | null, exclude: Set<string> = new Set()) {
-  const closures = await getClosures(after, addDays(after, 180), kitchenId);
+  const [closures, locked] = await Promise.all([getClosures(after, addDays(after, 180), kitchenId), getLockedDates(addDays(after, 1), addDays(after, 180), kitchenId)]);
   const out: string[] = [];
   for (let d = addDays(after, 1); out.length < count && d <= addDays(after, 180); d = addDays(d, 1)) {
     const wd = weekdayOf(d);
-    if (days.includes(wd) && settings.deliveryDays.includes(wd) && !closures.has(d) && !exclude.has(d)) out.push(d);
+    // a day the kitchen has already locked can't take new meals
+    if (days.includes(wd) && settings.deliveryDays.includes(wd) && !closures.has(d) && !locked.has(d) && !exclude.has(d)) out.push(d);
   }
   return out;
 }

@@ -29,8 +29,8 @@ export function parseRupees(input: unknown): number | null {
   if (typeof input !== "string") return null;
   const clean = input.replace(/[,\s]|Rs\.?|रु/gi, "");
   if (!clean) return null;
-  if (!/^-?\d+(\.\d{1,2})?$/.test(clean)) return null;
-  const [whole, frac = ""] = clean.replace("-", "").split(".");
+  if (!/^[-+]?\d+(\.\d{1,2})?$/.test(clean)) return null;
+  const [whole, frac = ""] = clean.replace(/^[-+]/, "").split(".");
   const value = parseInt(whole, 10) * 100 + parseInt((frac + "00").slice(0, 2), 10);
   return clean.startsWith("-") ? -value : value;
 }

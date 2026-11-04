@@ -9,15 +9,17 @@ domain, merchant activation or production infrastructure yet.
 |---|---|
 | `npm run typecheck` | ✅ 0 errors |
 | `npm run lint` | ✅ 0 errors (8 warnings: unused vars, `<img>` for QR codes, anonymous default export) |
-| `npm test` (Vitest unit + integration, real Postgres, fresh schema per run) | ✅ 72 / 72 in 8 files |
+| `npm test` (Vitest unit + integration, real Postgres, fresh schema per run) | ✅ 73 / 73 in 8 files |
 | `npm run build` (production) | ✅ all routes compile |
-| `npm run test:e2e` (Playwright, Chromium desktop + Pixel 7 for public pages, against the production build) | ✅ 33 / 33 |
+| `npm run test:e2e` (Playwright, Chromium desktop + Pixel 7 for public pages, against the production build) | ✅ 38 / 38 |
 | HTTP smoke of every owned route per area (owner + role accounts) | ✅ 200, no server errors |
 
 Tests by file: `money`, `pricing`, `calendar`, `rbac-transitions` (unit); `commerce` (orders, payments,
 plans, corporate split, lock, disruption), `ops` (kitchen BOM, batch usage idempotency, PO receiving, OTP,
 cash), `finance` (invoices, VAT, void, credit note, tenant isolation, privacy deletion), `catalog` (recipe
 versions, menu publish re-assignment, CMS publish/rollback/locale fallback, staff role limits).
+E2E by file: `public`, `order-flow`, `permissions`, `plans`, `cms`, `fulfilment` (kitchen → dispatch → rider),
+`team`, `refunds`.
 
 ## Phases
 | Phase | Status |
@@ -51,9 +53,11 @@ versions, menu publish re-assignment, CMS publish/rollback/locale fallback, staf
 ## Known issues / limitations
 1. Nepali translations (UI dictionaries, seed CMS) are hand-written but **not reviewed by a native editor**.
 2. Admin screens are English only.
-3. Server actions were verified through their services and HTTP page loads; only the order flow,
-   logins and permission boundaries are clicked through in Playwright. Add E2E for skip/pause, CMS
-   publish, kitchen→dispatch→rider, team order, refund approval.
+3. Clicked through in Playwright: public pages, order + cash checkout, logins and permission
+   boundaries, plan skip/undo/pause/resume/cancel, CMS draft→publish→rollback, kitchen lock/pack →
+   dispatch route → rider delivery with the hand-off code, company team order, and refund
+   request → approval → processing with a reference. Other admin screens (inventory, invoices,
+   disruption wizard, settings) are covered by service tests and page loads, not E2E.
 4. Recipe quantities and costs are planning estimates; suppliers are placeholders.
 5. Nutrition: no values seeded (shown only when a source is entered).
 6. No food photography yet — illustrated dabbas are used until photos are uploaded.
@@ -76,7 +80,7 @@ versions, menu publish re-assignment, CMS publish/rollback/locale fallback, staf
 | Vercel + Neon production accounts | Staging/production deploy |
 
 ## Prioritised backlog
-1. More Playwright coverage (see issue 3) and an accessibility scan (axe) in CI.
+1. Playwright for inventory/POs, invoices and the disruption wizard (see issue 3), and an accessibility scan (axe) in CI.
 2. Error tracking (Sentry) + Vercel Firewall/Turnstile on public forms.
 3. Native-speaker review of Nepali copy; translate admin chrome if staff prefer Nepali.
 4. Ingredient unit conversions (buy in sacks, cook in grams).

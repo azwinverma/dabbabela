@@ -16,6 +16,10 @@ describe("money", () => {
     expect(parseRupees("0.29")).toBe(29);
     expect(parseRupees("abc")).toBeNull();
     expect(parseRupees("1.234")).toBeNull();
+    // signed amounts, as the credit-adjustment form suggests ("+100 or -50")
+    expect(parseRupees("+100")).toBe(10000);
+    expect(parseRupees("-50")).toBe(-5000);
+    expect(parseRupees("+-5")).toBeNull();
   });
   it("allocates exactly", () => {
     const parts = allocate(100, [1, 1, 1]);

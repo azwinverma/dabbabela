@@ -54,27 +54,27 @@ function ImageInput({ value, onChange }: { value: string; onChange: (v: string) 
   );
 }
 
-function FieldInput({ field, value, onChange, placeholder }: { field: Field; value: any; onChange: (v: any) => void; placeholder?: string }) {
+function FieldInput({ field, value, onChange, placeholder, id }: { field: Field; value: any; onChange: (v: any) => void; placeholder?: string; id?: string }) {
   switch (field.type) {
     case "textarea":
-      return <textarea className="field" rows={3} value={value ?? ""} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />;
+      return <textarea id={id} className="field" rows={3} value={value ?? ""} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />;
     case "markdown":
-      return <textarea className="field font-mono text-[13px]" rows={10} value={value ?? ""} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />;
+      return <textarea id={id} className="field font-mono text-[13px]" rows={10} value={value ?? ""} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />;
     case "boolean":
       return (
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" className="h-4 w-4 accent-sindoor" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
+          <input id={id} type="checkbox" className="h-4 w-4 accent-sindoor" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
           {value ? "On" : "Off"}
         </label>
       );
     case "number":
-      return <input type="number" className="field" value={value ?? 0} onChange={(e) => onChange(Number(e.target.value))} />;
+      return <input id={id} type="number" className="field" value={value ?? 0} onChange={(e) => onChange(Number(e.target.value))} />;
     case "image":
       return <ImageInput value={value ?? ""} onChange={onChange} />;
     case "list":
       return <ListInput field={field} value={Array.isArray(value) ? value : []} onChange={onChange} />;
     default:
-      return <input className="field" type={field.type === "url" ? "text" : "text"} value={value ?? ""} onChange={(e) => onChange(e.target.value)} placeholder={placeholder ?? (field.type === "url" ? "/menu or https://…" : undefined)} />;
+      return <input id={id} className="field" type="text" value={value ?? ""} onChange={(e) => onChange(e.target.value)} placeholder={placeholder ?? (field.type === "url" ? "/menu or https://…" : undefined)} />;
   }
 }
 
@@ -132,8 +132,15 @@ export function SectionEditor({ fields, initial, placeholders }: { fields: Field
       <input type="hidden" name="data" value={JSON.stringify(data)} />
       {fields.map((f) => (
         <div key={f.name}>
-          <span className="label">{f.label}</span>
-          <FieldInput field={f} value={data[f.name]} placeholder={placeholders && typeof placeholders[f.name] === "string" ? String(placeholders[f.name]).slice(0, 140) : undefined} onChange={(v) => setData((d) => ({ ...d, [f.name]: v }))} />
+          {/* Simple fields get a real <label>; lists and images have their own controls. */}
+          {f.type === "list" || f.type === "image" ? (
+            <span className="label">{f.label}</span>
+          ) : (
+            <label htmlFor={`cms-${f.name}`} className="label">
+              {f.label}
+            </label>
+          )}
+          <FieldInput id={`cms-${f.name}`} field={f} value={data[f.name]} placeholder={placeholders && typeof placeholders[f.name] === "string" ? String(placeholders[f.name]).slice(0, 140) : undefined} onChange={(v) => setData((d) => ({ ...d, [f.name]: v }))} />
           {f.help && <p className="mt-1 text-xs text-ink-mute">{f.help}</p>}
           {placeholders && f.type === "list" && <p className="mt-1 text-xs text-ink-mute">Leave empty to show the English list.</p>}
           {f.type === "markdown" && <p className="mt-1 text-xs text-ink-mute">Markdown: blank line between paragraphs, ## for headings, *word* for the marker style, - for lists.</p>}

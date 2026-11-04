@@ -492,9 +492,17 @@ export async function resumeSubscription(subId: string, actor: { id: string; isS
     const already = await db.orderStatusEvent.findFirst({ where: { orderId: h.id, note: "Re-added on resume" } });
     if (!already) fresh.push(h);
   }
+  // Meals are re-added as an ACTIVE plan; if that fails (capacity, closures) the plan goes back to
+  // PAUSED with its meals still on hold instead of ending up "active" with nothing scheduled.
   await db.subscription.update({ where: { id: subId }, data: { status: "ACTIVE" } });
+  let added: string[];
+  try {
+    added = await appendMeals(subId, fresh, actor.id, "Re-added after pause");
+  } catch (e) {
+    await db.subscription.update({ where: { id: subId }, data: { status: "PAUSED" } });
+    throw e;
+  }
   if (pause && !pause.toDate) await db.subscriptionPause.update({ where: { id: pause.id }, data: { toDate: dateOnly(todayKTM()) } });
-  const added = await appendMeals(subId, fresh, actor.id, "Re-added after pause");
   for (const h of fresh.slice(0, added.length)) await db.orderStatusEvent.create({ data: { orderId: h.id, fromStatus: "SKIPPED", toStatus: "SKIPPED", note: "Re-added on resume", actorId: actor.id } });
   await db.subscriptionChange.create({ data: { subscriptionId: subId, type: "RESUME", detail: `${added.length} meals re-added`, actorId: actor.id } });
   return added.length;
