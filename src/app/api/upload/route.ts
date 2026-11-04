@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 /** Staff media upload → Vercel Blob (dev: public/uploads). Records a MediaAsset row. */
 export async function POST(req: Request) {
   const user = await getCurrentUser();
-  if (!user || !(can(user.role, "media") || can(user.role, "menu") || can(user.role, "content") || can(user.role, "marketing")))
+  if (!user || !(can(user, "media.edit") || can(user, "menu.edit") || can(user, "content.edit") || can(user, "marketing.edit")))
     return NextResponse.json({ error: "Not allowed" }, { status: 403 });
   const s = await getSettings();
   const twoFaExempt = process.env.DISABLE_STAFF_2FA === "true" && process.env.NODE_ENV !== "production";

@@ -14,7 +14,7 @@ import { GenerateForm } from "./InvoiceForms";
 export const metadata = { title: "Invoices" };
 
 export default async function Invoices({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  await requirePermission("invoices");
+  await requirePermission("invoices.view");
   const sp = await searchParams;
   const prev = monthRange(addDays(`${todayKTM().slice(0, 7)}-01`, -1).slice(0, 7));
   const where: Prisma.InvoiceWhereInput = {

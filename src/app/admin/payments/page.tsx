@@ -17,7 +17,7 @@ export default async function Payments({ searchParams }: { searchParams: Promise
   const user = await requirePermission("payments.view");
   const sp = await searchParams;
   const view = sp.view ?? "all";
-  const canVerify = can(user.role, "payments.verify");
+  const canVerify = can(user, "payments.approve");
   const verifyCount = await db.payment.count({ where: { method: "BANK_TRANSFER", status: "PENDING" } });
   const tabs = [
     { key: "all", label: "All payments", href: "/admin/payments" },

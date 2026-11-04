@@ -12,7 +12,7 @@ import { MovementForm } from "./MovementForm";
 export const metadata = { title: "Inventory" };
 
 export default async function InventoryPage({ searchParams }: { searchParams: Promise<{ kitchen?: string; low?: string }> }) {
-  const user = await requirePermission("inventory");
+  const user = await requirePermission("inventory.view");
   const sp = await searchParams;
   const { kitchens, kitchen } = await pickKitchen(user, sp.kitchen);
   if (!kitchen) return <PageHeader title="Inventory" description="Add a kitchen first." />;

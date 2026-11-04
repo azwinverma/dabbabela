@@ -12,7 +12,7 @@ import { f, FieldError } from "../_kit/form";
 const KINDS: PlanKind[] = ["WEEKLY", "MONTHLY", "OFFICE", "CUSTOM"];
 
 export async function savePlan(id: string | null, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("plans", async (user) => {
+  return guarded("plans.edit", async (user) => {
     const name = f.str(fd, "name", 120);
     if (!name) throw new FieldError("name", "Name is required");
     const kind = f.str(fd, "kind") as PlanKind;
@@ -54,7 +54,7 @@ export async function savePlan(id: string | null, _prev: ActionResult, fd: FormD
 }
 
 export async function togglePlan(id: string): Promise<ActionResult> {
-  return guarded("plans", async (user) => {
+  return guarded("plans.edit", async (user) => {
     const p = await db.mealPlan.findUnique({ where: { id } });
     if (!p) return fail("Not found");
     await db.mealPlan.update({ where: { id }, data: { isActive: !p.isActive } });

@@ -9,7 +9,7 @@ import { ConfirmAction } from "@/components/admin/ConfirmAction";
 import { deleteTestimonial, saveTestimonial } from "../actions";
 
 export default async function TestimonialEdit({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("content");
+  await requirePermission("content.view");
   const { id } = await params;
   const t = id === "new" ? null : await db.testimonial.findUnique({ where: { id } });
   if (id !== "new" && !t) notFound();

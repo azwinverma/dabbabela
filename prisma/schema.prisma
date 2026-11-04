@@ -42,23 +42,23 @@ enum DietPreference {
 }
 
 model User {
-  id                  String    @id @default(cuid())
+  id                  String   @id @default(cuid())
   name                String
-  email               String    @unique
-  emailVerified       Boolean   @default(false)
+  email               String   @unique
+  emailVerified       Boolean  @default(false)
   image               String?
-  phoneNumber         String?   @unique
-  phoneNumberVerified Boolean?  @default(false)
-  twoFactorEnabled    Boolean?  @default(false)
-  role                Role      @default(CUSTOMER)
-  isActive            Boolean   @default(true)
-  locale              String    @default("en")
+  phoneNumber         String?  @unique
+  phoneNumberVerified Boolean? @default(false)
+  twoFactorEnabled    Boolean? @default(false)
+  role                Role     @default(CUSTOMER)
+  isActive            Boolean  @default(true)
+  locale              String   @default("en")
   kitchenId           String? // staff scoped to one kitchen (null = all kitchens)
 
   // food preferences (customer profile)
   diet             DietPreference @default(ANY)
   spiceTolerance   Int            @default(2) // 0 none … 4 very hot
-  allergies        String[] @default([]) // Allergen codes the customer wants to avoid
+  allergies        String[]       @default([]) // Allergen codes the customer wants to avoid
   avoidOnionGarlic Boolean        @default(false)
   dietaryNotes     String?
   marketingOptIn   Boolean        @default(false)
@@ -69,29 +69,41 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  sessions        Session[]
-  accounts        Account[]
-  twoFactors      TwoFactor[]
-  addresses       Address[]
-  membership      CompanyMember?
-  orders          Order[]          @relation("OrderCustomer")
-  ordersPlaced    Order[]          @relation("OrderPlacedBy")
-  subscriptions   Subscription[]
-  customBoxes     CustomBox[]
-  favorites       Favorite[]
-  payments        Payment[]
-  credits         CreditLedger[]   @relation("CreditOwner")
-  auditLogs       AuditLog[]
-  statusEvents    OrderStatusEvent[]
-  notifications   Notification[]
-  tickets         SupportTicket[]  @relation("TicketCustomer")
-  ticketsAssigned SupportTicket[]  @relation("TicketAssignee")
-  ticketMessages  SupportMessage[]
-  feedback        Feedback[]
-  routes          DeliveryRoute[]
-  deliveryEvents  DeliveryEvent[]
-  dataRequests    DataRequest[]
+  sessions          Session[]
+  accounts          Account[]
+  twoFactors        TwoFactor[]
+  addresses         Address[]
+  membership        CompanyMember?
+  orders            Order[]                  @relation("OrderCustomer")
+  ordersPlaced      Order[]                  @relation("OrderPlacedBy")
+  subscriptions     Subscription[]
+  customBoxes       CustomBox[]
+  favorites         Favorite[]
+  payments          Payment[]
+  credits           CreditLedger[]           @relation("CreditOwner")
+  auditLogs         AuditLog[]
+  statusEvents      OrderStatusEvent[]
+  notifications     Notification[]
+  tickets           SupportTicket[]          @relation("TicketCustomer")
+  ticketsAssigned   SupportTicket[]          @relation("TicketAssignee")
+  ticketMessages    SupportMessage[]
+  feedback          Feedback[]
+  routes            DeliveryRoute[]
+  deliveryEvents    DeliveryEvent[]
+  dataRequests      DataRequest[]
   notificationPrefs NotificationPreference[]
+
+  // ── WP-00: RBAC + attribution ──
+  staffRoleId       String? // optional custom role, adds grants on top of the base Role
+  staffRole         StaffRole?    @relation(fields: [staffRoleId], references: [id], onDelete: SetNull)
+  acquisitionSource String? // first-touch channel (utm_source / referral / direct)
+  attribution       Json? // first-touch UTM snapshot { source, medium, campaign, referrer, landing, at }
+  scopes            StaffScope[]
+  loginEvents       LoginEvent[]
+  savedViews        SavedView[]
+  riderProfile      RiderProfile?
+  referralCode      ReferralCode?
+  referralReceived  Referral?
 
   @@index([role])
 }
@@ -170,11 +182,11 @@ enum AddressType {
 }
 
 model Address {
-  id            String      @id @default(cuid())
+  id            String        @id @default(cuid())
   userId        String
-  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   label         String // "Office", "Home", "Mum's shop"
-  type          AddressType @default(OFFICE)
+  type          AddressType   @default(OFFICE)
   recipientName String
   phone         String
   placeName     String? // office / shop / college / building name
@@ -182,17 +194,17 @@ model Address {
   area          String // locality, e.g. "Baneshwor"
   ward          Int?
   municipality  String? // e.g. "Kathmandu Metropolitan City"
-  city          String      @default("Kathmandu")
+  city          String        @default("Kathmandu")
   landmark      String?
   lat           Float?
   lng           Float?
   instructions  String?
   zoneId        String?
   zone          DeliveryZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
-  isDefault     Boolean     @default(false)
+  isDefault     Boolean       @default(false)
   archivedAt    DateTime?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   orders        Order[]
   subscriptions Subscription[]
@@ -214,42 +226,59 @@ model Kitchen {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  zones       DeliveryZone[]
-  slots       DeliverySlot[]
-  capacities  KitchenCapacity[]
-  locks       DayLock[]
-  batches     ProductionBatch[]
-  qcLogs      QcLog[]
-  movements   StockMovement[]
-  purchases   PurchaseOrder[]
-  routes      DeliveryRoute[]
-  orders      Order[]
-  menus       WeeklyMenu[]
-  holidays    Holiday[]
+  zones      DeliveryZone[]
+  slots      DeliverySlot[]
+  capacities KitchenCapacity[]
+  locks      DayLock[]
+  batches    ProductionBatch[]
+  qcLogs     QcLog[]
+  movements  StockMovement[]
+  purchases  PurchaseOrder[]
+  routes     DeliveryRoute[]
+  orders     Order[]
+  menus      WeeklyMenu[]
+  holidays   Holiday[]
+
+  // ── WP-00: kitchen management ──
+  managerId    String? // User id of the kitchen manager
+  openTime     String? // "06:00" Kathmandu
+  closeTime    String? // "15:00"
+  workingDays  Weekday[]             @default([])
+  status       String                @default("OPEN") // OPEN | PAUSED | CLOSED
+  statusNote   String?
+  staffScopes  StaffScope[]
+  availability KitchenAvailability[]
+  locations    InventoryLocation[]
+  lots         StockLot[]
+  transfersOut StockTransfer[]       @relation("TransferFrom")
+  transfersIn  StockTransfer[]       @relation("TransferTo")
+  expenses     Expense[]
 }
 
 model DeliveryZone {
-  id           String   @id @default(cuid())
-  name         String
-  city         String   @default("Kathmandu")
-  areas        String[] // localities matched by the coverage lookup
-  wards        String[] // "KMC-10", "LMC-2" …
-  kitchenId    String
-  kitchen      Kitchen  @relation(fields: [kitchenId], references: [id], onDelete: Restrict)
-  fee          Int      @default(0) // paisa per delivery day
-  freeAbove    Int? // paisa; day subtotal at/above which delivery is free
-  minOrder     Int      @default(0) // paisa per delivery day
-  etaNote      String?
-  isActive     Boolean  @default(true)
-  sortOrder    Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id        String   @id @default(cuid())
+  name      String
+  city      String   @default("Kathmandu")
+  areas     String[] // localities matched by the coverage lookup
+  wards     String[] // "KMC-10", "LMC-2" …
+  kitchenId String
+  kitchen   Kitchen  @relation(fields: [kitchenId], references: [id], onDelete: Restrict)
+  fee       Int      @default(0) // paisa per delivery day
+  freeAbove Int? // paisa; day subtotal at/above which delivery is free
+  minOrder  Int      @default(0) // paisa per delivery day
+  etaNote   String?
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  addresses   Address[]
-  companies   Company[]
-  locations   OfficeLocation[]
-  orders      Order[]
-  routes      DeliveryRoute[]
+  addresses Address[]
+  companies Company[]
+  locations OfficeLocation[]
+  orders    Order[]
+  routes    DeliveryRoute[]
+
+  distanceRules Json? // optional fee bands [{ maxKm, fee }] (WP-13)
 
   @@index([kitchenId])
 }
@@ -340,29 +369,29 @@ enum NutritionSource {
 }
 
 model Allergen {
-  id         String   @id @default(cuid())
-  code       String   @unique // GLUTEN, DAIRY, EGG, SOY, PEANUT, TREE_NUT, SESAME, MUSTARD, FISH, SHELLFISH
-  name       String
-  nameNe     String?
-  sortOrder  Int      @default(0)
+  id        String  @id @default(cuid())
+  code      String  @unique // GLUTEN, DAIRY, EGG, SOY, PEANUT, TREE_NUT, SESAME, MUSTARD, FISH, SHELLFISH
+  name      String
+  nameNe    String?
+  sortOrder Int     @default(0)
 
   items MenuItemAllergen[]
 }
 
 model MenuItem {
-  id            String          @id @default(cuid())
-  name          String
-  nameNe        String?
-  description   String?
-  descriptionNe String?
-  category      ItemCategory
-  diet          Diet            @default(VEG)
-  dietVerified  Boolean         @default(false) // kitchen confirmed preparation (e.g. no egg wash)
-  hasOnionGarlic Boolean        @default(true)
-  spiceLevel    Int             @default(1) // 0–4
-  portionLabel  String? // "1 bowl (≈250 g)"
-  prepMinutes   Int?
-  station       String? // "Wok", "Tandoor/roll", "Dal & rice"
+  id              String          @id @default(cuid())
+  name            String
+  nameNe          String?
+  description     String?
+  descriptionNe   String?
+  category        ItemCategory
+  diet            Diet            @default(VEG)
+  dietVerified    Boolean         @default(false) // kitchen confirmed preparation (e.g. no egg wash)
+  hasOnionGarlic  Boolean         @default(true)
+  spiceLevel      Int             @default(1) // 0–4
+  portionLabel    String? // "1 bowl (≈250 g)"
+  prepMinutes     Int?
+  station         String? // "Wok", "Tandoor/roll", "Dal & rice"
   // nutrition per portion — only shown with its source label
   calories        Int?
   proteinG        Int?
@@ -371,26 +400,28 @@ model MenuItem {
   nutritionSource NutritionSource @default(NONE)
   nutritionNote   String?
 
-  price        Int     @default(0) // paisa, when picked in Build-a-Dabba
-  costPrice    Int     @default(0) // paisa, manual cost when no recipe is costed
-  dailyLimit   Int? // portions per day for Build-a-Dabba (null = unlimited)
-  image        String?
-  isActive     Boolean @default(true)
-  allowCustom  Boolean @default(true)
-  sortOrder    Int     @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  price       Int      @default(0) // paisa, when picked in Build-a-Dabba
+  costPrice   Int      @default(0) // paisa, manual cost when no recipe is costed
+  dailyLimit  Int? // portions per day for Build-a-Dabba (null = unlimited)
+  image       String?
+  isActive    Boolean  @default(true)
+  allowCustom Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  allergens     MenuItemAllergen[]
-  boxItems      BoxItem[]
-  recipe        Recipe?
-  options       CustomizationOption[]
-  favorites     Favorite[]
-  batches       ProductionBatch[]
-  subsFrom      BoxSubstitution[] @relation("SubFrom")
-  subsTo        BoxSubstitution[] @relation("SubTo")
-  combosA       ComboRule[]       @relation("ComboA")
-  combosB       ComboRule[]       @relation("ComboB")
+  allergens MenuItemAllergen[]
+  boxItems  BoxItem[]
+  recipe    Recipe?
+  options   CustomizationOption[]
+  favorites Favorite[]
+  batches   ProductionBatch[]
+  subsFrom  BoxSubstitution[]     @relation("SubFrom")
+  subsTo    BoxSubstitution[]     @relation("SubTo")
+  combosA   ComboRule[]           @relation("ComboA")
+  combosB   ComboRule[]           @relation("ComboB")
+
+  kitchenAvailability KitchenAvailability[]
 
   @@index([category, isActive])
 }
@@ -419,16 +450,16 @@ model Recipe {
 
 /// Immutable once another version supersedes it.
 model RecipeVersion {
-  id            String   @id @default(cuid())
-  recipeId      String
-  recipe        Recipe   @relation("RecipeVersions", fields: [recipeId], references: [id], onDelete: Cascade)
-  version       Int
-  yieldPortions Int      @default(1) // ingredient quantities below make this many portions
-  method        String?
-  notes         String?
-  costPerPortion Int     @default(0) // paisa, computed when the version is saved
-  createdById   String?
-  createdAt     DateTime @default(now())
+  id             String   @id @default(cuid())
+  recipeId       String
+  recipe         Recipe   @relation("RecipeVersions", fields: [recipeId], references: [id], onDelete: Cascade)
+  version        Int
+  yieldPortions  Int      @default(1) // ingredient quantities below make this many portions
+  method         String?
+  notes          String?
+  costPerPortion Int      @default(0) // paisa, computed when the version is saved
+  createdById    String?
+  createdAt      DateTime @default(now())
 
   ingredients RecipeIngredient[]
   current     Recipe?            @relation("CurrentVersion")
@@ -477,6 +508,19 @@ model LunchBox {
   menuDayItems  MenuDayItem[]
   orderItems    OrderItem[]
   favorites     Favorite[]
+
+  // ── WP-00: catalogue management ──
+  categoryId          String?
+  category            MealCategory?         @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  shortDescription    String?
+  shortDescriptionNe  String?
+  isFeatured          Boolean               @default(false)
+  isVisible           Boolean               @default(true) // hidden from the public site but orderable by staff
+  maxDailyQty         Int? // per kitchen per day; null = no box-level cap
+  packagingCost       Int                   @default(0) // paisa per box
+  replacementFor      MenuDayItem[]         @relation("MenuReplacement")
+  kitchenAvailability KitchenAvailability[]
+  companyMenus        CompanyMenuItem[]
 }
 
 model BoxItem {
@@ -519,30 +563,35 @@ model CustomizationGroup {
   isActive  Boolean      @default(true)
 
   options CustomizationOption[]
+
+  dietRule String? // e.g. "VEG_ONLY" — options must satisfy this diet
 }
 
 model CustomizationOption {
-  id          String             @id @default(cuid())
-  groupId     String
-  group       CustomizationGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  menuItemId  String
-  menuItem    MenuItem           @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  id            String             @id @default(cuid())
+  groupId       String
+  group         CustomizationGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  menuItemId    String
+  menuItem      MenuItem           @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
   priceOverride Int? // paisa; null = dish price
-  isDefault   Boolean            @default(false)
-  sortOrder   Int                @default(0)
+  isDefault     Boolean            @default(false)
+  sortOrder     Int                @default(0)
+
+  portions            CustomizationPortion[]
+  kitchenAvailability KitchenAvailability[]
 
   @@unique([groupId, menuItemId])
 }
 
 /// Combination rules for Build-a-Dabba. EXCLUDE = never together; REQUIRE = A needs B.
 model ComboRule {
-  id       String   @id @default(cuid())
-  kind     String   @default("EXCLUDE")
-  itemAId  String
-  itemA    MenuItem @relation("ComboA", fields: [itemAId], references: [id], onDelete: Cascade)
-  itemBId  String
-  itemB    MenuItem @relation("ComboB", fields: [itemBId], references: [id], onDelete: Cascade)
-  message  String?
+  id      String   @id @default(cuid())
+  kind    String   @default("EXCLUDE")
+  itemAId String
+  itemA   MenuItem @relation("ComboA", fields: [itemAId], references: [id], onDelete: Cascade)
+  itemBId String
+  itemB   MenuItem @relation("ComboB", fields: [itemBId], references: [id], onDelete: Cascade)
+  message String?
 
   @@unique([kind, itemAId, itemBId])
 }
@@ -564,21 +613,26 @@ enum MenuStatus {
 }
 
 model WeeklyMenu {
-  id          String     @id @default(cuid())
-  title       String
+  id            String     @id @default(cuid())
+  title         String
   // Sunday of the week this menu covers. Null + isDefault = standing rotation template.
-  weekStart   DateTime?  @db.Date
-  isDefault   Boolean    @default(false)
-  status      MenuStatus @default(DRAFT)
-  kitchenId   String?
-  kitchen     Kitchen?   @relation(fields: [kitchenId], references: [id], onDelete: SetNull)
-  note        String?
-  publishedAt DateTime?
+  weekStart     DateTime?  @db.Date
+  isDefault     Boolean    @default(false)
+  status        MenuStatus @default(DRAFT)
+  kitchenId     String?
+  kitchen       Kitchen?   @relation(fields: [kitchenId], references: [id], onDelete: SetNull)
+  note          String?
+  publishedAt   DateTime?
   publishedById String?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   days MenuDay[]
+
+  kind      String               @default("STANDARD") // STANDARD | SEASONAL | PROMO
+  publishAt DateTime? // scheduled publication (cron publishes when due)
+  version   Int                  @default(0)
+  revisions WeeklyMenuRevision[]
 
   @@index([weekStart, status])
 }
@@ -593,20 +647,25 @@ model MenuDay {
 
   items MenuDayItem[]
 
+  cutoffOverride String? // "10:00" — overrides the global order cut-off for this day
+
   @@unique([menuId, day])
 }
 
 model MenuDayItem {
-  id        String   @id @default(cuid())
-  menuDayId String
-  menuDay   MenuDay  @relation(fields: [menuDayId], references: [id], onDelete: Cascade)
-  boxId     String
-  box       LunchBox @relation(fields: [boxId], references: [id], onDelete: Restrict)
-  isPrimary Boolean  @default(false) // the chef's pick that rotation plans receive
-  capacity  Int? // portions that day (null = kitchen capacity only)
-  soldOut   Boolean  @default(false)
+  id            String   @id @default(cuid())
+  menuDayId     String
+  menuDay       MenuDay  @relation(fields: [menuDayId], references: [id], onDelete: Cascade)
+  boxId         String
+  box           LunchBox @relation(fields: [boxId], references: [id], onDelete: Restrict)
+  isPrimary     Boolean  @default(false) // the chef's pick that rotation plans receive
+  capacity      Int? // portions that day (null = kitchen capacity only)
+  soldOut       Boolean  @default(false)
   priceOverride Int? // paisa
-  sortOrder Int      @default(0)
+  sortOrder     Int      @default(0)
+
+  replacementBoxId String?
+  replacementBox   LunchBox? @relation("MenuReplacement", fields: [replacementBoxId], references: [id], onDelete: SetNull)
 
   @@unique([menuDayId, boxId])
 }
@@ -649,31 +708,39 @@ enum PlanKind {
 }
 
 model MealPlan {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   name             String
   nameNe           String?
-  slug             String   @unique
-  kind             PlanKind @default(WEEKLY)
+  slug             String    @unique
+  kind             PlanKind  @default(WEEKLY)
   tagline          String?
   description      String?
-  durationWeeks    Int      @default(1)
-  minDaysPerWeek   Int      @default(3)
+  durationWeeks    Int       @default(1)
+  minDaysPerWeek   Int       @default(3)
   pricePerMeal     Int // paisa
   compareAtPrice   Int? // paisa: the regular single-order price, for honest savings maths
-  includesDelivery Boolean  @default(true)
-  maxPauseDays     Int      @default(10)
+  includesDelivery Boolean   @default(true)
+  maxPauseDays     Int       @default(10)
   policyNote       String? // pause / refund wording shown before purchase
   features         String[]
-  isPopular        Boolean  @default(false)
-  isCorporate      Boolean  @default(false)
-  isActive         Boolean  @default(true)
+  isPopular        Boolean   @default(false)
+  isCorporate      Boolean   @default(false)
+  isActive         Boolean   @default(true)
   effectiveFrom    DateTime? @db.Date
   effectiveTo      DateTime? @db.Date
-  sortOrder        Int      @default(0)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  sortOrder        Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   subscriptions Subscription[]
+
+  // ── WP-00: plan policies + versioned pricing ──
+  minWeeks            Int?
+  maxWeeks            Int?
+  skipPolicy          String? // EXTEND | CREDIT | null = global setting
+  cancelPolicy        String? // free-text policy shown before purchase; logic stays in settings
+  renewalReminderDays Int             @default(3)
+  prices              MealPlanPrice[]
 }
 
 enum SubscriptionStatus {
@@ -727,6 +794,14 @@ model Subscription {
   payments Payment[]
   changes  SubscriptionChange[]
   pauses   SubscriptionPause[]
+
+  priceId       String?
+  price         MealPlanPrice? @relation(fields: [priceId], references: [id], onDelete: SetNull)
+  renewedFromId String?
+  renewedFrom   Subscription?  @relation("Renewal", fields: [renewedFromId], references: [id], onDelete: SetNull)
+  renewals      Subscription[] @relation("Renewal")
+  campaignId    String?
+  campaign      Campaign?      @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([status])
@@ -807,43 +882,43 @@ model Order {
   followsRotation Boolean            @default(false)
 
   // delivery snapshot (copied from the address at order time)
-  addressId     String?
-  address       Address?      @relation(fields: [addressId], references: [id], onDelete: SetNull)
-  contactName   String
-  contactPhone  String
-  addressType   AddressType   @default(OFFICE)
-  placeName     String?
-  addressLine   String
-  area          String
-  ward          Int?
-  landmark      String?
-  lat           Float?
-  lng           Float?
-  instructions  String?
-  zoneId        String?
-  zone          DeliveryZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
-  companyId     String?
-  company       Company?      @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  addressId        String?
+  address          Address?      @relation(fields: [addressId], references: [id], onDelete: SetNull)
+  contactName      String
+  contactPhone     String
+  addressType      AddressType   @default(OFFICE)
+  placeName        String?
+  addressLine      String
+  area             String
+  ward             Int?
+  landmark         String?
+  lat              Float?
+  lng              Float?
+  instructions     String?
+  zoneId           String?
+  zone             DeliveryZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  companyId        String?
+  company          Company?      @relation(fields: [companyId], references: [id], onDelete: SetNull)
   officeLocationId String?
 
   // money (paisa)
-  subtotal      Int
-  deliveryFee   Int     @default(0)
-  discount      Int     @default(0)
-  tax           Int     @default(0)
-  taxInclusive  Boolean @default(true)
-  total         Int
-  companyShare  Int     @default(0) // part billed to the employer
-  customerShare Int     @default(0) // part the eater pays
-  refundedAmount Int    @default(0)
-  costTotal     Int     @default(0)
-  couponCode    String?
+  subtotal       Int
+  deliveryFee    Int     @default(0)
+  discount       Int     @default(0)
+  tax            Int     @default(0)
+  taxInclusive   Boolean @default(true)
+  total          Int
+  companyShare   Int     @default(0) // part billed to the employer
+  customerShare  Int     @default(0) // part the eater pays
+  refundedAmount Int     @default(0)
+  costTotal      Int     @default(0)
+  couponCode     String?
 
-  allergenNote  String? // snapshot of the customer's declared allergies
-  notes         String?
-  kitchenNote   String?
-  deliveryOtp   String?
-  version       Int     @default(0) // optimistic concurrency for staff edits
+  allergenNote String? // snapshot of the customer's declared allergies
+  notes        String?
+  kitchenNote  String?
+  deliveryOtp  String?
+  version      Int     @default(0) // optimistic concurrency for staff edits
 
   subscriptionId String?
   subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
@@ -858,18 +933,23 @@ model Order {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  items        OrderItem[]
-  events       OrderStatusEvent[]
-  adjustments  OrderAdjustment[]
-  ticket       KitchenTicket?
-  packing      PackingCheck[]
-  assignment   DeliveryAssignment?
+  items          OrderItem[]
+  events         OrderStatusEvent[]
+  adjustments    OrderAdjustment[]
+  ticket         KitchenTicket?
+  packing        PackingCheck[]
+  assignment     DeliveryAssignment?
   deliveryEvents DeliveryEvent[]
-  refunds      Refund[]
-  feedback     Feedback?
+  refunds        Refund[]
+  feedback       Feedback?
   supportTickets SupportTicket[]
-  invoiceLines InvoiceLine[]
-  redemptions  CouponRedemption[]
+  invoiceLines   InvoiceLine[]
+  redemptions    CouponRedemption[]
+
+  packagingCost Int       @default(0) // paisa snapshot (estimated)
+  attribution   Json? // UTM snapshot at checkout
+  campaignId    String?
+  campaign      Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
   @@index([deliveryDate, status])
   @@index([kitchenId, deliveryDate])
@@ -980,6 +1060,10 @@ model Payment {
   events   PaymentProviderEvent[]
   refunds  Refund[]
 
+  gatewayFee     Int                    @default(0) // paisa, estimated at verification from the method fee setting
+  feeActual      Int? // paisa, from the imported gateway statement
+  statementLines GatewayStatementLine[]
+
   @@index([status])
   @@index([userId])
 }
@@ -1002,15 +1086,15 @@ model PaymentAttempt {
 
 /// Every callback / lookup we receive, deduplicated by eventKey.
 model PaymentProviderEvent {
-  id          String   @id @default(cuid())
-  provider    String
-  eventKey    String   @unique
-  paymentId   String?
-  payment     Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
-  verified    Boolean  @default(false)
-  outcome     String? // PAID | FAILED | IGNORED | MISMATCH
-  payload     Json
-  createdAt   DateTime @default(now())
+  id        String   @id @default(cuid())
+  provider  String
+  eventKey  String   @unique
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  verified  Boolean  @default(false)
+  outcome   String? // PAID | FAILED | IGNORED | MISMATCH
+  payload   Json
+  createdAt DateTime @default(now())
 }
 
 enum RefundStatus {
@@ -1161,6 +1245,12 @@ model Coupon {
   updatedAt      DateTime     @updatedAt
 
   redemptions CouponRedemption[]
+
+  freeDelivery Boolean   @default(false)
+  boxIds       String[]  @default([]) // empty = all dabbas
+  campaignId   String?
+  campaign     Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  stackable    Boolean   @default(false) // reserved; checkout applies one coupon per order
 }
 
 model CouponRedemption {
@@ -1186,33 +1276,33 @@ enum BillingMode {
 }
 
 model Company {
-  id              String      @id @default(cuid())
-  name            String
-  legalName       String?
-  slug            String      @unique
-  contactPerson   String?
-  contactEmail    String?
-  contactPhone    String?
-  billingAddress  String?
-  panVat          String?
-  zoneId          String?
-  zone            DeliveryZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
-  billingMode     BillingMode @default(EMPLOYEE_PAID)
+  id               String        @id @default(cuid())
+  name             String
+  legalName        String?
+  slug             String        @unique
+  contactPerson    String?
+  contactEmail     String?
+  contactPhone     String?
+  billingAddress   String?
+  panVat           String?
+  zoneId           String?
+  zone             DeliveryZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  billingMode      BillingMode   @default(EMPLOYEE_PAID)
   // SPLIT: the company pays subsidyPct of each meal up to subsidyCap paisa; the rest is the employee's
-  subsidyPct      Int         @default(0)
-  subsidyCap      Int? // paisa per meal
+  subsidyPct       Int           @default(0)
+  subsidyCap       Int? // paisa per meal
   monthlyAllowance Int? // paisa per member per month the company will cover
-  discountPct     Int         @default(0)
-  freeDelivery    Boolean     @default(true)
-  invoiceTermsDays Int        @default(15)
-  creditLimit     Int? // paisa outstanding before new company-paid orders are blocked
-  requireApproval Boolean     @default(true) // new members wait for a company admin
-  joinCode        String?     @unique
-  cutoffOverride  String? // "10:00"
-  isActive        Boolean     @default(true)
-  notes           String?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  discountPct      Int           @default(0)
+  freeDelivery     Boolean       @default(true)
+  invoiceTermsDays Int           @default(15)
+  creditLimit      Int? // paisa outstanding before new company-paid orders are blocked
+  requireApproval  Boolean       @default(true) // new members wait for a company admin
+  joinCode         String?       @unique
+  cutoffOverride   String? // "10:00"
+  isActive         Boolean       @default(true)
+  notes            String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   members   CompanyMember[]
   locations OfficeLocation[]
@@ -1221,6 +1311,11 @@ model Company {
   leads     CorporateLead[]
   orders    Order[]
   invoices  Invoice[]
+
+  deliveryInstructions String?
+  staffScopes          StaffScope[]
+  budgets              DepartmentBudget[]
+  menuItems            CompanyMenuItem[]
 }
 
 enum MemberRole {
@@ -1235,75 +1330,84 @@ enum MemberStatus {
 }
 
 model CompanyMember {
-  id               String         @id @default(cuid())
-  companyId        String
-  company          Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  userId           String         @unique
-  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role             MemberRole     @default(MEMBER)
-  status           MemberStatus   @default(PENDING)
-  department       String?
-  costCenter       String?
-  employeeCode     String?
-  officeLocationId String?
-  officeLocation   OfficeLocation? @relation(fields: [officeLocationId], references: [id], onDelete: SetNull)
+  id                String          @id @default(cuid())
+  companyId         String
+  company           Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId            String          @unique
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role              MemberRole      @default(MEMBER)
+  status            MemberStatus    @default(PENDING)
+  department        String?
+  costCenter        String?
+  employeeCode      String?
+  officeLocationId  String?
+  officeLocation    OfficeLocation? @relation(fields: [officeLocationId], references: [id], onDelete: SetNull)
   allowanceOverride Int? // paisa per month
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  mealEligible Boolean   @default(true)
+  eligibleDays Weekday[] @default([]) // empty = every service day
 
   @@index([companyId, status])
 }
 
 model OfficeLocation {
-  id         String        @id @default(cuid())
-  companyId  String
-  company    Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  name       String // "Head office, 4th floor"
-  line1      String
-  area       String
-  ward       Int?
-  landmark   String?
-  zoneId     String?
-  zone       DeliveryZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
-  slotId     String?
-  slot       DeliverySlot? @relation(fields: [slotId], references: [id], onDelete: SetNull)
+  id            String        @id @default(cuid())
+  companyId     String
+  company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name          String // "Head office, 4th floor"
+  line1         String
+  area          String
+  ward          Int?
+  landmark      String?
+  zoneId        String?
+  zone          DeliveryZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  slotId        String?
+  slot          DeliverySlot? @relation(fields: [slotId], references: [id], onDelete: SetNull)
   receiverName  String?
   receiverPhone String?
-  isActive   Boolean       @default(true)
-  createdAt  DateTime      @default(now())
+  isActive      Boolean       @default(true)
+  createdAt     DateTime      @default(now())
 
   members CompanyMember[]
 }
 
 model CorporateContract {
-  id           String    @id @default(cuid())
-  companyId    String
-  company      Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  title        String
-  startsOn     DateTime  @db.Date
-  endsOn       DateTime? @db.Date
-  pricePerMeal Int? // paisa agreed rate
+  id             String    @id @default(cuid())
+  companyId      String
+  company        Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  title          String
+  startsOn       DateTime  @db.Date
+  endsOn         DateTime? @db.Date
+  pricePerMeal   Int? // paisa agreed rate
   minMealsPerDay Int?
-  terms        String?
-  documentUrl  String?
-  status       String    @default("DRAFT") // DRAFT | ACTIVE | ENDED
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  terms          String?
+  documentUrl    String?
+  status         String    @default("DRAFT") // DRAFT | ACTIVE | ENDED
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  version          Int     @default(1)
+  minMealsPerMonth Int?
+  creditTermsDays  Int?
+  boxPrices        Json? // { [boxId]: paisa } negotiated per-dabba prices
+  supersedesId     String? // previous contract version
 }
 
 model CompanyInvite {
-  id         String     @id @default(cuid())
-  companyId  String
-  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  email      String
-  name       String?
-  department String?
-  role       MemberRole @default(MEMBER)
-  tokenHash  String     @unique
-  expiresAt  DateTime
-  acceptedAt DateTime?
+  id          String     @id @default(cuid())
+  companyId   String
+  company     Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  email       String
+  name        String?
+  department  String?
+  role        MemberRole @default(MEMBER)
+  tokenHash   String     @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
   invitedById String?
-  createdAt  DateTime   @default(now())
+  createdAt   DateTime   @default(now())
 
   @@index([companyId])
 }
@@ -1318,26 +1422,26 @@ enum LeadStatus {
 }
 
 model CorporateLead {
-  id           String     @id @default(cuid())
-  companyName  String
-  contactName  String
-  email        String
-  phone        String
-  headcount    Int?
-  location     String?
-  mealsPerWeek Int?
-  budget       String?
-  message      String?
-  source       String     @default("website")
-  status       LeadStatus @default(NEW)
-  notes        String?
-  quotePerMeal Int? // paisa
-  quoteValidUntil DateTime? @db.Date
-  nextFollowUp DateTime?  @db.Date
-  companyId    String?
-  company      Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id              String     @id @default(cuid())
+  companyName     String
+  contactName     String
+  email           String
+  phone           String
+  headcount       Int?
+  location        String?
+  mealsPerWeek    Int?
+  budget          String?
+  message         String?
+  source          String     @default("website")
+  status          LeadStatus @default(NEW)
+  notes           String?
+  quotePerMeal    Int? // paisa
+  quoteValidUntil DateTime?  @db.Date
+  nextFollowUp    DateTime?  @db.Date
+  companyId       String?
+  company         Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
 
   @@index([status])
 }
@@ -1352,26 +1456,26 @@ enum BatchStatus {
 }
 
 model ProductionBatch {
-  id             String      @id @default(cuid())
-  kitchenId      String
-  kitchen        Kitchen     @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
-  date           DateTime    @db.Date
-  menuItemId     String
-  menuItem       MenuItem    @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+  id              String      @id @default(cuid())
+  kitchenId       String
+  kitchen         Kitchen     @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  date            DateTime    @db.Date
+  menuItemId      String
+  menuItem        MenuItem    @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
   recipeVersionId String?
-  station        String?
+  station         String?
   plannedPortions Int
-  bufferPortions Int         @default(0)
-  actualPortions Int?
-  wastePortions  Int?
-  status         BatchStatus @default(PLANNED)
-  assignedTo     String?
-  startedAt      DateTime?
-  completedAt    DateTime?
-  stockPosted    Boolean     @default(false) // ingredient usage written to the stock ledger
-  notes          String?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  bufferPortions  Int         @default(0)
+  actualPortions  Int?
+  wastePortions   Int?
+  status          BatchStatus @default(PLANNED)
+  assignedTo      String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  stockPosted     Boolean     @default(false) // ingredient usage written to the stock ledger
+  notes           String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
 
   qcLogs QcLog[]
 
@@ -1441,28 +1545,39 @@ model Supplier {
 
   ingredients Ingredient[]
   purchases   PurchaseOrder[]
+
+  invoices SupplierInvoice[]
+  expenses Expense[]
 }
 
 /// A stock item. Quantity on hand = SUM(StockMovement.quantity) per kitchen.
 model Ingredient {
-  id           String    @id @default(cuid())
-  name         String    @unique
-  nameNe       String?
-  unit         StockUnit @default(KG)
-  costPerUnit  Int // paisa per unit (latest purchase price)
-  safetyStock  Float     @default(0)
-  reorderQty   Float     @default(0)
+  id            String    @id @default(cuid())
+  name          String    @unique
+  nameNe        String?
+  unit          StockUnit @default(KG)
+  costPerUnit   Int // paisa per unit (latest purchase price)
+  safetyStock   Float     @default(0)
+  reorderQty    Float     @default(0)
   shelfLifeDays Int?
   allergenCodes String[]
-  supplierId   String?
-  supplier     Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
-  isActive     Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  supplierId    String?
+  supplier      Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   recipeLines RecipeIngredient[]
   movements   StockMovement[]
   poLines     PurchaseOrderLine[]
+
+  category       String?
+  purchaseUnit   StockUnit? // unit bought in (e.g. sack = PACK)
+  purchaseFactor Float               @default(1) // base units per purchase unit
+  reorderPoint   Float?
+  conversions    UnitConversion[]
+  lots           StockLot[]
+  transferLines  StockTransferLine[]
 }
 
 enum StockMovementType {
@@ -1471,23 +1586,32 @@ enum StockMovementType {
   WASTE
   ADJUSTMENT
   RETURN
+  TRANSFER_OUT
+  TRANSFER_IN
 }
 
 model StockMovement {
-  id           String            @id @default(cuid())
-  ingredientId String
-  ingredient   Ingredient        @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
-  kitchenId    String
-  kitchen      Kitchen           @relation(fields: [kitchenId], references: [id], onDelete: Restrict)
-  type         StockMovementType
-  quantity     Float // + in / − out, in the ingredient unit
-  unitCost     Int? // paisa
-  reference    String? // PO number / batch id
-  idempotencyKey String?         @unique // e.g. "batch:<id>:usage"
-  expiresOn    DateTime?         @db.Date
-  note         String?
-  actorId      String?
-  createdAt    DateTime          @default(now())
+  id             String            @id @default(cuid())
+  ingredientId   String
+  ingredient     Ingredient        @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  kitchenId      String
+  kitchen        Kitchen           @relation(fields: [kitchenId], references: [id], onDelete: Restrict)
+  type           StockMovementType
+  quantity       Float // + in / − out, in the ingredient unit
+  unitCost       Int? // paisa
+  reference      String? // PO number / batch id
+  idempotencyKey String?           @unique // e.g. "batch:<id>:usage"
+  expiresOn      DateTime?         @db.Date
+  note           String?
+  actorId        String?
+  createdAt      DateTime          @default(now())
+
+  lotId      String?
+  lot        StockLot?          @relation(fields: [lotId], references: [id], onDelete: SetNull)
+  locationId String?
+  location   InventoryLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  transferId String?
+  transfer   StockTransfer?     @relation(fields: [transferId], references: [id], onDelete: SetNull)
 
   @@index([ingredientId, kitchenId])
 }
@@ -1516,6 +1640,8 @@ model PurchaseOrder {
   updatedAt   DateTime       @updatedAt
 
   lines PurchaseOrderLine[]
+
+  supplierInvoices SupplierInvoice[]
 }
 
 model PurchaseOrderLine {
@@ -1532,28 +1658,30 @@ model PurchaseOrderLine {
 // ═════════════════════════════ Dispatch ═════════════════════════════
 
 model DeliveryRoute {
-  id          String        @id @default(cuid())
-  kitchenId   String
-  kitchen     Kitchen       @relation(fields: [kitchenId], references: [id], onDelete: Restrict)
-  date        DateTime      @db.Date
-  name        String
-  slotId      String?
-  slot        DeliverySlot? @relation(fields: [slotId], references: [id], onDelete: SetNull)
-  zoneId      String?
-  zone        DeliveryZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
-  riderId     String?
-  rider       User?         @relation(fields: [riderId], references: [id], onDelete: SetNull)
-  status      String        @default("PLANNED") // PLANNED | OUT | DONE
-  cashCollected Int         @default(0)
-  cashHandedIn  Int?
+  id              String        @id @default(cuid())
+  kitchenId       String
+  kitchen         Kitchen       @relation(fields: [kitchenId], references: [id], onDelete: Restrict)
+  date            DateTime      @db.Date
+  name            String
+  slotId          String?
+  slot            DeliverySlot? @relation(fields: [slotId], references: [id], onDelete: SetNull)
+  zoneId          String?
+  zone            DeliveryZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  riderId         String?
+  rider           User?         @relation(fields: [riderId], references: [id], onDelete: SetNull)
+  status          String        @default("PLANNED") // PLANNED | OUT | DONE
+  cashCollected   Int           @default(0)
+  cashHandedIn    Int?
   cashCheckedById String?
-  startedAt   DateTime?
-  completedAt DateTime?
-  notes       String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  startedAt       DateTime?
+  completedAt     DateTime?
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   assignments DeliveryAssignment[]
+
+  cost Int? // paisa: rider pay + fuel for this route (estimated)
 
   @@index([date])
 }
@@ -1587,25 +1715,25 @@ model DeliveryEvent {
 // ═════════════════════════════ Support, feedback, notifications ═════════════════════════════
 
 model SupportTicket {
-  id           String   @id @default(cuid())
-  number       String   @unique
+  id           String    @id @default(cuid())
+  number       String    @unique
   userId       String?
-  user         User?    @relation("TicketCustomer", fields: [userId], references: [id], onDelete: SetNull)
+  user         User?     @relation("TicketCustomer", fields: [userId], references: [id], onDelete: SetNull)
   name         String?
   email        String?
   phone        String?
   orderId      String?
-  order        Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  order        Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
   subject      String
-  category     String   @default("GENERAL") // ORDER | PAYMENT | DELIVERY | FOOD | ACCOUNT | CORPORATE | GENERAL
-  status       String   @default("OPEN") // OPEN | PENDING | RESOLVED | CLOSED
-  priority     String   @default("NORMAL") // LOW | NORMAL | HIGH | URGENT
-  source       String   @default("account") // account | contact_form | staff
+  category     String    @default("GENERAL") // ORDER | PAYMENT | DELIVERY | FOOD | ACCOUNT | CORPORATE | GENERAL
+  status       String    @default("OPEN") // OPEN | PENDING | RESOLVED | CLOSED
+  priority     String    @default("NORMAL") // LOW | NORMAL | HIGH | URGENT
+  source       String    @default("account") // account | contact_form | staff
   assignedToId String?
-  assignedTo   User?    @relation("TicketAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  assignedTo   User?     @relation("TicketAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
   resolvedAt   DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   messages SupportMessage[]
 
@@ -1624,18 +1752,18 @@ model SupportMessage {
 }
 
 model Feedback {
-  id          String   @id @default(cuid())
-  orderId     String   @unique
-  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  rating      Int // 1–5
-  taste       Int?
-  portion     Int?
-  onTime      Boolean?
-  comment     String?
-  publishConsent Boolean @default(false) // may be quoted on the website with first name only
-  createdAt   DateTime @default(now())
+  id             String   @id @default(cuid())
+  orderId        String   @unique
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rating         Int // 1–5
+  taste          Int?
+  portion        Int?
+  onTime         Boolean?
+  comment        String?
+  publishConsent Boolean  @default(false) // may be quoted on the website with first name only
+  createdAt      DateTime @default(now())
 }
 
 model Notification {
@@ -1744,15 +1872,15 @@ model Subscriber {
 
 /// Published + draft copy of one website section in one locale.
 model ContentSection {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   key         String
-  locale      String   @default("en")
+  locale      String    @default("en")
   data        Json // published
   draft       Json? // unpublished edits
-  version     Int      @default(1)
+  version     Int       @default(1)
   publishedAt DateTime?
   updatedBy   String?
-  updatedAt   DateTime @updatedAt
+  updatedAt   DateTime  @updatedAt
 
   revisions ContentRevision[]
 
@@ -1779,19 +1907,21 @@ model Setting {
 }
 
 model Page {
-  id             String   @id @default(cuid())
-  slug           String   @unique
-  title          String
-  titleNe        String?
-  body           String // markdown, rendered with raw HTML escaped
-  bodyNe         String?
-  seoTitle       String?
-  seoDescription String?
-  published      Boolean  @default(true)
-  showInFooter   Boolean  @default(true)
-  needsLegalReview Boolean @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id               String   @id @default(cuid())
+  slug             String   @unique
+  title            String
+  titleNe          String?
+  body             String // markdown, rendered with raw HTML escaped
+  bodyNe           String?
+  seoTitle         String?
+  seoDescription   String?
+  published        Boolean  @default(true)
+  showInFooter     Boolean  @default(true)
+  needsLegalReview Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  revisions PageRevision[]
 }
 
 model Post {
@@ -1855,18 +1985,18 @@ model Faq {
 }
 
 model MediaAsset {
-  id           String   @id @default(cuid())
-  url          String
-  name         String
-  type         String
-  size         Int
-  width        Int?
-  height       Int?
-  alt          String?
-  credit       String? // photographer / licence — required for anything not shot in-house
-  isPlaceholder Boolean @default(false)
-  uploadedById String?
-  createdAt    DateTime @default(now())
+  id            String   @id @default(cuid())
+  url           String
+  name          String
+  type          String
+  size          Int
+  width         Int?
+  height        Int?
+  alt           String?
+  credit        String? // photographer / licence — required for anything not shot in-house
+  isPlaceholder Boolean  @default(false)
+  uploadedById  String?
+  createdAt     DateTime @default(now())
 }
 
 model AuditLog {
@@ -1883,7 +2013,541 @@ model AuditLog {
   ip        String?
   createdAt DateTime @default(now())
 
+  requestId    String?
+  userAgent    String?
+  approvedById String?
+
   @@index([entity, entityId])
   @@index([createdAt])
   @@index([actorId])
+  @@index([actorId, createdAt])
+  @@index([requestId])
+}
+
+// ═════════════════════════════ Super Admin foundation (WP-00, 2026-11-04) ═════════════════════════════
+// Additive only. See docs/SUPER_ADMIN_ARCHITECTURE.md and docs/ADMIN_IMPLEMENTATION_TRACKER.md.
+
+// ── RBAC ──
+
+/// Custom staff role: extra grants (module.action keys) on top of the user's base Role.
+model StaffRole {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  description String?
+  permissions String[] // granular keys, e.g. "kitchen.view", "menu.publish"
+  isSystem    Boolean  @default(false) // seeded preset; editable, not deletable
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users User[]
+}
+
+/// Data scope for a staff member. No rows (and no User.kitchenId) = all kitchens.
+model StaffScope {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kitchenId String?
+  kitchen   Kitchen? @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, kitchenId, companyId])
+  @@index([userId])
+}
+
+/// Sign-in attempts (success and failure). Never stores passwords, tokens or OTPs.
+model LoginEvent {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  email     String?
+  ip        String?
+  userAgent String?
+  method    String // email | phone | two-factor
+  success   Boolean
+  reason    String? // short failure code, e.g. INVALID_EMAIL_OR_PASSWORD
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+// ── Menu ──
+
+model MealCategory {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String
+  nameNe    String?
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  boxes LunchBox[]
+}
+
+/// Per-kitchen availability of a dabba, dish or builder option (absent row = available).
+model KitchenAvailability {
+  id          String               @id @default(cuid())
+  kitchenId   String
+  kitchen     Kitchen              @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  boxId       String?
+  box         LunchBox?            @relation(fields: [boxId], references: [id], onDelete: Cascade)
+  menuItemId  String?
+  menuItem    MenuItem?            @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  optionId    String?
+  option      CustomizationOption? @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  isAvailable Boolean              @default(true)
+  note        String?
+  updatedAt   DateTime             @updatedAt
+
+  @@unique([kitchenId, boxId, menuItemId, optionId])
+  @@index([kitchenId])
+}
+
+model WeeklyMenuRevision {
+  id        String     @id @default(cuid())
+  menuId    String
+  menu      WeeklyMenu @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  version   Int
+  snapshot  Json // days + items as published
+  action    String // PUBLISH | UNPUBLISH | SCHEDULE | EDIT
+  actorId   String?
+  createdAt DateTime   @default(now())
+
+  @@unique([menuId, version])
+}
+
+// ── Builder ──
+
+model CustomizationPortion {
+  id            String              @id @default(cuid())
+  optionId      String
+  option        CustomizationOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  label         String // "Regular", "Large"
+  labelNe       String?
+  qtyMultiplier Float               @default(1)
+  priceDelta    Int                 @default(0) // paisa
+  sortOrder     Int                 @default(0)
+}
+
+// ── Plans ──
+
+/// Versioned plan price. A subscription keeps the price row it was sold at.
+model MealPlanPrice {
+  id             String    @id @default(cuid())
+  planId         String
+  plan           MealPlan  @relation(fields: [planId], references: [id], onDelete: Restrict)
+  pricePerMeal   Int // paisa
+  compareAtPrice Int? // paisa
+  effectiveFrom  DateTime  @db.Date
+  effectiveTo    DateTime? @db.Date
+  createdById    String?
+  createdAt      DateTime  @default(now())
+
+  subscriptions Subscription[]
+
+  @@index([planId, effectiveFrom])
+}
+
+// ── Inventory ──
+
+model UnitConversion {
+  id           String      @id @default(cuid())
+  ingredientId String? // null = global conversion (e.g. KG → G)
+  ingredient   Ingredient? @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+  fromUnit     StockUnit
+  toUnit       StockUnit
+  factor       Float // 1 fromUnit = factor toUnit
+
+  @@unique([ingredientId, fromUnit, toUnit])
+}
+
+model InventoryLocation {
+  id        String   @id @default(cuid())
+  kitchenId String
+  kitchen   Kitchen  @relation(fields: [kitchenId], references: [id], onDelete: Restrict)
+  name      String // "Dry store", "Walk-in chiller"
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  lots      StockLot[]
+  movements StockMovement[]
+
+  @@unique([kitchenId, name])
+}
+
+/// A received batch of an ingredient, consumed first-expiry-first-out.
+model StockLot {
+  id           String             @id @default(cuid())
+  ingredientId String
+  ingredient   Ingredient         @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  kitchenId    String
+  kitchen      Kitchen            @relation(fields: [kitchenId], references: [id], onDelete: Restrict)
+  locationId   String?
+  location     InventoryLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  code         String
+  receivedQty  Float
+  remainingQty Float
+  unitCost     Int // paisa per base unit
+  expiresOn    DateTime?          @db.Date
+  receivedAt   DateTime           @default(now())
+  poLineId     String?
+
+  movements StockMovement[]
+
+  @@unique([kitchenId, code])
+  @@index([ingredientId, kitchenId, expiresOn])
+}
+
+model StockTransfer {
+  id            String   @id @default(cuid())
+  number        String   @unique
+  fromKitchenId String
+  fromKitchen   Kitchen  @relation("TransferFrom", fields: [fromKitchenId], references: [id], onDelete: Restrict)
+  toKitchenId   String
+  toKitchen     Kitchen  @relation("TransferTo", fields: [toKitchenId], references: [id], onDelete: Restrict)
+  status        String   @default("DRAFT") // DRAFT | SENT | RECEIVED | CANCELLED
+  note          String?
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  lines     StockTransferLine[]
+  movements StockMovement[]
+}
+
+model StockTransferLine {
+  id           String        @id @default(cuid())
+  transferId   String
+  transfer     StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  ingredientId String
+  ingredient   Ingredient    @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  quantity     Float
+  receivedQty  Float         @default(0)
+}
+
+// ── Finance ──
+
+model ExpenseCategory {
+  id       String  @id @default(cuid())
+  key      String  @unique // FOOD, PACKAGING, DELIVERY, LABOR, RENT, UTILITIES, MARKETING, GATEWAY_FEES, EQUIPMENT, OTHER
+  name     String
+  kind     String  @default("OPERATING") // COGS | OPERATING | CAPEX
+  isActive Boolean @default(true)
+
+  expenses Expense[]
+}
+
+/// Business expense. Never hard-deleted: VOID instead.
+model Expense {
+  id            String          @id @default(cuid())
+  number        String          @unique
+  date          DateTime        @db.Date
+  categoryId    String
+  category      ExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  kitchenId     String?
+  kitchen       Kitchen?        @relation(fields: [kitchenId], references: [id], onDelete: Restrict)
+  supplierId    String?
+  supplier      Supplier?       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  description   String
+  amount        Int // paisa, before tax
+  tax           Int             @default(0)
+  method        String? // CASH | BANK | ESEWA | KHALTI | OTHER
+  reference     String?
+  attachmentUrl String?
+  status        String          @default("DRAFT") // DRAFT | APPROVED | PAID | VOID
+  approvedById  String?
+  createdById   String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([date])
+  @@index([categoryId, date])
+}
+
+model SupplierInvoice {
+  id            String         @id @default(cuid())
+  supplierId    String
+  supplier      Supplier       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  poId          String?
+  po            PurchaseOrder? @relation(fields: [poId], references: [id], onDelete: Restrict)
+  number        String
+  date          DateTime       @db.Date
+  dueDate       DateTime?      @db.Date
+  subtotal      Int
+  tax           Int            @default(0)
+  total         Int
+  paidAmount    Int            @default(0)
+  status        String         @default("OPEN") // OPEN | PARTIAL | PAID | VOID
+  attachmentUrl String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  payments SupplierPayment[]
+
+  @@unique([supplierId, number])
+  @@index([status, dueDate])
+}
+
+model SupplierPayment {
+  id        String          @id @default(cuid())
+  invoiceId String
+  invoice   SupplierInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  amount    Int
+  method    String
+  reference String
+  paidAt    DateTime
+  actorId   String?
+  createdAt DateTime        @default(now())
+}
+
+/// End-of-day cash / gateway count per kitchen and method.
+model DailySettlement {
+  id         String        @id @default(cuid())
+  date       DateTime      @db.Date
+  kitchenId  String?
+  method     PaymentMethod
+  expected   Int
+  counted    Int
+  variance   Int
+  note       String?
+  closedById String?
+  closedAt   DateTime?
+  createdAt  DateTime      @default(now())
+
+  @@unique([date, kitchenId, method])
+}
+
+model GatewayStatementLine {
+  id               String   @id @default(cuid())
+  provider         String // ESEWA | KHALTI | BANK
+  providerRef      String
+  amount           Int
+  fee              Int      @default(0)
+  settledAt        DateTime
+  matchedPaymentId String?
+  matchedPayment   Payment? @relation(fields: [matchedPaymentId], references: [id], onDelete: SetNull)
+  batch            String // import batch id
+  importedAt       DateTime @default(now())
+
+  @@unique([provider, providerRef])
+  @@index([batch])
+}
+
+model AccountingPeriod {
+  id         String    @id @default(cuid())
+  month      String    @unique // "2026-11"
+  closedAt   DateTime?
+  closedById String?
+  note       String?
+}
+
+// ── Delivery ──
+
+model RiderProfile {
+  userId      String   @id
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicle     String?
+  phone       String?
+  isAvailable Boolean  @default(true)
+  zoneIds     String[] @default([])
+  updatedAt   DateTime @updatedAt
+}
+
+// ── Corporate ──
+
+model DepartmentBudget {
+  id         String  @id @default(cuid())
+  companyId  String
+  company    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department String
+  month      String // "2026-11"
+  amount     Int // paisa
+
+  @@unique([companyId, department, month])
+}
+
+/// Company-specific menu: when a company has rows here, its members see only these dabbas.
+model CompanyMenuItem {
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  boxId     String
+  box       LunchBox @relation(fields: [boxId], references: [id], onDelete: Cascade)
+
+  @@id([companyId, boxId])
+}
+
+// ── Marketing ──
+
+model Campaign {
+  id          String    @id @default(cuid())
+  name        String
+  channel     String // FACEBOOK | INSTAGRAM | TIKTOK | GOOGLE | FLYER | REFERRAL | OTHER
+  utmCampaign String?   @unique
+  startsAt    DateTime?
+  endsAt      DateTime?
+  budget      Int? // paisa
+  notes       String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  spend         CampaignSpend[]
+  coupons       Coupon[]
+  orders        Order[]
+  subscriptions Subscription[]
+}
+
+model CampaignSpend {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  date       DateTime @db.Date
+  amount     Int // paisa
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@index([campaignId, date])
+}
+
+model ReferralCode {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code      String   @unique
+  createdAt DateTime @default(now())
+
+  referrals Referral[]
+}
+
+model Referral {
+  id               String       @id @default(cuid())
+  codeId           String
+  code             ReferralCode @relation(fields: [codeId], references: [id], onDelete: Cascade)
+  refereeId        String       @unique
+  referee          User         @relation(fields: [refereeId], references: [id], onDelete: Cascade)
+  status           String       @default("PENDING") // PENDING | QUALIFIED | REWARDED | REJECTED
+  rewardLedgerId   String?
+  qualifiedOrderId String?
+  createdAt        DateTime     @default(now())
+}
+
+// ── Alerts ──
+
+model Alert {
+  id             String    @id @default(cuid())
+  type           String // LOW_STOCK, UNPAID_ORDERS, OVER_CAPACITY, …
+  severity       String // INFO | WARNING | CRITICAL
+  priority       Int       @default(2) // 1 high … 3 low
+  source         String // detector / job name
+  entity         String?
+  entityId       String?
+  dedupeKey      String    @unique
+  status         String    @default("OPEN") // OPEN | ACKNOWLEDGED | RESOLVED
+  ownerId        String?
+  message        String
+  data           Json?
+  firstSeenAt    DateTime  @default(now())
+  lastSeenAt     DateTime  @default(now())
+  count          Int       @default(1)
+  ackAt          DateTime?
+  ackById        String?
+  resolvedAt     DateTime?
+  resolvedById   String?
+  resolutionNote String?
+
+  @@index([status, severity])
+}
+
+// ── CMS ──
+
+model CmsPage {
+  id             String   @id @default(cuid())
+  slug           String   @unique
+  title          String
+  titleNe        String?
+  status         String   @default("DRAFT") // DRAFT | PUBLISHED | ARCHIVED
+  seoTitle       String?
+  seoDescription String?
+  ogImage        String?
+  canonicalUrl   String?
+  noindex        Boolean  @default(false)
+  showInNav      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  versions CmsPageVersion[]
+}
+
+model CmsPageVersion {
+  id          String    @id @default(cuid())
+  pageId      String
+  page        CmsPage   @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  locale      String    @default("en")
+  version     Int
+  blocks      Json // validated block list (src/lib/cms/blocks.ts)
+  status      String    @default("DRAFT") // DRAFT | SCHEDULED | PUBLISHED | SUPERSEDED
+  publishAt   DateTime?
+  publishedAt DateTime?
+  actorId     String?
+  createdAt   DateTime  @default(now())
+
+  @@unique([pageId, locale, version])
+}
+
+model Redirect {
+  id        String   @id @default(cuid())
+  from      String   @unique // path, e.g. "/old-menu"
+  to        String
+  permanent Boolean  @default(true)
+  hits      Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model NavItem {
+  id        String    @id @default(cuid())
+  menu      String // HEADER | FOOTER_EXPLORE | FOOTER_COMPANY | FOOTER_LEGAL
+  label     String
+  labelNe   String?
+  href      String
+  parentId  String?
+  parent    NavItem?  @relation("NavTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  NavItem[] @relation("NavTree")
+  sortOrder Int       @default(0)
+  visible   Boolean   @default(true)
+
+  @@unique([menu, href])
+  @@index([menu, sortOrder])
+}
+
+/// Edit history for policy/marketing pages (Page).
+model PageRevision {
+  id        String   @id @default(cuid())
+  pageId    String
+  page      Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  bodyNe    String?
+  actorId   String?
+  createdAt DateTime @default(now())
+
+  @@index([pageId, createdAt])
+}
+
+// ── Admin UX ──
+
+model SavedView {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module    String // "orders", "customers" …
+  name      String
+  query     Json
+  createdAt DateTime @default(now())
+
+  @@index([userId, module])
 }

@@ -10,7 +10,7 @@ import { ConfirmAction } from "@/components/admin/ConfirmAction";
 import { deleteCapacity, saveCapacity, saveKitchen, saveSlot } from "../actions";
 
 export default async function KitchenPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("rules");
+  await requirePermission("rules.view");
   const { id } = await params;
   const k = await db.kitchen.findUnique({
     where: { id },

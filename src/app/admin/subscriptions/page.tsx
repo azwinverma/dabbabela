@@ -12,9 +12,9 @@ export const metadata = { title: "Meal plans sold" };
 const PER = 40;
 
 export default async function SubsPage({ searchParams }: { searchParams: Promise<{ status?: string; q?: string; plan?: string; page?: string }> }) {
-  const user = await requirePermission("subscriptions");
+  const user = await requirePermission("subscriptions.view");
   const sp = await searchParams;
-  const pii = piiFor(user.role);
+  const pii = piiFor(user);
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
   const q = sp.q?.trim();
   const where: Prisma.SubscriptionWhereInput = {

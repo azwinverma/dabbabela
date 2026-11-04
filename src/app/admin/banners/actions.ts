@@ -11,7 +11,7 @@ const TONES = ["turmeric", "achar", "saag", "charcoal"];
 const ktm = (d: string, end = false) => new Date(`${d}T${end ? "23:59:59" : "00:00:00"}+05:45`);
 
 export async function saveBanner(id: string | null, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("marketing", async (user) => {
+  return guarded("marketing.edit", async (user) => {
     const text = f.str(fd, "text", 200);
     if (!text) throw new FieldError("text", "Write the banner text");
     const link = f.opt(fd, "link", 300);
@@ -39,7 +39,7 @@ export async function saveBanner(id: string | null, _prev: ActionResult, fd: For
 }
 
 export async function deleteBanner(id: string): Promise<ActionResult> {
-  return guarded("marketing", async (user) => {
+  return guarded("marketing.edit", async (user) => {
     const b = await db.banner.findUnique({ where: { id } });
     if (!b) return fail("Not found");
     await db.banner.delete({ where: { id } });

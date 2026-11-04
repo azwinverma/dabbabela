@@ -18,7 +18,7 @@ async function route(id: string, user: { kitchenId: string | null }) {
 
 export async function createRouteAction(_p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("dispatch");
+    const user = await requirePermission("dispatch.edit");
     const kitchenId = String(fd.get("kitchenId"));
     const date = String(fd.get("date"));
     assertKitchen(user, kitchenId);
@@ -33,7 +33,7 @@ export async function createRouteAction(_p: ActionResult, fd: FormData): Promise
 
 export async function assignAction(_p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("dispatch");
+    const user = await requirePermission("dispatch.edit");
     const ids = fd.getAll("ids").map(String);
     if (!ids.length) return fail("Tick some orders first");
     if (!String(fd.get("routeId") ?? "")) return createRouteAction(_p, fd);
@@ -46,7 +46,7 @@ export async function assignAction(_p: ActionResult, fd: FormData): Promise<Acti
 
 export async function unassignAction(orderId: string): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("dispatch");
+    const user = await requirePermission("dispatch.edit");
     const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
     assertKitchen(user, o.kitchenId);
     await unassignOrder(orderId);
@@ -57,7 +57,7 @@ export async function unassignAction(orderId: string): Promise<ActionResult> {
 
 export async function moveAction(routeId: string, orderId: string, dir: -1 | 1): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("dispatch");
+    const user = await requirePermission("dispatch.edit");
     await route(routeId, user);
     await moveStop(routeId, orderId, dir);
     revalidatePath("/admin/dispatch");
@@ -67,7 +67,7 @@ export async function moveAction(routeId: string, orderId: string, dir: -1 | 1):
 
 export async function riderAction(routeId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("dispatch");
+    const user = await requirePermission("dispatch.edit");
     await route(routeId, user);
     await setRouteRider(routeId, String(fd.get("riderId") ?? "") || null);
     revalidatePath("/admin/dispatch");
@@ -77,7 +77,7 @@ export async function riderAction(routeId: string, _p: ActionResult, fd: FormDat
 
 export async function startRouteAction(routeId: string): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("dispatch");
+    const user = await requirePermission("dispatch.edit");
     const r0 = await route(routeId, user);
     const r = await startRoute(routeId, user.id);
     await audit({ actorId: user.id, action: "dispatch.start_route", entity: "DeliveryRoute", entityId: routeId, summary: `${r0.name}: ${r.out} out` });
@@ -88,7 +88,7 @@ export async function startRouteAction(routeId: string): Promise<ActionResult> {
 
 export async function completeRouteAction(routeId: string): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("dispatch");
+    const user = await requirePermission("dispatch.edit");
     await route(routeId, user);
     await completeRoute(routeId, { id: user.id, isStaff: true });
     revalidatePath("/admin/dispatch");
@@ -98,7 +98,7 @@ export async function completeRouteAction(routeId: string): Promise<ActionResult
 
 export async function handInAction(routeId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("dispatch");
+    const user = await requirePermission("dispatch.edit");
     const r = await route(routeId, user);
     const amount = parseRupees(String(fd.get("amount") ?? ""));
     if (amount == null || amount < 0) return fail("Enter the cash counted");
@@ -113,7 +113,7 @@ export async function handInAction(routeId: string, _p: ActionResult, fd: FormDa
 
 export async function resolveFailedAction(orderId: string, action: "RETRY" | "CANCEL", _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("dispatch");
+    const user = await requirePermission("dispatch.edit");
     const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
     assertKitchen(user, o.kitchenId);
     const reason = reasonOf(fd);

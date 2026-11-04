@@ -5,16 +5,16 @@ import { formatDay, isoDate } from "@/lib/dates";
 import { rs } from "@/lib/money";
 import { PageHeader } from "@/components/admin/ui";
 import { PrintButton } from "@/components/admin/ops/PrintButton";
-import { piiFor } from "@/components/admin/ops/scope";
+import { piiFor, inScope } from "@/components/admin/ops/scope";
 
 export const metadata = { title: "Route manifest" };
 
 export default async function ManifestPage({ searchParams }: { searchParams: Promise<{ route?: string }> }) {
-  const user = await requirePermission("dispatch");
+  const user = await requirePermission("dispatch.view");
   const { route: id } = await searchParams;
   const r = id ? await db.deliveryRoute.findUnique({ where: { id }, include: { rider: { select: { name: true, phoneNumber: true } }, kitchen: { select: { name: true } }, slot: { select: { label: true } }, assignments: { orderBy: { sequence: "asc" }, include: { order: { include: { items: true, payment: { select: { method: true } } } } } } } }) : null;
-  if (!r || (user.kitchenId && r.kitchenId !== user.kitchenId)) notFound();
-  const pii = piiFor(user.role);
+  if (!r || !inScope(user, r.kitchenId)) notFound();
+  const pii = piiFor(user);
   const cash = r.assignments.filter((a) => a.order.payment?.method === "CASH" && a.order.paymentStatus !== "PAID").reduce((s, a) => s + a.order.customerShare, 0);
   return (
     <div>

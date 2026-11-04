@@ -10,7 +10,7 @@ import { ConfirmAction } from "@/components/admin/ConfirmAction";
 import { togglePlan } from "./actions";
 
 export default async function PlansPage() {
-  await requirePermission("plans");
+  await requirePermission("plans.view");
   const plans = await db.mealPlan.findMany({
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     include: { _count: { select: { subscriptions: true } }, subscriptions: { where: { status: "ACTIVE" }, select: { id: true } } },

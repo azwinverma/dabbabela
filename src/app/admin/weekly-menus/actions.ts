@@ -40,7 +40,7 @@ async function resync(menu: { isDefault: boolean; weekStart: Date | null }, acto
 }
 
 export async function saveMenuDays(menuId: string, meta: { title: string; note: string; kitchenId: string | null }, days: DayInput[]): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const menu = await db.weeklyMenu.findUnique({ where: { id: menuId }, include: { days: { include: { items: true } } } });
     if (!menu) return fail("Menu not found");
     if (!meta.title.trim()) return fail("Give the menu a title");
@@ -74,7 +74,7 @@ export async function saveMenuDays(menuId: string, meta: { title: string; note: 
 }
 
 export async function setMenuStatus(menuId: string, status: "DRAFT" | "PUBLISHED" | "ARCHIVED"): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.publish", async (user) => {
     const menu = await db.weeklyMenu.findUnique({ where: { id: menuId }, include: { days: { include: { items: true } } } });
     if (!menu) return fail("Menu not found");
     if (status === "PUBLISHED") {
@@ -96,7 +96,7 @@ export async function setMenuStatus(menuId: string, status: "DRAFT" | "PUBLISHED
 }
 
 export async function createWeekMenu(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const raw = String(fd.get("weekOf") ?? "");
     if (!isValidISODate(raw)) return fail("Pick a date in the week");
     const weekStart = weekStartOf(raw);
@@ -129,7 +129,7 @@ export async function duplicateMenu(menuId: string, weekOf: string): Promise<Act
 }
 
 export async function deleteMenu(menuId: string): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const m = await db.weeklyMenu.findUnique({ where: { id: menuId } });
     if (!m) return fail("Not found");
     if (m.status === "PUBLISHED") return fail("Unpublish or archive it first");

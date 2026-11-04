@@ -7,6 +7,7 @@ import { audit } from "@/lib/audit";
 import { done, fail, type ActionResult } from "@/lib/action";
 import { canGrantRole, isStaffRole, STAFF_ROLES } from "@/lib/permissions";
 import { normalizeNepalPhone } from "@/lib/phone";
+import { assignStaffRole, revokeSessions, setScopes } from "@/server/access";
 import { guarded } from "../_kit/guard";
 import { f, FieldError } from "../_kit/form";
 
@@ -30,7 +31,7 @@ async function activeSuperAdmins(excludeId?: string) {
 }
 
 export async function createStaff(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("staff", async (me) => {
+  return guarded("staff.edit", async (me) => {
     const name = f.str(fd, "name", 80);
     const email = f.str(fd, "email", 160).toLowerCase();
     const role = f.str(fd, "role") as Role;
@@ -38,7 +39,7 @@ export async function createStaff(_prev: ActionResult, fd: FormData): Promise<Ac
     if (!name) throw new FieldError("name", "Name is required");
     if (!EMAIL.test(email)) throw new FieldError("email", "Enter a valid email");
     if (!STAFF_ROLES.includes(role)) throw new FieldError("role", "Pick a staff role");
-    if (!canGrantRole(me.role, role)) throw new FieldError("role", "You can't grant that role");
+    if (!canGrantRole(me, role)) throw new FieldError("role", "You can't grant that role");
     const pwErr = checkPassword(password);
     if (pwErr) throw new FieldError("password", pwErr);
     const phoneRaw = f.str(fd, "phone", 20);
@@ -49,16 +50,18 @@ export async function createStaff(_prev: ActionResult, fd: FormData): Promise<Ac
     const kitchenId = f.opt(fd, "kitchenId");
     const u = await db.user.create({ data: { name, email, emailVerified: true, role, phoneNumber, kitchenId } });
     await setPassword(u.id, password);
+    const staffRoleId = f.opt(fd, "staffRoleId");
+    if (staffRoleId) await assignStaffRole(me, u.id, staffRoleId);
     await audit({ actorId: me.id, action: "staff.create", entity: "User", entityId: u.id, summary: `${email} as ${role}`, after: { role, kitchenId } });
     return done(`${name} can now sign in. Share the temporary password privately and ask them to change it and turn on 2FA.`);
   }, ["/admin/staff"]);
 }
 
 export async function promoteUser(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("staff", async (me) => {
+  return guarded("staff.edit", async (me) => {
     const email = f.str(fd, "email", 160).toLowerCase();
     const role = f.str(fd, "role") as Role;
-    if (!STAFF_ROLES.includes(role) || !canGrantRole(me.role, role)) return fail("You can't grant that role");
+    if (!STAFF_ROLES.includes(role) || !canGrantRole(me, role)) return fail("You can't grant that role");
     const u = await db.user.findUnique({ where: { email } });
     if (!u) return fail("No account with that email");
     if (isStaffRole(u.role)) return fail("Already staff — change their role in the list");
@@ -70,7 +73,7 @@ export async function promoteUser(_prev: ActionResult, fd: FormData): Promise<Ac
 }
 
 export async function updateStaff(userId: string, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("staff", async (me) => {
+  return guarded("staff.edit", async (me) => {
     const u = await db.user.findUnique({ where: { id: userId } });
     if (!u || !isStaffRole(u.role)) return fail("Not a staff account");
     const role = f.str(fd, "role") as Role;
@@ -78,13 +81,17 @@ export async function updateStaff(userId: string, _prev: ActionResult, fd: FormD
     const reason = f.opt(fd, "reason", 200);
     if (role !== u.role) {
       if (!(STAFF_ROLES.includes(role) || role === "CUSTOMER")) return fail("Unknown role");
-      if (!canGrantRole(me.role, role === "CUSTOMER" ? "KITCHEN_STAFF" : role)) return fail("You can't grant that role");
-      if (!canGrantRole(me.role, u.role)) return fail("You can't change someone with that role");
+      if (!canGrantRole(me, role === "CUSTOMER" ? "KITCHEN_STAFF" : role)) return fail("You can't grant that role");
+      if (!canGrantRole(me, u.role)) return fail("You can't change someone with that role");
       if (u.id === me.id) return fail("You can't change your own role");
       if (u.role === "SUPER_ADMIN" && (await activeSuperAdmins(u.id)) === 0) return fail("Keep at least one active super admin");
       if (!reason) return fail("Give a reason for the role change");
     }
-    await db.user.update({ where: { id: userId }, data: { role, kitchenId } });
+    if (me.kitchenIds && (kitchenId ? !me.kitchenIds.includes(kitchenId) : true) && kitchenId !== u.kitchenId)
+      return fail("You can only assign kitchens inside your own scope");
+    const toCustomer = role === "CUSTOMER";
+    await db.user.update({ where: { id: userId }, data: { role, kitchenId: toCustomer ? null : kitchenId, ...(toCustomer ? { staffRoleId: null } : {}) } });
+    if (toCustomer) await db.staffScope.deleteMany({ where: { userId } });
     if (role !== u.role) await db.session.deleteMany({ where: { userId } });
     await audit({ actorId: me.id, action: "staff.update", entity: "User", entityId: userId, summary: `${u.email}`, before: { role: u.role, kitchenId: u.kitchenId }, after: { role, kitchenId }, reason });
     return done(role === "CUSTOMER" ? "Staff access removed" : "Saved");
@@ -92,11 +99,11 @@ export async function updateStaff(userId: string, _prev: ActionResult, fd: FormD
 }
 
 export async function toggleActive(userId: string): Promise<ActionResult> {
-  return guarded("staff", async (me) => {
+  return guarded("staff.edit", async (me) => {
     const u = await db.user.findUnique({ where: { id: userId } });
     if (!u) return fail("Not found");
     if (u.id === me.id) return fail("You can't deactivate yourself");
-    if (!canGrantRole(me.role, u.role)) return fail("You can't change someone with that role");
+    if (!canGrantRole(me, u.role)) return fail("You can't change someone with that role");
     if (u.isActive && u.role === "SUPER_ADMIN" && (await activeSuperAdmins(u.id)) === 0) return fail("Keep at least one active super admin");
     await db.user.update({ where: { id: userId }, data: { isActive: !u.isActive } });
     const revoked = u.isActive ? (await db.session.deleteMany({ where: { userId } })).count : 0;
@@ -106,10 +113,10 @@ export async function toggleActive(userId: string): Promise<ActionResult> {
 }
 
 export async function resetPassword(userId: string, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("staff", async (me) => {
+  return guarded("staff.edit", async (me) => {
     const u = await db.user.findUnique({ where: { id: userId } });
     if (!u) return fail("Not found");
-    if (!canGrantRole(me.role, u.role)) return fail("You can't reset that account");
+    if (!canGrantRole(me, u.role)) return fail("You can't reset that account");
     const password = f.str(fd, "password", 128);
     const err = checkPassword(password);
     if (err) return fail(err);
@@ -121,15 +128,45 @@ export async function resetPassword(userId: string, _prev: ActionResult, fd: For
 }
 
 export async function resetTwoFactor(userId: string): Promise<ActionResult> {
-  return guarded("staff", async (me) => {
+  return guarded("staff.edit", async (me) => {
     const u = await db.user.findUnique({ where: { id: userId } });
     if (!u) return fail("Not found");
     if (u.id === me.id) return fail("Use your own security page");
-    if (!canGrantRole(me.role, u.role)) return fail("You can't reset that account");
+    if (!canGrantRole(me, u.role)) return fail("You can't reset that account");
     await db.twoFactor.deleteMany({ where: { userId } });
     await db.user.update({ where: { id: userId }, data: { twoFactorEnabled: false } });
     await db.session.deleteMany({ where: { userId } });
     await audit({ actorId: me.id, action: "staff.reset_2fa", entity: "User", entityId: userId, summary: u.email, reason: "Lost authenticator" });
     return done("2FA removed — they must set it up again on next sign-in");
   }, ["/admin/staff"]);
+}
+
+export async function assignCustomRole(userId: string, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
+  return guarded("staff.edit", async (me) => {
+    await assignStaffRole(me, userId, f.opt(fd, "staffRoleId"));
+    return done("Custom role saved");
+  }, ["/admin/staff", `/admin/staff/${userId}`]);
+}
+
+export async function saveScopes(userId: string, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
+  return guarded("staff.edit", async (me) => {
+    const ids = (k: string) => fd.getAll(k).filter((v): v is string => typeof v === "string" && v.length > 0);
+    await setScopes(me, userId, { kitchenIds: ids("kitchen"), companyIds: ids("company") });
+    return done("Scope saved");
+  }, ["/admin/staff", `/admin/staff/${userId}`]);
+}
+
+export async function revokeSession(userId: string, sessionId: string): Promise<ActionResult> {
+  return guarded("staff.edit", async (me) => {
+    await revokeSessions(me, userId, sessionId);
+    return done("Session signed out");
+  }, [`/admin/staff/${userId}`]);
+}
+
+export async function revokeAllSessions(userId: string): Promise<ActionResult> {
+  return guarded("staff.edit", async (me) => {
+    if (userId === me.id) return fail("Use Sign out on your own account");
+    const n = await revokeSessions(me, userId, null);
+    return done(`${n} session(s) signed out`);
+  }, ["/admin/staff", `/admin/staff/${userId}`]);
 }

@@ -13,8 +13,8 @@ export const metadata = { title: "Customers" };
 const PER = 40;
 
 export default async function Customers({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  const user = await requirePermission("customers");
-  const pii = can(user.role, "customers.pii");
+  const user = await requirePermission("customers.view");
+  const pii = can(user, "customers.pii");
   const sp = await searchParams;
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
   const q = sp.q?.trim();

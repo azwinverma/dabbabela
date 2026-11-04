@@ -11,7 +11,7 @@ import { ConfirmAction } from "@/components/admin/ConfirmAction";
 import { savePost, deletePost } from "../actions";
 
 export default async function PostEdit({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requirePermission("content");
+  const user = await requirePermission("content.view");
   const { id } = await params;
   const p = id === "new" ? null : await db.post.findUnique({ where: { id } });
   if (id !== "new" && !p) notFound();

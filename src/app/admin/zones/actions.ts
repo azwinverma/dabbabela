@@ -9,7 +9,7 @@ import { guarded } from "../_kit/guard";
 import { f, FieldError } from "../_kit/form";
 
 export async function saveZone(id: string | null, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("rules", async (user) => {
+  return guarded("rules.edit", async (user) => {
     const name = f.str(fd, "name", 100);
     if (!name) throw new FieldError("name", "Name is required");
     const kitchenId = f.str(fd, "kitchenId");
@@ -46,7 +46,7 @@ export async function saveZone(id: string | null, _prev: ActionResult, fd: FormD
 }
 
 export async function testArea(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("rules", async () => {
+  return guarded("rules.edit", async () => {
     const area = f.str(fd, "area", 80);
     const ward = f.intOpt(fd, "ward");
     const municipality = f.opt(fd, "municipality", 80);
@@ -57,7 +57,7 @@ export async function testArea(_prev: ActionResult, fd: FormData): Promise<Actio
 }
 
 export async function toggleZone(id: string): Promise<ActionResult> {
-  return guarded("rules", async (user) => {
+  return guarded("rules.edit", async (user) => {
     const z = await db.deliveryZone.findUnique({ where: { id } });
     if (!z) return fail("Not found");
     await db.deliveryZone.update({ where: { id }, data: { isActive: !z.isActive } });

@@ -11,7 +11,7 @@ import { saveCoupon } from "../actions";
 const ymd = (d: Date | null | undefined) => (d ? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kathmandu" }).format(d) : "");
 
 export default async function CouponPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("pricing");
+  await requirePermission("pricing.view");
   const { id } = await params;
   const isNew = id === "new";
   const c = isNew ? null : await db.coupon.findUnique({ where: { id }, include: { redemptions: { orderBy: { createdAt: "desc" }, take: 50 } } });

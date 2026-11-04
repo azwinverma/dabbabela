@@ -8,7 +8,7 @@ import { done, fail, type ActionResult } from "@/lib/action";
 import { bool, intOr, str } from "@/lib/utils";
 
 export async function saveFaq(id: string | null, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("content");
+  const user = await requirePermission("content.edit");
   const question = str(fd.get("question"));
   const answer = str(fd.get("answer"));
   if (!question || !answer) return fail("Question and answer are required");
@@ -21,7 +21,7 @@ export async function saveFaq(id: string | null, _prev: ActionResult, fd: FormDa
 }
 
 export async function toggleFaq(id: string) {
-  const user = await requirePermission("content");
+  const user = await requirePermission("content.edit");
   const f = await db.faq.findUnique({ where: { id } });
   if (!f) return { ok: false, message: "Not found" };
   await db.faq.update({ where: { id }, data: { published: !f.published } });
@@ -32,7 +32,7 @@ export async function toggleFaq(id: string) {
 }
 
 export async function deleteFaq(id: string) {
-  const user = await requirePermission("content");
+  const user = await requirePermission("content.edit");
   const f = await db.faq.delete({ where: { id } });
   await audit(user.id, "delete", "Faq", id, f.question);
   revalidatePath("/admin/faqs");

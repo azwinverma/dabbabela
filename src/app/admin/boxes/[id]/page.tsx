@@ -13,7 +13,7 @@ import { Composer } from "../Composer";
 import { addSubstitution, deleteBox, deleteSubstitution, saveBox, toggleSubstitution } from "../actions";
 
 export default async function BoxPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("menu");
+  await requirePermission("menu.view");
   const { id } = await params;
   const isNew = id === "new";
   const [box, dishes] = await Promise.all([

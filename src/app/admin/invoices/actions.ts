@@ -8,7 +8,7 @@ import { createCreditNote, generateInvoice, issueInvoice, recordInvoicePayment, 
 const msg = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong");
 
 export async function generateInvoiceAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("invoices");
+  const user = await requirePermission("invoices.edit");
   const companyId = String(fd.get("companyId") ?? "");
   const periodStart = String(fd.get("periodStart") ?? "");
   const periodEnd = String(fd.get("periodEnd") ?? "");
@@ -23,7 +23,7 @@ export async function generateInvoiceAction(_: ActionResult, fd: FormData): Prom
 }
 
 export async function issueInvoiceAction(id: string) {
-  const user = await requirePermission("invoices");
+  const user = await requirePermission("invoices.edit");
   try {
     await issueInvoice(id, user.id);
     return { ok: true };
@@ -33,7 +33,7 @@ export async function issueInvoiceAction(id: string) {
 }
 
 export async function recordPaymentAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("invoices");
+  const user = await requirePermission("invoices.edit");
   const amount = parseRupees(String(fd.get("amount") ?? ""));
   if (amount == null) return fail("Enter the amount received");
   try {
@@ -45,7 +45,7 @@ export async function recordPaymentAction(_: ActionResult, fd: FormData): Promis
 }
 
 export async function voidInvoiceAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("invoices");
+  const user = await requirePermission("invoices.edit");
   try {
     await voidInvoice(String(fd.get("id")), user.id, String(fd.get("reason") ?? ""));
     return done("Invoice voided — its meals can be billed again");
@@ -55,7 +55,7 @@ export async function voidInvoiceAction(_: ActionResult, fd: FormData): Promise<
 }
 
 export async function creditNoteAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("invoices");
+  const user = await requirePermission("invoices.edit");
   const amount = parseRupees(String(fd.get("amount") ?? ""));
   if (amount == null) return fail("Enter the amount to credit");
   try {

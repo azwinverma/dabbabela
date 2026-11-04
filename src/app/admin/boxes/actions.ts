@@ -12,7 +12,7 @@ import { refreshBoxCosts } from "../_kit/costing";
 const ACCENTS = ["achar", "turmeric", "saag", "charcoal"];
 
 export async function saveBox(id: string | null, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const name = f.str(fd, "name", 120);
     if (!name) throw new FieldError("name", "Name is required");
     let rows: { menuItemId: string; quantity: number }[] = [];
@@ -65,7 +65,7 @@ export async function saveBox(id: string | null, _prev: ActionResult, fd: FormDa
 }
 
 export async function addSubstitution(boxId: string, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const fromItemId = f.str(fd, "fromItemId");
     const toItemId = f.str(fd, "toItemId");
     if (!fromItemId || !toItemId) return fail("Pick both dishes");
@@ -86,7 +86,7 @@ export async function addSubstitution(boxId: string, _prev: ActionResult, fd: Fo
 }
 
 export async function toggleSubstitution(id: string): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const s = await db.boxSubstitution.findUnique({ where: { id } });
     if (!s) return fail("Not found");
     await db.boxSubstitution.update({ where: { id }, data: { isActive: !s.isActive } });
@@ -96,7 +96,7 @@ export async function toggleSubstitution(id: string): Promise<ActionResult> {
 }
 
 export async function deleteSubstitution(id: string): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const s = await db.boxSubstitution.delete({ where: { id } });
     await audit({ actorId: user.id, action: "box.substitution_delete", entity: "LunchBox", entityId: s.boxId, before: s });
     return done("Removed");
@@ -104,7 +104,7 @@ export async function deleteSubstitution(id: string): Promise<ActionResult> {
 }
 
 export async function toggleBox(id: string): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const b = await db.lunchBox.findUnique({ where: { id } });
     if (!b) return fail("Not found");
     await db.lunchBox.update({ where: { id }, data: { isActive: !b.isActive } });
@@ -114,7 +114,7 @@ export async function toggleBox(id: string): Promise<ActionResult> {
 }
 
 export async function deleteBox(id: string): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const [orders, menus] = await Promise.all([db.orderItem.count({ where: { boxId: id } }), db.menuDayItem.count({ where: { boxId: id } })]);
     if (orders || menus) return fail(`On ${orders} order(s) and ${menus} menu day(s). Archive it instead.`);
     const b = await db.lunchBox.delete({ where: { id } });

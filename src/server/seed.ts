@@ -1,4 +1,5 @@
 /* Catalogue + demo seed. Shared by `prisma/seed.ts` and the one-time /setup screen. No "server-only" here. */
+import { ensureFoundationData } from "./foundation";
 import type { Diet, ItemCategory, PrismaClient, StockUnit, Weekday, Role } from "@prisma/client";
 import { hashPassword } from "better-auth/crypto";
 import { addDays, dateOnly, todayKTM, weekStartOf } from "../lib/dates";
@@ -626,6 +627,8 @@ export async function seedCatalog(db: PrismaClient, opts: SeedOptions = {}) {
     say(`owner ${opts.owner.email}`);
   }
   if (opts.demo) await seedDemo(db, kitchen.id, boxId, say);
+  const f = await ensureFoundationData(db);
+  say(`foundation data ${JSON.stringify(f)}`);
 }
 
 // ───────────── demo data (never in production) ─────────────

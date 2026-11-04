@@ -12,14 +12,22 @@
 * Rate limits stored in Postgres (sign-in 6/min, sign-up 5/5 min, reset 3/5 min, OTP 3/5 min, TOTP 6/min).
 
 ## Authorisation
-* Role → permission matrix in `src/lib/permissions.ts` (unit-tested). Every admin page and **every server
-  action** calls `requirePermission`; middleware only checks that a session cookie exists.
+* **Granular permissions** (`src/lib/permissions/`): `module.action` keys (view · create · edit · delete · publish · approve · export ·
+  refund · settings, plus bulk and pii). Effective permissions = the base `Role`'s grants (derived from the original matrix, which is
+  kept verbatim and snapshot-tested so no existing user gained or lost access) ∪ an optional custom `StaffRole`. SUPER_ADMIN has everything.
+* Every admin page calls `requirePermission("<module>.view")`; every server action / API route the stricter write key
+  (`.edit`, `.approve`, `.publish` …). Middleware only checks that a session cookie exists. Hiding a button is cosmetic.
+* **Escalation guards:** only super admins create/edit roles (`roles.edit`); you can't grant a custom role or base role containing a
+  permission you don't hold; kitchen-scoped staff can't widen anyone's scope; the last super admin can't be demoted or deactivated.
+  All role, scope, assignment and session changes are audited with before/after.
+* **Scopes:** `User.kitchenId` ∪ `StaffScope` kitchens limit kitchen data (orders, kitchen, dispatch, inventory) through
+  `kitchenWhere`/`inScope`. Exports and reports get the same treatment in WP-10.
+* **Login activity:** every sign-in attempt (email, phone OTP, TOTP, backup code) is recorded in `LoginEvent` with IP, user agent and a
+  failure code — never passwords, codes or tokens. Staff pages list sessions with revoke one / revoke all.
 * Customer data is always queried with `userId` from the session, never from the request.
 * Corporate portal: `requireCompanyAdmin()` + every query filtered by that company id (integration test
   proves another company's data can't be read).
-* Staff can be scoped to a kitchen (`User.kitchenId`). Only super admins grant super admin; the last
-  super admin can't be demoted or deactivated.
-* PII (phone/email) masked for roles without `customers.pii`; CSV exports follow the same rule and are audited.
+* PII (phone/email) masked without `customers.pii`; CSV exports follow the same rule and are audited.
 
 ## Payments
 * Prices recomputed on the server for every quote and order; client totals are ignored.

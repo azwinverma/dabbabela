@@ -18,7 +18,7 @@ export async function setActiveAction(_: ActionResult, fd: FormData): Promise<Ac
 }
 
 export async function saveNoteAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const actor = await requirePermission("customers");
+  const actor = await requirePermission("customers.edit");
   const id = String(fd.get("id"));
   const note = String(fd.get("note") ?? "").slice(0, 2000);
   const u = await db.user.findUnique({ where: { id }, select: { internalNote: true } });
@@ -29,7 +29,7 @@ export async function saveNoteAction(_: ActionResult, fd: FormData): Promise<Act
 }
 
 export async function openPrivacyRequestAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const actor = await requirePermission("privacy");
+  const actor = await requirePermission("privacy.edit");
   const type = fd.get("type") === "DELETE" ? "DELETE" : "EXPORT";
   const userId = String(fd.get("id"));
   const open = await db.dataRequest.findFirst({ where: { userId, type, status: "OPEN" } });

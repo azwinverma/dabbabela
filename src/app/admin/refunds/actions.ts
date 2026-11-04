@@ -12,7 +12,7 @@ const METHODS: RefundMethod[] = ["ORIGINAL", "BANK", "CASH", "WALLET_CREDIT"];
 const msg = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong");
 
 export async function requestRefundAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("refunds.request");
+  const user = await requirePermission("refunds.create");
   const amount = parseRupees(String(fd.get("amount") ?? ""));
   const method = String(fd.get("method")) as RefundMethod;
   if (amount == null || amount <= 0) return fail("Enter the refund amount in rupees");

@@ -10,7 +10,7 @@ import { parseRupees, rs } from "@/lib/money";
 import { adjustOrder, cancelOrder, setOrderStatus, type Settlement } from "@/server/orders";
 import { requestRefund } from "@/server/payments";
 import { TRANSITIONS } from "@/server/transitions";
-import { assertKitchen, guard, reasonOf } from "@/components/admin/ops/scope";
+import { assertKitchen, guard, reasonOf, kitchenWhere } from "@/components/admin/ops/scope";
 
 const STATUSES = Object.keys(TRANSITIONS) as OrderStatus[];
 
@@ -22,7 +22,7 @@ async function loadOrder(id: string, user: { kitchenId: string | null }) {
 
 export async function changeStatusAction(orderId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("orders.manage");
+    const user = await requirePermission("orders.edit");
     const to = String(fd.get("status")) as OrderStatus;
     if (!STATUSES.includes(to) || to === "CANCELLED") return fail("Pick a status (use Cancel for cancellations)");
     const o = await loadOrder(orderId, user);
@@ -38,7 +38,7 @@ export async function changeStatusAction(orderId: string, _p: ActionResult, fd: 
 
 export async function cancelAction(orderId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("orders.manage");
+    const user = await requirePermission("orders.edit");
     const o = await loadOrder(orderId, user);
     const reason = reasonOf(fd);
     const settlement = (["CREDIT", "REFUND", "NONE"].includes(String(fd.get("settlement"))) ? String(fd.get("settlement")) : "CREDIT") as Settlement;
@@ -51,7 +51,7 @@ export async function cancelAction(orderId: string, _p: ActionResult, fd: FormDa
 
 export async function adjustAction(orderId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("orders.manage");
+    const user = await requirePermission("orders.edit");
     const o = await loadOrder(orderId, user);
     const reason = reasonOf(fd);
     const amount = parseRupees(String(fd.get("amount") ?? ""));
@@ -65,7 +65,7 @@ export async function adjustAction(orderId: string, _p: ActionResult, fd: FormDa
 
 export async function refundAction(orderId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("refunds.request");
+    const user = await requirePermission("refunds.create");
     const o = await loadOrder(orderId, user);
     if (!o.paymentId) return fail("This order has no payment");
     const reason = reasonOf(fd);
@@ -86,7 +86,7 @@ export async function bulkStatusAction(_p: ActionResult, fd: FormData): Promise<
     if (!ids.length) return fail("Tick the orders first");
     if (!STATUSES.includes(to) || to === "CANCELLED") return fail("Pick a status (cancel orders one by one, with a settlement)");
     const reason = reasonOf(fd);
-    const scoped = user.kitchenId ? (await db.order.findMany({ where: { id: { in: ids }, kitchenId: user.kitchenId }, select: { id: true } })).map((o) => o.id) : ids;
+    const scoped = user.kitchenIds ? (await db.order.findMany({ where: { id: { in: ids }, ...kitchenWhere(user) }, select: { id: true } })).map((o) => o.id) : ids;
     const r = await setOrderStatus(scoped, to, user.id, `Bulk: ${reason}`);
     await audit({ actorId: user.id, action: "order.bulk_status", entity: "Order", summary: `${r.changed.length} → ${to}, ${r.rejected.length} rejected`, reason, after: { to, changed: r.changed, rejected: r.rejected } });
     revalidatePath("/admin/orders");

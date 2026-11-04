@@ -11,12 +11,12 @@ import { messageFlagAction, messageToTicketAction } from "../../support/actions"
 export const metadata = { title: "Message" };
 
 export default async function MessagePage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requirePermission("support");
+  const user = await requirePermission("support.view");
   const { id } = await params;
   const m = await db.contactMessage.findUnique({ where: { id } });
   if (!m) notFound();
   if (!m.isRead) await db.contactMessage.update({ where: { id }, data: { isRead: true } });
-  const pii = piiFor(user.role);
+  const pii = piiFor(user);
   return (
     <div>
       <PageHeader back={{ href: "/admin/messages", label: "Messages" }} title={m.subject || "Website message"} actions={<>

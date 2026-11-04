@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { buttonClass } from "@/components/ui/Button";
 
 export default async function PagesIndex() {
-  await requirePermission("content");
+  await requirePermission("content.view");
   const pages = await db.page.findMany({ orderBy: { title: "asc" } });
   return (
     <>

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { can } from "@/lib/permissions";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { done, fail, type ActionResult } from "@/lib/action";
@@ -42,7 +43,7 @@ function sparse(data: Record<string, unknown>) {
 }
 
 export async function saveSectionAction(key: string, locale: string, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("content", async (user) => {
+  return guarded("content.edit", async (user) => {
     const def = SECTION_MAP[key];
     if (!def || !isLocale(locale)) return fail("Unknown section");
     let raw: Record<string, unknown>;
@@ -54,6 +55,7 @@ export async function saveSectionAction(key: string, locale: string, _prev: Acti
     let data = clean(def.fields, raw);
     if (locale === "ne") data = sparse(data);
     const intent = String(fd.get("intent") ?? "draft");
+    if (intent === "publish" && !can(user, "content.publish")) return fail("You can save drafts; publishing needs the content publish permission");
     await saveDraft(key, locale as Locale, data, user.id);
     if (intent === "publish") {
       const before = await db.contentSection.findUnique({ where: { key_locale: { key, locale } } });
@@ -68,7 +70,7 @@ export async function saveSectionAction(key: string, locale: string, _prev: Acti
 }
 
 export async function discardDraftAction(key: string, locale: string): Promise<ActionResult> {
-  return guarded("content", async (user) => {
+  return guarded("content.edit", async (user) => {
     if (!isLocale(locale)) return fail("Unknown locale");
     await discardDraft(key, locale);
     await audit({ actorId: user.id, action: "cms.discard", entity: "ContentSection", entityId: `${key}|${locale}` });
@@ -77,7 +79,7 @@ export async function discardDraftAction(key: string, locale: string): Promise<A
 }
 
 export async function rollbackAction(key: string, locale: string, revisionId: string): Promise<ActionResult> {
-  return guarded("content", async (user) => {
+  return guarded("content.publish", async (user) => {
     if (!isLocale(locale)) return fail("Unknown locale");
     const v = await rollbackSection(key, locale, revisionId, user.id);
     await audit({ actorId: user.id, action: "cms.rollback", entity: "ContentSection", entityId: `${key}|${locale}`, summary: `Rolled back → v${v}`, reason: `revision ${revisionId}` });
@@ -87,7 +89,7 @@ export async function rollbackAction(key: string, locale: string, revisionId: st
 }
 
 export async function saveLayoutAction(blocks: HomeBlock[]): Promise<ActionResult> {
-  return guarded("content", async (user) => {
+  return guarded("content.publish", async (user) => {
     await saveHomeLayout(blocks);
     await audit({ actorId: user.id, action: "cms.home_layout", entity: "Setting", entityId: "home.layout", after: blocks });
     revalidatePath("/");

@@ -7,7 +7,7 @@ import { rs } from "@/lib/money";
 export const dynamic = "force-dynamic";
 
 export default async function RiderHome() {
-  const user = await requirePermission("rider");
+  const user = await requirePermission("rider.view");
   const today = todayKTM();
   const routes = await db.deliveryRoute.findMany({
     where: { date: dateOnly(today), ...(user.role === "DELIVERY_AGENT" ? { riderId: user.id } : user.kitchenId ? { kitchenId: user.kitchenId } : {}) },

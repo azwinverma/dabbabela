@@ -9,7 +9,7 @@ import { ORDER_PAYMENT_STATUS, ORDER_STATUS, METHOD_LABEL } from "@/lib/labels";
 import { Badge } from "@/components/ui/Badge";
 import { PageHeader, Table, Th, Td, EmptyRow, OrderBadge, Pagination } from "@/components/admin/ui";
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
-import { kitchensFor, piiFor } from "@/components/admin/ops/scope";
+import { kitchensFor, piiFor, inScope, kitchenWhere } from "@/components/admin/ops/scope";
 import { bulkStatusAction } from "./actions";
 
 export const metadata = { title: "Orders" };
@@ -20,7 +20,7 @@ type SP = Record<string, string | undefined>;
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<SP> }) {
   const user = await requirePermission("orders.view");
   const sp = await searchParams;
-  const pii = piiFor(user.role);
+  const pii = piiFor(user);
   const today = todayKTM();
   const from = sp.from && isValidISODate(sp.from) ? sp.from : today;
   const to = sp.to && isValidISODate(sp.to) ? sp.to : addDays(from, 6);
@@ -28,15 +28,15 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
 
   const kitchens = await kitchensFor(user);
   const [zones, companies, slots] = await Promise.all([
-    db.deliveryZone.findMany({ where: user.kitchenId ? { kitchenId: user.kitchenId } : {}, orderBy: { sortOrder: "asc" }, select: { id: true, name: true } }),
+    db.deliveryZone.findMany({ where: kitchenWhere(user), orderBy: { sortOrder: "asc" }, select: { id: true, name: true } }),
     db.company.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-    db.deliverySlot.findMany({ where: { isActive: true, ...(user.kitchenId ? { kitchenId: user.kitchenId } : {}) }, orderBy: { sortOrder: "asc" }, select: { id: true, label: true } }),
+    db.deliverySlot.findMany({ where: { isActive: true, ...kitchenWhere(user) }, orderBy: { sortOrder: "asc" }, select: { id: true, label: true } }),
   ]);
 
   const q = sp.q?.trim();
   const where: Prisma.OrderWhereInput = {
     deliveryDate: { gte: dateOnly(from), lte: dateOnly(to) },
-    ...(user.kitchenId ? { kitchenId: user.kitchenId } : sp.kitchen ? { kitchenId: sp.kitchen } : {}),
+    ...(sp.kitchen && inScope(user, sp.kitchen) ? { kitchenId: sp.kitchen } : kitchenWhere(user)),
     ...(sp.status ? { status: sp.status as OrderStatus } : {}),
     ...(sp.pay ? { paymentStatus: sp.pay as OrderPaymentStatus } : {}),
     ...(sp.zone ? { zoneId: sp.zone } : {}),
@@ -67,7 +67,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     db.order.groupBy({ by: ["status"], where: { ...where, status: undefined }, _count: true }),
   ]);
   const meals = orders.reduce((a, o) => a + o.items.reduce((b, i) => b + i.quantity, 0), 0);
-  const canBulk = can(user.role, "orders.bulk");
+  const canBulk = can(user, "orders.bulk");
   const params: SP = { ...sp, from, to };
   const statusLink = (s?: string) => {
     const p = new URLSearchParams(Object.entries({ ...params, status: s, page: undefined }).filter(([, v]) => v) as [string, string][]);
@@ -95,7 +95,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         <label className="text-xs font-semibold text-ink-mute">To<input type="date" name="to" defaultValue={to} className="field mt-1" /></label>
         <Sel name="status" value={sp.status} label="Status" options={Object.entries(ORDER_STATUS).map(([v, s]) => [v, s.label])} />
         <Sel name="pay" value={sp.pay} label="Payment" options={Object.entries(ORDER_PAYMENT_STATUS).map(([v, s]) => [v, s.label])} />
-        {!user.kitchenId && kitchens.length > 1 && <Sel name="kitchen" value={sp.kitchen} label="Kitchen" options={kitchens.map((k) => [k.id, k.name])} />}
+        {kitchens.length > 1 && <Sel name="kitchen" value={sp.kitchen} label="Kitchen" options={kitchens.map((k) => [k.id, k.name])} />}
         <Sel name="zone" value={sp.zone} label="Zone" options={zones.map((z) => [z.id, z.name])} />
         <Sel name="slot" value={sp.slot} label="Slot" options={slots.map((s) => [s.id, s.label])} />
         <Sel name="source" value={sp.source} label="Source" options={[["SINGLE", "Single"], ["SUBSCRIPTION", "Plan"], ["CORPORATE", "Corporate"], ["ADMIN", "Staff"]]} />

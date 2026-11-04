@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { buttonClass } from "@/components/ui/Button";
 
 export default async function BlogIndex() {
-  await requirePermission("content");
+  await requirePermission("content.view");
   const posts = await db.post.findMany({ orderBy: [{ published: "asc" }, { publishedAt: "desc" }, { createdAt: "desc" }] });
   return (
     <>

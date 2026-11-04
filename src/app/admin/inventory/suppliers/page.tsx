@@ -9,7 +9,7 @@ import { saveSupplierAction } from "../actions";
 export const metadata = { title: "Suppliers" };
 
 export default async function SuppliersPage() {
-  await requirePermission("inventory");
+  await requirePermission("inventory.view");
   const suppliers = await db.supplier.findMany({ include: { _count: { select: { ingredients: true, purchases: true } } }, orderBy: [{ isActive: "desc" }, { name: "asc" }] });
   return (
     <div>

@@ -2,11 +2,11 @@
   "name": "dabba-bela",
   "version": "1.0.0",
   "private": true,
-  "description": "Dabba Bela — Nepal-first cloud kitchen platform: weekly menus, Build-a-Dabba, meal plans, corporate lunches, kitchen, inventory, dispatch and CMS",
+  "description": "Dabba Bela \u2014 Nepal-first cloud kitchen platform: weekly menus, Build-a-Dabba, meal plans, corporate lunches, kitchen, inventory, dispatch and CMS",
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
-    "vercel-build": "prisma generate && prisma migrate deploy && next build",
+    "vercel-build": "prisma generate && prisma migrate deploy && tsx prisma/foundation.ts && next build",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -18,7 +18,8 @@
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:e2e": "playwright test",
-    "check": "npm run typecheck && npm run lint && npm run test"
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "db:foundation": "tsx prisma/foundation.ts"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",

@@ -11,7 +11,7 @@ import { ConfirmAction } from "@/components/admin/ConfirmAction";
 import { testArea, toggleZone } from "./actions";
 
 export default async function ZonesPage() {
-  await requirePermission("rules");
+  await requirePermission("rules.view");
   const [zones, uncovered] = await Promise.all([
     db.deliveryZone.findMany({ orderBy: [{ city: "asc" }, { sortOrder: "asc" }], include: { kitchen: { select: { name: true } }, _count: { select: { addresses: true, orders: true } } } }),
     db.address.groupBy({ by: ["area"], where: { zoneId: null, archivedAt: null }, _count: true, orderBy: { _count: { area: "desc" } }, take: 10 }),

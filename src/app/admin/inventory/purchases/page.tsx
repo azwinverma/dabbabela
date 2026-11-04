@@ -14,7 +14,7 @@ export const metadata = { title: "Purchase orders" };
 const PO_TONE = { DRAFT: "neutral", SENT: "info", PARTIAL: "warn", RECEIVED: "good", CANCELLED: "bad" } as const;
 
 export default async function PurchasesPage({ searchParams }: { searchParams: Promise<{ kitchen?: string; status?: string }> }) {
-  const user = await requirePermission("inventory");
+  const user = await requirePermission("inventory.view");
   const sp = await searchParams;
   const { kitchen } = await pickKitchen(user, sp.kitchen);
   if (!kitchen) return null;

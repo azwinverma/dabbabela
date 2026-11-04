@@ -18,7 +18,7 @@ export const metadata = { title: "Kitchen" };
 type SP = { kitchen?: string; date?: string; buffer?: string };
 
 export default async function KitchenPage({ searchParams }: { searchParams: Promise<SP> }) {
-  const user = await requirePermission("kitchen");
+  const user = await requirePermission("kitchen.view");
   const sp = await searchParams;
   const { kitchens, kitchen } = await pickKitchen(user, sp.kitchen);
   if (!kitchen) return <PageHeader title="Kitchen" description="No active kitchen yet — add one under Kitchens & slots." />;
@@ -66,7 +66,7 @@ export default async function KitchenPage({ searchParams }: { searchParams: Prom
           ) : (
             <>
               <p className="mt-1 text-xs text-ink-mute">{afterCutoff ? "Cut-off passed — lock to confirm orders." : `Cut-off ${settings.orderCutoff}. Locking early stops customer changes.`}</p>
-              {can(user.role, "kitchen.lock") && (
+              {can(user, "kitchen.approve") && (
                 <ActionForm action={lockDayAction} className="mt-2">
                   <input type="hidden" name="kitchenId" value={kitchen.id} />
                   <input type="hidden" name="date" value={date} />

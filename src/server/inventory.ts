@@ -29,7 +29,7 @@ export async function stockList(kitchenId: string) {
   });
 }
 
-const SIGN: Record<StockMovementType, 1 | -1 | 0> = { RECEIPT: 1, RETURN: -1, USAGE: -1, WASTE: -1, ADJUSTMENT: 0 };
+const SIGN: Record<StockMovementType, 1 | -1 | 0> = { RECEIPT: 1, RETURN: -1, USAGE: -1, WASTE: -1, ADJUSTMENT: 0, TRANSFER_OUT: -1, TRANSFER_IN: 1 };
 
 /**
  * Append a stock movement. Quantities are entered positive; the sign comes from the type

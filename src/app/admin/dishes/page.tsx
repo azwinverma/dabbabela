@@ -14,7 +14,7 @@ import { toggleDish } from "./actions";
 const CATS = Object.keys(CATEGORY_LABEL) as ItemCategory[];
 
 export default async function DishesPage({ searchParams }: { searchParams: Promise<{ q?: string; cat?: string; status?: string }> }) {
-  await requirePermission("menu");
+  await requirePermission("menu.view");
   const sp = await searchParams;
   const cat = CATS.includes(sp.cat as ItemCategory) ? (sp.cat as ItemCategory) : undefined;
   const where: Prisma.MenuItemWhereInput = {

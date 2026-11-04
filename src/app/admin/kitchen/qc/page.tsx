@@ -11,7 +11,7 @@ import { qcAction } from "../actions";
 export const metadata = { title: "QC log" };
 
 export default async function QcPage({ searchParams }: { searchParams: Promise<{ kitchen?: string; date?: string }> }) {
-  const user = await requirePermission("kitchen");
+  const user = await requirePermission("kitchen.view");
   const sp = await searchParams;
   const { kitchens, kitchen } = await pickKitchen(user, sp.kitchen);
   if (!kitchen) return null;

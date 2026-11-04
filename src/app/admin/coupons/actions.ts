@@ -8,7 +8,7 @@ import { guarded } from "../_kit/guard";
 import { f, FieldError } from "../_kit/form";
 
 export async function saveCoupon(id: string | null, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("pricing", async (user) => {
+  return guarded("pricing.edit", async (user) => {
     const code = f.str(fd, "code", 30).toUpperCase().replace(/[^A-Z0-9_-]/g, "");
     if (code.length < 3) throw new FieldError("code", "Use at least 3 letters/numbers");
     const type = (f.str(fd, "type") === "FLAT" ? "FLAT" : "PERCENT") as DiscountType;
@@ -50,7 +50,7 @@ export async function saveCoupon(id: string | null, _prev: ActionResult, fd: For
 }
 
 export async function toggleCoupon(id: string): Promise<ActionResult> {
-  return guarded("pricing", async (user) => {
+  return guarded("pricing.edit", async (user) => {
     const c = await db.coupon.findUnique({ where: { id } });
     if (!c) return fail("Not found");
     await db.coupon.update({ where: { id }, data: { isActive: !c.isActive } });

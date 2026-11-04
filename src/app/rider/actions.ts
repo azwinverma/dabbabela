@@ -12,7 +12,7 @@ const isRider = (role: string) => role === "DELIVERY_AGENT";
 
 export async function deliverAction(orderId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("rider");
+    const user = await requirePermission("rider.edit");
     const file = fd.get("photo");
     let photoUrl: string | null = null;
     if (file instanceof File && file.size > 0) photoUrl = (await storeUpload(file, { folder: "proof" })).url;
@@ -27,7 +27,7 @@ export async function deliverAction(orderId: string, _p: ActionResult, fd: FormD
 
 export async function failAction(orderId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("rider");
+    const user = await requirePermission("rider.edit");
     await failStop(orderId, { id: user.id, isStaff: !isRider(user.role) }, String(fd.get("reason") ?? ""));
     revalidatePath("/rider", "layout");
     return done("Marked failed — dispatch will follow up");
@@ -36,7 +36,7 @@ export async function failAction(orderId: string, _p: ActionResult, fd: FormData
 
 export async function finishRouteAction(routeId: string): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("rider");
+    const user = await requirePermission("rider.edit");
     await completeRoute(routeId, { id: user.id, isStaff: !isRider(user.role) });
     revalidatePath("/rider", "layout");
     return done("Route finished. Hand the cash to dispatch.");

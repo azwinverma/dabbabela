@@ -4,7 +4,11 @@ Every page and server action calls `requirePermission(...)`; the sidebar hides w
 Staff must have TOTP 2FA when the `staff2fa` flag is on (production default). Overrides are written to
 the audit log with who / when / why / before / after.
 
-## Permission matrix (summary — source: `src/lib/permissions.ts`)
+## Permission matrix (summary — base roles; source: `src/lib/permissions/`)
+Since 2026-11-04 permissions are granular (`module.action`); the full grid per role is at **/admin/roles**, and custom roles
+(e.g. the seeded *Kitchen manager* and *Delivery manager* presets) add permissions on top of a base role. The table below is the
+base-role summary and is unchanged by the migration.
+
 
 | Module | Super admin / Owner | Ops manager | Finance | Support | Menu mgr | Content | Kitchen | Inventory | Dispatcher | Rider |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -57,6 +61,6 @@ Corporate admins are not staff: they use `/team`, scoped to their own company.
 | Service rules | `/admin/kitchens`, `/admin/zones`, `/admin/holidays`, `/admin/coupons`, `/admin/taxes` | Capacity, slots, coverage, closures & disruption wizard, coupons, effective-dated VAT |
 | People | `/admin/customers`, `/admin/companies`, `/admin/leads`, `/admin/privacy` | Customer 360, company billing setup, CRM pipeline, data requests |
 | Website | `/admin/content`, `/admin/pages`, `/admin/blog`, `/admin/banners`, `/admin/testimonials`, `/admin/faqs`, `/admin/media` | Per-locale CMS with draft/publish/rollback, home layout, policies, scheduled banners, consented testimonials |
-| System | `/admin/staff`, `/admin/notifications`, `/admin/settings`, `/admin/audit` | Roles & kitchen scope, templates & outbox, settings & feature flags, audit diff |
+| System | `/admin/staff` (+ `[id]`), `/admin/roles` (+ `[id]`), `/admin/notifications`, `/admin/settings`, `/admin/audit` | Staff, custom roles & permission grid, kitchen/company scopes, sessions & sign-in activity; templates & outbox; settings & feature flags; audit diff |
 
 Other portals: `/rider` (delivery agents), `/team` (company admins), `/setup` (first owner, once).

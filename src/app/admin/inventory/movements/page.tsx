@@ -12,7 +12,7 @@ export const metadata = { title: "Stock movements" };
 const PER = 100;
 
 export default async function MovementsPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  const user = await requirePermission("inventory");
+  const user = await requirePermission("inventory.view");
   const sp = await searchParams;
   const { kitchen } = await pickKitchen(user, sp.kitchen);
   if (!kitchen) return null;

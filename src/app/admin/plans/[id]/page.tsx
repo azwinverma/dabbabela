@@ -9,7 +9,7 @@ import { Input, Textarea, Select, Checkbox } from "@/components/ui/Fields";
 import { savePlan } from "../actions";
 
 export default async function PlanPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("plans");
+  await requirePermission("plans.view");
   const { id } = await params;
   const isNew = id === "new";
   const p = isNew ? null : await db.mealPlan.findUnique({ where: { id } });

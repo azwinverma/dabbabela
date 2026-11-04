@@ -20,7 +20,7 @@ const n = (fd: FormData, k: string) => {
 
 export async function saveIngredientAction(id: string | null, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("inventory");
+    const user = await requirePermission("inventory.edit");
     const name = s(fd, "name");
     if (!name) return fail("Name is required", { name: "Required" });
     const unit = s(fd, "unit") as StockUnit;
@@ -49,7 +49,7 @@ export async function saveIngredientAction(id: string | null, _p: ActionResult, 
 
 export async function movementAction(_p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("inventory");
+    const user = await requirePermission("inventory.edit");
     const kitchenId = s(fd, "kitchenId");
     assertKitchen(user, kitchenId);
     const type = s(fd, "type") as StockMovementType;
@@ -67,7 +67,7 @@ export async function movementAction(_p: ActionResult, fd: FormData): Promise<Ac
 
 export async function saveSupplierAction(id: string | null, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("inventory");
+    const user = await requirePermission("inventory.edit");
     const name = s(fd, "name");
     if (!name) return fail("Name is required");
     const data = { name, contact: s(fd, "contact") || null, phone: s(fd, "phone") || null, email: s(fd, "email") || null, address: s(fd, "address") || null, panVat: s(fd, "panVat") || null, notes: s(fd, "notes") || null, isActive: id ? fd.get("isActive") !== null : true };
@@ -80,7 +80,7 @@ export async function saveSupplierAction(id: string | null, _p: ActionResult, fd
 
 export async function createPOAction(_p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("inventory");
+    const user = await requirePermission("inventory.edit");
     const kitchenId = s(fd, "kitchenId");
     assertKitchen(user, kitchenId);
     const ing = fd.getAll("line_ingredient").map(String);
@@ -96,7 +96,7 @@ export async function createPOAction(_p: ActionResult, fd: FormData): Promise<Ac
 
 export async function poStatusAction(poId: string, to: "SENT" | "CANCELLED", _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("inventory");
+    const user = await requirePermission("inventory.edit");
     const po = await db.purchaseOrder.findUniqueOrThrow({ where: { id: poId } });
     assertKitchen(user, po.kitchenId);
     const reason = to === "CANCELLED" ? reasonOf(fd) : null;
@@ -109,7 +109,7 @@ export async function poStatusAction(poId: string, to: "SENT" | "CANCELLED", _p:
 
 export async function receiveAction(poId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("inventory");
+    const user = await requirePermission("inventory.edit");
     const po = await db.purchaseOrder.findUniqueOrThrow({ where: { id: poId }, include: { lines: true } });
     assertKitchen(user, po.kitchenId);
     const rows = po.lines.map((l) => {

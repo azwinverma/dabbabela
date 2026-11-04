@@ -11,7 +11,7 @@ import { WeekEditor } from "../WeekEditor";
 import { deleteMenu, duplicateMenu, saveMenuDays, setMenuStatus } from "../actions";
 
 export default async function MenuEditPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("menu");
+  await requirePermission("menu.view");
   const { id } = await params;
   const [menu, boxes, kitchens] = await Promise.all([
     db.weeklyMenu.findUnique({ where: { id }, include: { days: { include: { items: { orderBy: { sortOrder: "asc" } } } } } }),

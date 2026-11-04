@@ -7,7 +7,7 @@ import { fail, done, type ActionResult } from "@/lib/action";
 import { marketingSpend, SPEND_KEY } from "@/server/reports";
 
 export async function saveSpendAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("dashboard.finance");
+  const user = await requirePermission("analytics.view");
   const ym = String(fd.get("ym") ?? "");
   if (!/^\d{4}-\d{2}$/.test(ym)) return fail("Pick a month");
   const amount = parseRupees(String(fd.get("amount") ?? ""));

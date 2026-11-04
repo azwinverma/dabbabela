@@ -19,7 +19,9 @@ Hosting: **Vercel** (functions pinned to `sin1`, Singapore) + **Neon Postgres** 
 5. Environment variables (Production): `BETTER_AUTH_SECRET` (`openssl rand -base64 32`),
    `BETTER_AUTH_URL` and `NEXT_PUBLIC_SITE_URL` (your https domain), `CRON_SECRET`, `SETUP_KEY`,
    `RESEND_API_KEY` + `EMAIL_FROM`, payment keys when activated, SMS keys when approved.
-6. Deploy. `vercel-build` runs `prisma generate && prisma migrate deploy && next build`.
+6. Deploy. `vercel-build` runs `prisma generate && prisma migrate deploy && tsx prisma/foundation.ts && next build`.
+   The foundation step is idempotent (adds missing preset roles, expense categories, plan price rows, nav links, meal
+   categories; never changes existing rows), so it is safe on every deploy, including preview deployments sharing a database.
 7. Open `https://<domain>/setup`, enter `SETUP_KEY`, create the owner. This loads allergens, the kitchen,
    zones, slots, ingredients, dishes with starter recipes, the nine dabbas, the weekly rotation, plans,
    policies (marked "needs legal review"), FAQs. It refuses to run again once an owner exists.

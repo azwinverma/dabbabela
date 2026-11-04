@@ -8,7 +8,7 @@ import { ConfirmAction } from "@/components/admin/ConfirmAction";
 import { toggleFaq, deleteFaq } from "./actions";
 
 export default async function FaqsPage() {
-  await requirePermission("content");
+  await requirePermission("content.view");
   const faqs = await db.faq.findMany({ orderBy: [{ category: "asc" }, { sortOrder: "asc" }] });
   const cats = [...new Set(faqs.map((f) => f.category))];
   return (

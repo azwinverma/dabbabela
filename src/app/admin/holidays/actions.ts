@@ -13,7 +13,7 @@ const KINDS = ["HOLIDAY", "BANDH", "WEATHER", "CLOSURE"];
 const LIVE = ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED", "PREPARING"] as const;
 
 export async function addHoliday(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("rules", async (user) => {
+  return guarded("rules.edit", async (user) => {
     const date = f.date(fd, "date");
     const name = f.str(fd, "name", 100);
     const kind = KINDS.includes(f.str(fd, "kind")) ? f.str(fd, "kind") : "HOLIDAY";
@@ -30,7 +30,7 @@ export async function addHoliday(_prev: ActionResult, fd: FormData): Promise<Act
 }
 
 export async function deleteHoliday(id: string): Promise<ActionResult> {
-  return guarded("rules", async (user) => {
+  return guarded("rules.edit", async (user) => {
     const h = await db.holiday.delete({ where: { id } });
     await audit({ actorId: user.id, action: "closure.delete", entity: "Holiday", entityId: id, before: h });
     return done("Day re-opened for orders");
@@ -38,7 +38,7 @@ export async function deleteHoliday(id: string): Promise<ActionResult> {
 }
 
 export async function runDisruption(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("rules", async (user) => {
+  return guarded("rules.edit", async (user) => {
     const date = f.date(fd, "date");
     const reason = f.str(fd, "reason", 120);
     const kind = KINDS.includes(f.str(fd, "kind")) ? f.str(fd, "kind") : "BANDH";

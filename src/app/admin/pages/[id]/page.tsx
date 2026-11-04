@@ -10,7 +10,7 @@ import { ConfirmAction } from "@/components/admin/ConfirmAction";
 import { savePage, deletePage } from "../actions";
 
 export default async function PageEdit({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("content");
+  await requirePermission("content.view");
   const { id } = await params;
   const p = id === "new" ? null : await db.page.findUnique({ where: { id } });
   if (id !== "new" && !p) notFound();

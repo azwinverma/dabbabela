@@ -13,7 +13,7 @@ import { f, FieldError } from "../_kit/form";
 const CATS = Object.keys(CATEGORY_LABEL) as ItemCategory[];
 
 export async function saveGroup(id: string | null, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const name = f.str(fd, "name", 80);
     if (!name) throw new FieldError("name", "Name is required");
     const category = f.str(fd, "category") as ItemCategory;
@@ -30,7 +30,7 @@ export async function saveGroup(id: string | null, _prev: ActionResult, fd: Form
 }
 
 export async function deleteGroup(id: string): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const g = await db.customizationGroup.delete({ where: { id } });
     await audit({ actorId: user.id, action: "builder.group_delete", entity: "CustomizationGroup", entityId: id, before: g });
     return done("Step removed");
@@ -38,7 +38,7 @@ export async function deleteGroup(id: string): Promise<ActionResult> {
 }
 
 export async function addOption(groupId: string, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const menuItemId = f.str(fd, "menuItemId");
     if (!menuItemId) return fail("Pick a dish");
     const priceOverride = f.moneyOpt(fd, "priceOverride", "Price override");
@@ -53,7 +53,7 @@ export async function addOption(groupId: string, _prev: ActionResult, fd: FormDa
 }
 
 export async function removeOption(id: string): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const o = await db.customizationOption.delete({ where: { id } });
     await audit({ actorId: user.id, action: "builder.option_delete", entity: "CustomizationGroup", entityId: o.groupId, before: o });
     return done();
@@ -61,7 +61,7 @@ export async function removeOption(id: string): Promise<ActionResult> {
 }
 
 export async function addRule(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const kind = f.str(fd, "kind") === "REQUIRE" ? "REQUIRE" : "EXCLUDE";
     const itemAId = f.str(fd, "itemAId");
     const itemBId = f.str(fd, "itemBId");
@@ -77,7 +77,7 @@ export async function addRule(_prev: ActionResult, fd: FormData): Promise<Action
 }
 
 export async function deleteRule(id: string): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const r = await db.comboRule.delete({ where: { id } });
     await audit({ actorId: user.id, action: "builder.rule_delete", entity: "ComboRule", entityId: id, before: r });
     return done();
@@ -85,7 +85,7 @@ export async function deleteRule(id: string): Promise<ActionResult> {
 }
 
 export async function saveBuilderLimits(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const before = await getSettings();
     const builderMinPrice = f.money(fd, "builderMinPrice", "Minimum dabba price");
     const builderMaxQty = f.int(fd, "builderMaxQty", 3, 1, 5);

@@ -38,7 +38,17 @@ WP-00 schema (one migration) ──► WP-01 RBAC + nav + permission keys ──
 
 ---
 
-## WP-00: Consolidated schema migration ⬜ (L)
+## WP-00: Consolidated schema migration ✅ (L)
+**Done 2026-11-04.** Migration `20261104100940_super_admin_foundation` (34 tables, additive; checked the SQL has no
+DROP/RENAME/SET NOT NULL). Backfill `src/server/foundation.ts` (`ensureFoundationData`), wired into `seedCatalog`,
+`npm run db:foundation` (in `vercel-build` after `migrate deploy`) and `/admin/roles` → "Install missing presets".
+Tests: `tests/integration/access.test.ts` (backfill re-run adds nothing; presets, prices, nav, categories present).
+Deviations from the table below: `LoginEvent` also has `reason` (failure code); `NavItem` has `@@unique([menu, href])`;
+`KitchenAvailability` unique on `[kitchenId, boxId, menuItemId, optionId]`; `StockLot` unique on `[kitchenId, code]`;
+`InventoryLocation` unique on `[kitchenId, name]`; `GatewayStatementLine` unique on `[provider, providerRef]`.
+Note: Postgres treats NULLs as distinct in unique keys, so `DailySettlement(date, kitchenId=null, method)` and
+`StaffScope` rows with nulls must be de-duplicated in code (WP-09 / done in `setScopes` by replace-all).
+
 **Owns:** `prisma/schema.prisma`, `prisma/migrations/<ts>_super_admin_foundation/`, `src/server/seed.ts` (backfill section only), `docs/DATABASE_SCHEMA.md`.
 **Migration type:** additive only (new tables, nullable or defaulted columns, new enum values), safe on the live Neon database.
 
@@ -75,7 +85,29 @@ WP-00 schema (one migration) ──► WP-01 RBAC + nav + permission keys ──
 
 **Depends:** none.
 
-## WP-01: Granular RBAC, custom roles, scopes, login activity ⬜ (L)
+## WP-01: Granular RBAC, custom roles, scopes, login activity ✅ (L)
+**Done 2026-11-04** (invites deferred, see below).
+- `src/lib/permissions/{registry,legacy,system,index}.ts` (old `permissions.ts` removed; `@/lib/permissions` resolves to the folder).
+  36 modules, 89 `module.action` keys. Legacy keys still accepted and resolve to their stricter `write` key.
+- **Codemod:** every `requirePermission`/`guarded`/`can` call site now uses granular keys — pages use the `view` key, server actions and
+  API routes the `write` key, so a view-only custom role can't mutate. Publish actions use `menu.publish` / `content.publish`.
+- `getCurrentUser` now carries `customGrants` (custom role) and `kitchenIds` (User.kitchenId ∪ StaffScope); `can(user, …)` everywhere.
+  Shared loader `src/lib/user-context.ts` (also used by team orders and tests).
+- Scope helpers (`src/components/admin/ops/scope.ts`): `kitchenWhere`, `inScope`, `kitchensFor` handle multi-kitchen scopes; applied to
+  orders, kitchen, dispatch manifest, inventory (via `pickKitchen`) and PO detail. **Not yet:** CSV exports and reports (WP-10 owns them).
+- Escalation: `canGrantRole` requires holding every permission of the target base role; `ungrantable()` guards role edits and
+  custom-role assignment; only SUPER_ADMIN has `roles.edit`; kitchen-scoped editors can't widen scopes.
+- `LoginEvent` written from a Better Auth `after` hook (`src/server/login-events.ts`) for email, phone OTP, TOTP and backup-code sign-ins.
+- UI: `/admin/roles` (base-role grids, custom roles, create), `/admin/roles/[id]` (permission grid editor, users), `/admin/staff`
+  (table), `/admin/staff/[id]` (role, custom role, scope, effective permissions, sessions with revoke one/all, sign-in activity, recovery).
+- Sidebar: every planned route is registered in `nav.ts` with `ready: false` (hidden). A unit test fails if a ready entry has no page or a
+  not-ready entry gains one — the building package flips `ready` (the only edit allowed in `nav.ts`).
+- Tests: `tests/unit/rbac-granular.test.ts` (frozen legacy snapshot = system grants for every role × key, custom roles, escalation, nav
+  registry), `tests/integration/access.test.ts` (role CRUD guards, assignment escalation, scope isolation, session revoke, login events),
+  `e2e/permissions.spec.ts` (super admin grants a chef inventory view through a custom role; ops can't open the role editor).
+- **Deferred:** email invite links (token, 48 h) — still temporary passwords, because email sending isn't configured (no Resend key);
+  build when the email domain is verified.
+
 **Owns:**
 - `src/lib/permissions.ts` → `src/lib/permissions/{index,registry,system,legacy}.ts` (keep a re-export at the old path)
 - `src/lib/auth.ts` (`requirePermission`/`can` signature)

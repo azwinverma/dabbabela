@@ -15,24 +15,24 @@ import { SpendForm } from "./SpendForm";
 export const metadata = { title: "Reports" };
 
 const EXPORTS: { type: string; label: string; perm: Parameters<typeof can>[1] }[] = [
-  { type: "orders", label: "Orders", perm: "reports" },
-  { type: "order-items", label: "Order items", perm: "reports" },
-  { type: "dish-sales", label: "Dish sales", perm: "reports" },
-  { type: "subscriptions", label: "Meal plans", perm: "reports" },
+  { type: "orders", label: "Orders", perm: "reports.export" },
+  { type: "order-items", label: "Order items", perm: "reports.export" },
+  { type: "dish-sales", label: "Dish sales", perm: "reports.export" },
+  { type: "subscriptions", label: "Meal plans", perm: "reports.export" },
   { type: "payments", label: "Payments", perm: "payments.view" },
-  { type: "refunds", label: "Refunds", perm: "refunds.request" },
-  { type: "ledger", label: "Credit ledger", perm: "refunds.request" },
-  { type: "invoices", label: "Invoices", perm: "invoices" },
-  { type: "customers", label: "Customers", perm: "customers" },
-  { type: "stock", label: "Stock movements", perm: "inventory" },
+  { type: "refunds", label: "Refunds", perm: "refunds.view" },
+  { type: "ledger", label: "Credit ledger", perm: "refunds.view" },
+  { type: "invoices", label: "Invoices", perm: "invoices.view" },
+  { type: "customers", label: "Customers", perm: "customers.view" },
+  { type: "stock", label: "Stock movements", perm: "inventory.export" },
 ];
 
 export default async function Reports({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  const user = await requirePermission("reports");
+  const user = await requirePermission("reports.view");
   const sp = await searchParams;
   const { from, to } = readRange(sp, 30);
   const r = { from, to };
-  const money = can(user.role, "dashboard.finance");
+  const money = can(user, "analytics.view");
   const where = { deliveryDate: { gte: dateOnly(from), lte: dateOnly(to) }, status: { in: REVENUE_STATUSES } };
   const [sales, cash, boxes, series, byZone, byCompany, byKitchen, bySource, spend] = await Promise.all([
     salesSummary(r),
@@ -189,7 +189,7 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
         <Panel title="CSV exports" className="print:hidden">
           <p className="mb-3 text-xs text-ink-mute">For the selected dates. Phone numbers and emails are only included if your role may see customer contact details. Amounts are in rupees.</p>
           <div className="flex flex-wrap gap-2">
-            {EXPORTS.filter((e) => can(user.role, e.perm)).map((e) => (
+            {EXPORTS.filter((e) => can(user, e.perm)).map((e) => (
               <Link key={e.type} href={`/api/admin/export/${e.type}?${qs}`} prefetch={false} className="rounded-lg border border-ink-line bg-white px-3 py-1.5 text-sm font-semibold hover:border-ink">
                 ↓ {e.label}
               </Link>

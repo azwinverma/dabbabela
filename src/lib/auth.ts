@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { Role } from "@prisma/client";
 import { db } from "./db";
+import { CURRENT_USER_INCLUDE, toCurrentUser } from "./user-context";
 import { auth } from "@/server/auth";
 import { getSettings } from "./settings";
 import { can, isStaffRole, type Permission } from "./permissions";
@@ -20,16 +21,12 @@ export const getCurrentUser = cache(async () => {
     return null;
   }
   if (!session) return null;
-  const user = await db.user.findUnique({
-    where: { id: session.user.id },
-    include: {
-      membership: { include: { company: true, officeLocation: true } },
-      addresses: { where: { archivedAt: null }, orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }], include: { zone: true } },
-    },
-  });
+  const user = await db.user.findUnique({ where: { id: session.user.id }, include: CURRENT_USER_INCLUDE });
   if (!user || !user.isActive || user.deletedAt) return null;
-  return { ...user, sessionId: session.session.id };
+  return toCurrentUser(user, session.session.id);
 });
+
+export { kitchenScope } from "./user-context";
 
 export type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>;
 
@@ -65,7 +62,7 @@ async function enforce2fa(user: CurrentUser) {
 export async function requirePermission(perm: Permission) {
   const user = await getCurrentUser();
   if (!user) redirect("/login?next=/admin");
-  if (!can(user.role, perm)) redirect("/admin/forbidden");
+  if (!can(user, perm)) redirect("/admin/forbidden");
   await enforce2fa(user);
   return user;
 }
@@ -74,8 +71,15 @@ export async function requirePermission(perm: Permission) {
 export async function requireAnyPermission(...perms: Permission[]) {
   const user = await getCurrentUser();
   if (!user) redirect("/login?next=/admin");
-  if (!perms.some((p) => can(user.role, p))) redirect("/admin/forbidden");
+  if (!perms.some((p) => can(user, p))) redirect("/admin/forbidden");
   await enforce2fa(user);
+  return user;
+}
+
+/** Super admin only (roles editor, granting super admin). */
+export async function requireSuperAdmin() {
+  const user = await requirePermission("roles.view");
+  if (user.role !== "SUPER_ADMIN") redirect("/admin/forbidden");
   return user;
 }
 

@@ -14,12 +14,12 @@ import { companyOutstanding } from "@/server/corporate";
 import { CompanyForm, RegenerateCode, MemberRow, LocationForm, LocationToggle, ContractForm } from "../CompanyForms";
 
 export default async function CompanyPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; status?: string }> }) {
-  const user = await requirePermission("corporate");
+  const user = await requirePermission("corporate.view");
   const { id } = await params;
   const { tab = "overview", status } = await searchParams;
   const c = await db.company.findUnique({ where: { id }, include: { zone: { select: { name: true } } } });
   if (!c) notFound();
-  const pii = can(user.role, "customers.pii");
+  const pii = can(user, "customers.pii");
   const { start, end, ym } = monthRange(todayKTM().slice(0, 7));
   const [outstanding, members, locations, contracts, invoices, month, zones, slots, counts] = await Promise.all([
     companyOutstanding(c.id),
@@ -187,7 +187,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
               invoices.map((i) => (
                 <tr key={i.id}>
                   <Td>
-                    {can(user.role, "invoices") ? (
+                    {can(user, "invoices.view") ? (
                       <Link href={`/admin/invoices/${i.id}`} className="font-mono text-xs text-sindoor hover:underline">
                         {i.number}
                       </Link>

@@ -14,7 +14,7 @@ export const metadata = { title: "Kitchen tickets" };
 type Comp = { name: string; qty: number; substitutedFrom?: string };
 
 export default async function TicketsPage({ searchParams }: { searchParams: Promise<{ kitchen?: string; date?: string }> }) {
-  const user = await requirePermission("kitchen");
+  const user = await requirePermission("kitchen.view");
   const sp = await searchParams;
   const { kitchen } = await pickKitchen(user, sp.kitchen);
   if (!kitchen) return null;

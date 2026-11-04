@@ -10,7 +10,7 @@ import { TRANSITIONS } from "@/server/transitions";
 import { Badge } from "@/components/ui/Badge";
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
 import { PageHeader, Panel, KV, OrderBadge } from "@/components/admin/ui";
-import { piiFor } from "@/components/admin/ops/scope";
+import { piiFor, inScope } from "@/components/admin/ops/scope";
 import { ReasonForm } from "@/components/admin/ops/ReasonForm";
 import { adjustAction, cancelAction, changeStatusAction, refundAction } from "../actions";
 
@@ -42,9 +42,9 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
       feedback: true,
     },
   });
-  if (!o || (user.kitchenId && o.kitchenId !== user.kitchenId)) notFound();
-  const pii = piiFor(user.role);
-  const manage = can(user.role, "orders.manage");
+  if (!o || !inScope(user, o.kitchenId)) notFound();
+  const pii = piiFor(user);
+  const manage = can(user, "orders.edit");
   const next = TRANSITIONS[o.status].filter((s) => s !== "CANCELLED");
   const canCancel = TRANSITIONS[o.status].includes("CANCELLED");
   const refundable = o.paymentStatus === "PAID" || o.paymentStatus === "PARTIALLY_REFUNDED" ? o.customerShare - o.refundedAmount : 0;
@@ -64,7 +64,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
           </span>
         }
         actions={
-          can(user.role, "kitchen") && (
+          can(user, "kitchen.view") && (
             <Link href={`/admin/kitchen/labels?order=${o.id}`} className="rounded-lg border border-ink-line bg-white px-3 py-2 text-sm font-semibold hover:border-ink">
               Print label
             </Link>
@@ -181,7 +181,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
           <Panel title="Customer & drop-off">
             <KV
               items={[
-                ["Customer", can(user.role, "customers") ? <Link key="c" href={`/admin/customers/${o.user.id}`} className="text-akash underline">{o.user.name}</Link> : o.user.name],
+                ["Customer", can(user, "customers.view") ? <Link key="c" href={`/admin/customers/${o.user.id}`} className="text-akash underline">{o.user.name}</Link> : o.user.name],
                 ["Email", pii.email(o.user.email)],
                 ["Receiver", o.contactName],
                 ["Phone", pii.phone(o.contactPhone)],
@@ -210,7 +210,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                 ["Company pays", rs(o.companyShare)],
                 ["Customer pays", rs(o.customerShare)],
                 ["Refunded", o.refundedAmount ? rs(o.refundedAmount) : "—"],
-                ["Food cost", can(user.role, "dashboard.finance") ? rs(o.costTotal) : "—"],
+                ["Food cost", can(user, "analytics.view") ? rs(o.costTotal) : "—"],
               ]}
             />
             {!!o.adjustments.length && (
@@ -265,7 +265,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
             </Panel>
           )}
 
-          {can(user.role, "refunds.request") && refundable > 0 && (
+          {can(user, "refunds.create") && refundable > 0 && (
             <Panel title="Request refund">
               <p className="mb-2 text-xs text-ink-mute">Up to {rs(refundable)}. Finance approves and processes with proof.</p>
               <ReasonForm action={refundAction.bind(null, o.id)} label="Request refund">

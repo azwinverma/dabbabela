@@ -12,17 +12,17 @@ import { REVENUE_STATUSES } from "@/server/transitions";
 export const dynamic = "force-dynamic";
 
 const PERM: Record<string, Permission> = {
-  orders: "reports",
-  "order-items": "reports",
-  "dish-sales": "reports",
-  subscriptions: "reports",
+  orders: "reports.export",
+  "order-items": "reports.export",
+  "dish-sales": "reports.export",
+  subscriptions: "reports.export",
   payments: "payments.view",
-  refunds: "refunds.request",
-  ledger: "refunds.request",
-  invoices: "invoices",
-  customers: "customers",
-  stock: "inventory",
-  privacy: "privacy",
+  refunds: "refunds.view",
+  ledger: "refunds.view",
+  invoices: "invoices.view",
+  customers: "customers.view",
+  stock: "inventory.export",
+  privacy: "privacy.view",
 };
 
 export async function GET(req: Request, { params }: { params: Promise<{ type: string }> }) {
@@ -30,11 +30,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ type: st
   const user = await requireStaff();
   const perm = PERM[type];
   if (!perm) return NextResponse.json({ error: "Unknown export" }, { status: 404 });
-  if (!can(user.role, perm)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!can(user, perm)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const url = new URL(req.url);
   const to = isValidISODate(url.searchParams.get("to") ?? "") ? url.searchParams.get("to")! : todayKTM();
   const from = isValidISODate(url.searchParams.get("from") ?? "") ? url.searchParams.get("from")! : addDays(to, -29);
-  const pii = can(user.role, "customers.pii");
+  const pii = can(user, "customers.pii");
   const phone = (p: string | null | undefined) => (pii ? (p ?? "") : maskPhone(p));
   const email = (e: string | null | undefined) => (pii ? (e ?? "") : maskEmail(e));
   const day = { gte: dateOnly(from), lte: dateOnly(to) };

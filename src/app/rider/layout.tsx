@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: "Rider", robots: { index: false, foll
 export const viewport: Viewport = { themeColor: "#27221D", width: "device-width", initialScale: 1 };
 
 export default async function RiderLayout({ children }: { children: React.ReactNode }) {
-  const user = await requirePermission("rider");
+  const user = await requirePermission("rider.view");
   return (
     <div className="min-h-dvh bg-paper">
       <header className="sticky top-0 z-20 flex items-center justify-between bg-ink px-4 py-3 text-paper">

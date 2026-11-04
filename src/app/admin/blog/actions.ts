@@ -8,7 +8,7 @@ import { done, fail, type ActionResult } from "@/lib/action";
 import { bool, lines, slugify, str } from "@/lib/utils";
 
 export async function savePost(id: string | null, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("content");
+  const user = await requirePermission("content.edit");
   const title = str(fd.get("title"));
   if (!title) return fail("Title is required", { title: "Required" });
   const slug = slugify(str(fd.get("slug")) || title);
@@ -36,7 +36,7 @@ export async function savePost(id: string | null, _prev: ActionResult, fd: FormD
 }
 
 export async function deletePost(id: string) {
-  const user = await requirePermission("content");
+  const user = await requirePermission("content.edit");
   const p = await db.post.delete({ where: { id } });
   await audit(user.id, "delete", "Post", id, p.title);
   revalidatePath("/admin/blog");

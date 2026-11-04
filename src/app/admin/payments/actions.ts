@@ -5,7 +5,7 @@ import { verifyManualPayment, rejectManualPayment } from "@/server/payments";
 import { db } from "@/lib/db";
 
 export async function verifyPaymentAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("payments.verify");
+  const user = await requirePermission("payments.approve");
   const id = String(fd.get("id") ?? "");
   const ref = String(fd.get("reference") ?? "").trim();
   if (!ref) return fail("Enter the bank transaction reference you matched");
@@ -20,7 +20,7 @@ export async function verifyPaymentAction(_: ActionResult, fd: FormData): Promis
 }
 
 export async function rejectPaymentAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("payments.verify");
+  const user = await requirePermission("payments.approve");
   const reason = String(fd.get("reason") ?? "").trim();
   if (!reason) return fail("Say why (e.g. no matching credit in the bank statement)");
   const p = await db.payment.findUnique({ where: { id: String(fd.get("id") ?? "") } });

@@ -10,7 +10,7 @@ import { deleteBanner, saveBanner } from "../actions";
 const ymd = (d: Date | null | undefined) => (d ? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kathmandu" }).format(d) : "");
 
 export default async function BannerEdit({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("marketing");
+  await requirePermission("marketing.view");
   const { id } = await params;
   const b = id === "new" ? null : await db.banner.findUnique({ where: { id } });
   if (id !== "new" && !b) notFound();

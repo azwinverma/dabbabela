@@ -10,7 +10,7 @@ import { f, FieldError } from "../_kit/form";
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export async function saveKitchen(id: string | null, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("rules", async (user) => {
+  return guarded("rules.edit", async (user) => {
     const name = f.str(fd, "name", 100);
     const code = f.str(fd, "code", 20).toUpperCase().replace(/[^A-Z0-9-]/g, "");
     if (!name) throw new FieldError("name", "Name is required");
@@ -28,7 +28,7 @@ export async function saveKitchen(id: string | null, _prev: ActionResult, fd: Fo
 }
 
 export async function saveSlot(kitchenId: string, id: string | null, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("rules", async (user) => {
+  return guarded("rules.edit", async (user) => {
     const startTime = f.str(fd, "startTime");
     const endTime = f.str(fd, "endTime");
     if (!TIME.test(startTime) || !TIME.test(endTime)) return fail("Times must be HH:MM (24h)");
@@ -42,7 +42,7 @@ export async function saveSlot(kitchenId: string, id: string | null, _prev: Acti
 }
 
 export async function saveCapacity(kitchenId: string, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("rules", async (user) => {
+  return guarded("rules.edit", async (user) => {
     const date = f.date(fd, "date");
     if (!date) return fail("Pick a date");
     const maxMeals = f.int(fd, "maxMeals", -1, -1, 100000);
@@ -58,7 +58,7 @@ export async function saveCapacity(kitchenId: string, _prev: ActionResult, fd: F
 }
 
 export async function deleteCapacity(id: string): Promise<ActionResult> {
-  return guarded("rules", async (user) => {
+  return guarded("rules.edit", async (user) => {
     const r = await db.kitchenCapacity.delete({ where: { id } });
     await audit({ actorId: user.id, action: "capacity.clear", entity: "Kitchen", entityId: r.kitchenId, before: r });
     return done();

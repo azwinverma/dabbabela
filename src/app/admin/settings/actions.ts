@@ -12,7 +12,7 @@ const METHODS: PaymentMethod[] = ["ESEWA", "KHALTI", "BANK_TRANSFER", "CASH", "C
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export async function updateSettings(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("settings", async (user) => {
+  return guarded("settings.edit", async (user) => {
     const before = await getSettings();
     const brandName = f.str(fd, "brandName", 60);
     if (!brandName) throw new FieldError("brandName", "Brand name is required");

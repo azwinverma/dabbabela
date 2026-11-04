@@ -18,7 +18,7 @@ function preview(v: unknown): string {
 }
 
 export default async function SectionPage({ params, searchParams }: { params: Promise<{ key: string }>; searchParams: Promise<{ locale?: string }> }) {
-  await requirePermission("content");
+  await requirePermission("content.view");
   const { key: raw } = await params;
   const key = decodeURIComponent(raw);
   const def = SECTION_MAP[key];

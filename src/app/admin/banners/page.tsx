@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { buttonClass } from "@/components/ui/Button";
 
 export default async function BannersPage() {
-  await requirePermission("marketing");
+  await requirePermission("marketing.view");
   const banners = await db.banner.findMany({ orderBy: [{ isActive: "desc" }, { placement: "asc" }, { sortOrder: "asc" }] });
   const now = new Date();
   const state = (b: (typeof banners)[number]) => (!b.isActive ? ["off", "neutral"] : b.startsAt && b.startsAt > now ? ["scheduled", "info"] : b.endsAt && b.endsAt < now ? ["ended", "neutral"] : ["live", "good"]) as [string, "neutral" | "info" | "good"];

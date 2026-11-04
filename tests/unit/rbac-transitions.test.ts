@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { can, canGrantRole, PERMISSIONS, STAFF_ROLES } from "@/lib/permissions";
+import { can, canGrantRole, LEGACY_MATRIX, STAFF_ROLES } from "@/lib/permissions";
 import { canTransition, TRANSITIONS } from "@/server/transitions";
 
 describe("RBAC matrix", () => {
   it("customers have no staff permissions", () => {
-    for (const p of Object.keys(PERMISSIONS) as (keyof typeof PERMISSIONS)[]) expect(can("CUSTOMER", p)).toBe(false);
+    for (const p of Object.keys(LEGACY_MATRIX) as (keyof typeof LEGACY_MATRIX)[]) expect(can("CUSTOMER", p)).toBe(false);
   });
   it("operations managers can't see finance or change settings", () => {
     expect(can("OPERATIONS_MANAGER", "orders.manage")).toBe(true);
@@ -14,7 +14,7 @@ describe("RBAC matrix", () => {
     expect(can("OPERATIONS_MANAGER", "invoices")).toBe(false);
   });
   it("riders only get the rider app", () => {
-    const perms = (Object.keys(PERMISSIONS) as (keyof typeof PERMISSIONS)[]).filter((p) => can("DELIVERY_AGENT", p));
+    const perms = (Object.keys(LEGACY_MATRIX) as (keyof typeof LEGACY_MATRIX)[]).filter((p) => can("DELIVERY_AGENT", p));
     expect(perms).toEqual(["rider"]);
   });
   it("content editors can't touch orders or money", () => {
@@ -28,7 +28,7 @@ describe("RBAC matrix", () => {
     expect(canGrantRole("OPERATIONS_MANAGER", "KITCHEN_STAFF")).toBe(false);
   });
   it("every staff role has at least one permission", () => {
-    for (const r of STAFF_ROLES) expect((Object.keys(PERMISSIONS) as (keyof typeof PERMISSIONS)[]).some((p) => can(r, p))).toBe(true);
+    for (const r of STAFF_ROLES) expect((Object.keys(LEGACY_MATRIX) as (keyof typeof LEGACY_MATRIX)[]).some((p) => can(r, p))).toBe(true);
   });
 });
 

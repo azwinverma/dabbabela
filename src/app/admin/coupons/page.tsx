@@ -10,7 +10,7 @@ import { ConfirmAction } from "@/components/admin/ConfirmAction";
 import { toggleCoupon } from "./actions";
 
 export default async function CouponsPage() {
-  await requirePermission("pricing");
+  await requirePermission("pricing.view");
   const coupons = await db.coupon.findMany({ orderBy: [{ isActive: "desc" }, { createdAt: "desc" }], include: { redemptions: { select: { amount: true } } } });
   const now = new Date();
   return (

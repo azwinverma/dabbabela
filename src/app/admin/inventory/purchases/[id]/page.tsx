@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { inScope } from "@/components/admin/ops/scope";
 import { db } from "@/lib/db";
 import { requirePermission } from "@/lib/auth";
 import { formatDay, formatStamp, isoDate, todayKTM } from "@/lib/dates";
@@ -14,10 +15,10 @@ export const metadata = { title: "Purchase order" };
 const TONE = { DRAFT: "neutral", SENT: "info", PARTIAL: "warn", RECEIVED: "good", CANCELLED: "bad" } as const;
 
 export default async function POPage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requirePermission("inventory");
+  const user = await requirePermission("inventory.view");
   const { id } = await params;
   const po = await db.purchaseOrder.findUnique({ where: { id }, include: { supplier: true, kitchen: { select: { name: true } }, lines: { include: { ingredient: { select: { name: true, unit: true, shelfLifeDays: true } } } } } });
-  if (!po || (user.kitchenId && po.kitchenId !== user.kitchenId)) notFound();
+  if (!po || !inScope(user, po.kitchenId)) notFound();
   const open = ["DRAFT", "SENT", "PARTIAL"].includes(po.status);
   const receipts = await db.stockMovement.findMany({ where: { reference: po.number, type: "RECEIPT" }, include: { ingredient: { select: { name: true } } }, orderBy: { createdAt: "desc" } });
   return (

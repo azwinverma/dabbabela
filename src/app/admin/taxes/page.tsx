@@ -33,7 +33,7 @@ function RuleForm({ r }: { r?: { id: string; name: string; rateBps: number; incl
 }
 
 export default async function TaxesPage() {
-  await requirePermission("pricing");
+  await requirePermission("pricing.view");
   const rules = await db.taxRule.findMany({ orderBy: { effectiveFrom: "desc" } });
   const today = todayKTM();
   const live = rules.find((r) => r.isActive && isoDate(r.effectiveFrom) <= today && (!r.effectiveTo || isoDate(r.effectiveTo) >= today));

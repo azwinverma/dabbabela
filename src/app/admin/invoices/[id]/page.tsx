@@ -8,7 +8,7 @@ import { IssueButton, PaymentForm, VoidForm, CreditNoteForm } from "../InvoiceFo
 import Link from "next/link";
 
 export default async function InvoicePage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("invoices");
+  await requirePermission("invoices.view");
   const { id } = await params;
   const inv = await db.invoice.findUnique({ where: { id }, include: { lines: true, company: true } });
   if (!inv) notFound();

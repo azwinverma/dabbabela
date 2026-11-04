@@ -9,7 +9,7 @@ import { pickKitchen } from "@/components/admin/ops/scope";
 export const metadata = { title: "Usage variance" };
 
 export default async function VariancePage({ searchParams }: { searchParams: Promise<{ kitchen?: string; from?: string; to?: string }> }) {
-  const user = await requirePermission("inventory");
+  const user = await requirePermission("inventory.view");
   const sp = await searchParams;
   const { kitchen } = await pickKitchen(user, sp.kitchen);
   if (!kitchen) return null;

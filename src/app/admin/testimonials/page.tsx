@@ -9,7 +9,7 @@ import { ConfirmAction } from "@/components/admin/ConfirmAction";
 import { promoteFeedback, toggleTestimonial } from "./actions";
 
 export default async function TestimonialsPage() {
-  await requirePermission("content");
+  await requirePermission("content.view");
   const [items, feedback] = await Promise.all([
     db.testimonial.findMany({ orderBy: [{ published: "desc" }, { sortOrder: "asc" }, { createdAt: "desc" }] }),
     db.feedback.findMany({ where: { publishConsent: true, comment: { not: null } }, orderBy: { createdAt: "desc" }, take: 30, include: { user: { select: { name: true } } } }),

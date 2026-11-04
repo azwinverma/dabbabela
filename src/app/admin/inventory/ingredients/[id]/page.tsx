@@ -12,7 +12,7 @@ import { MovementForm } from "../../MovementForm";
 export const metadata = { title: "Ingredient" };
 
 export default async function IngredientPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ kitchen?: string }> }) {
-  const user = await requirePermission("inventory");
+  const user = await requirePermission("inventory.view");
   const { id } = await params;
   const sp = await searchParams;
   const ing = await db.ingredient.findUnique({ where: { id }, include: { recipeLines: { include: { version: { include: { recipe: { include: { menuItem: { select: { name: true } } } } } } } } } });

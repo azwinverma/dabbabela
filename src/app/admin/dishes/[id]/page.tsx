@@ -15,7 +15,7 @@ import { RecipeEditor } from "../RecipeEditor";
 import { deleteDish, restoreRecipeVersion, saveDish, saveRecipe } from "../actions";
 
 export default async function DishPage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requirePermission("menu");
+  const user = await requirePermission("menu.view");
   const { id } = await params;
   const isNew = id === "new";
   const [dish, allergens, ingredients] = await Promise.all([
@@ -42,7 +42,7 @@ export default async function DishPage({ params }: { params: Promise<{ id: strin
   const ingAllergens = [...new Set((current?.ingredients ?? []).flatMap((l) => l.ingredient.allergenCodes))];
   const declared = new Set(allergens.filter((a) => has.get(a.id) === false).map((a) => a.code));
   const missing = ingAllergens.filter((c) => !declared.has(c));
-  const canRecipe = can(user.role, "recipes");
+  const canRecipe = can(user, "recipes.edit");
 
   return (
     <>

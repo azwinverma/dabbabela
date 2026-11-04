@@ -12,7 +12,7 @@ import { finishRouteAction } from "../../actions";
 export const dynamic = "force-dynamic";
 
 export default async function RiderRoute({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requirePermission("rider");
+  const user = await requirePermission("rider.view");
   const { id } = await params;
   const r = await db.deliveryRoute.findUnique({
     where: { id },

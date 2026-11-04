@@ -8,7 +8,7 @@ import { Input, Textarea, Select, Checkbox } from "@/components/ui/Fields";
 import { saveZone } from "../actions";
 
 export default async function ZonePage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("rules");
+  await requirePermission("rules.view");
   const { id } = await params;
   const isNew = id === "new";
   const [z, kitchens] = await Promise.all([isNew ? null : db.deliveryZone.findUnique({ where: { id } }), db.kitchen.findMany({ orderBy: { name: "asc" } })]);

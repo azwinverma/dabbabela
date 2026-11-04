@@ -38,7 +38,7 @@ function Diff({ before, after }: { before: unknown; after: unknown }) {
 }
 
 export default async function AuditPage({ searchParams }: { searchParams: Promise<{ q?: string; entity?: string; actor?: string; action?: string; from?: string; to?: string; page?: string }> }) {
-  await requirePermission("audit");
+  await requirePermission("audit.view");
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page) || 1);
   const from = sp.from && isValidISODate(sp.from) ? new Date(`${sp.from}T00:00:00+05:45`) : undefined;

@@ -11,7 +11,7 @@ import { deleteMedia, saveMediaMeta } from "./actions";
 const PER = 24;
 
 export default async function MediaPage({ searchParams }: { searchParams: Promise<{ page?: string; filter?: string }> }) {
-  await requirePermission("media");
+  await requirePermission("media.view");
   const sp = await searchParams;
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
   const where = sp.filter === "placeholder" ? { isPlaceholder: true } : sp.filter === "nocredit" ? { credit: null } : {};

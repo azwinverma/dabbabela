@@ -14,7 +14,7 @@ const DIETS = Object.keys(DIET_LABEL) as Diet[];
 const SOURCES: NutritionSource[] = ["NONE", "ESTIMATED", "VERIFIED"];
 
 export async function saveDish(id: string | null, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const name = f.str(fd, "name", 120);
     const category = f.str(fd, "category") as ItemCategory;
     const diet = f.str(fd, "diet") as Diet;
@@ -74,7 +74,7 @@ export type RecipeLineInput = { ingredientId: string; quantity: number; wastePct
 
 /** Save a recipe as a NEW immutable version and make it current. */
 export async function saveRecipe(menuItemId: string, input: { yieldPortions: number; method: string; notes: string; lines: RecipeLineInput[] }): Promise<ActionResult> {
-  return guarded("recipes", async (user) => {
+  return guarded("recipes.edit", async (user) => {
     const lines = (input.lines ?? []).filter((l) => l.ingredientId && Number(l.quantity) > 0);
     if (!lines.length) return fail("Add at least one ingredient with a quantity");
     if (new Set(lines.map((l) => l.ingredientId)).size !== lines.length) return fail("Each ingredient can appear once — combine the quantities");
@@ -110,7 +110,7 @@ export async function saveRecipe(menuItemId: string, input: { yieldPortions: num
 
 /** Make an older version current again (creates no new rows; history stays intact). */
 export async function restoreRecipeVersion(menuItemId: string, versionId: string): Promise<ActionResult> {
-  return guarded("recipes", async (user) => {
+  return guarded("recipes.edit", async (user) => {
     const v = await db.recipeVersion.findUnique({ where: { id: versionId }, include: { recipe: true } });
     if (!v || v.recipe.menuItemId !== menuItemId) return fail("Version not found");
     await db.recipe.update({ where: { id: v.recipeId }, data: { currentVersionId: v.id } });
@@ -122,7 +122,7 @@ export async function restoreRecipeVersion(menuItemId: string, versionId: string
 }
 
 export async function toggleDish(id: string): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const d = await db.menuItem.findUnique({ where: { id } });
     if (!d) return fail("Not found");
     await db.menuItem.update({ where: { id }, data: { isActive: !d.isActive } });
@@ -132,7 +132,7 @@ export async function toggleDish(id: string): Promise<ActionResult> {
 }
 
 export async function deleteDish(id: string): Promise<ActionResult> {
-  return guarded("menu", async (user) => {
+  return guarded("menu.edit", async (user) => {
     const [boxes, batches] = await Promise.all([db.boxItem.count({ where: { menuItemId: id } }), db.productionBatch.count({ where: { menuItemId: id } })]);
     if (boxes || batches) return fail(`Used in ${boxes} dabba(s) / ${batches} production batch(es). Archive it instead.`);
     const d = await db.menuItem.delete({ where: { id } });

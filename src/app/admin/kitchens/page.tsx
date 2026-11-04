@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/Fields";
 import { saveKitchen } from "./actions";
 
 export default async function KitchensPage() {
-  await requirePermission("rules");
+  await requirePermission("rules.view");
   const today = dateOnly(todayKTM());
   const kitchens = await db.kitchen.findMany({ orderBy: { createdAt: "asc" }, include: { slots: { orderBy: { sortOrder: "asc" } }, _count: { select: { zones: true } } } });
   const booked = await db.orderItem.groupBy({ by: ["orderId"], where: { order: { deliveryDate: today, status: { in: LIVE_STATUSES } } }, _sum: { quantity: true } });

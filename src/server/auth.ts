@@ -6,7 +6,9 @@ import { twoFactor } from "better-auth/plugins/two-factor";
 import { phoneNumber } from "better-auth/plugins/phone-number";
 import { db } from "@/lib/db";
 import { isNepalMobile, normalizeNepalPhone } from "@/lib/phone";
+import { createAuthMiddleware } from "better-auth/api";
 import { notify } from "./notify";
+import { LOGIN_PATHS, recordLoginAttempt } from "./login-events";
 
 export const AUTH_COOKIE_PREFIX = "dabba";
 
@@ -72,6 +74,12 @@ export const auth = betterAuth({
       "/phone-number/verify": { window: 300, max: 6 },
       "/two-factor/verify-totp": { window: 60, max: 6 },
     },
+  },
+  hooks: {
+    // Login activity (LoginEvent) for every sign-in attempt, success or failure.
+    after: createAuthMiddleware(async (ctx) => {
+      if (ctx.path && LOGIN_PATHS[ctx.path]) await recordLoginAttempt(ctx as unknown as Parameters<typeof recordLoginAttempt>[0]);
+    }),
   },
   databaseHooks: {
     session: {

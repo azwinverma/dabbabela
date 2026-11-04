@@ -16,12 +16,12 @@ import { assignAction, completeRouteAction, handInAction, moveAction, resolveFai
 export const metadata = { title: "Dispatch" };
 
 export default async function DispatchPage({ searchParams }: { searchParams: Promise<{ kitchen?: string; date?: string; slot?: string }> }) {
-  const user = await requirePermission("dispatch");
+  const user = await requirePermission("dispatch.view");
   const sp = await searchParams;
   const { kitchens, kitchen } = await pickKitchen(user, sp.kitchen);
   if (!kitchen) return <PageHeader title="Dispatch" description="Add a kitchen first." />;
   const date = pickDate(sp.date);
-  const pii = piiFor(user.role);
+  const pii = piiFor(user);
   const [groups, slots, zones, riders, routes, failed] = await Promise.all([
     manifest(kitchen.id, date, sp.slot || null),
     db.deliverySlot.findMany({ where: { kitchenId: kitchen.id, isActive: true }, orderBy: { sortOrder: "asc" } }),

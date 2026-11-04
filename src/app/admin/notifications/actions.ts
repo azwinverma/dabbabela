@@ -10,7 +10,7 @@ import { f } from "../_kit/form";
 const CHANNELS = ["EMAIL", "SMS", "IN_APP"];
 
 export async function saveTemplate(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("settings", async (user) => {
+  return guarded("notifications.edit", async (user) => {
     const key = f.str(fd, "key") as TemplateKey;
     const channel = f.str(fd, "channel");
     const locale = f.str(fd, "locale") === "ne" ? "ne" : "en";
@@ -30,7 +30,7 @@ export async function saveTemplate(_prev: ActionResult, fd: FormData): Promise<A
 }
 
 export async function resetTemplate(id: string): Promise<ActionResult> {
-  return guarded("settings", async (user) => {
+  return guarded("notifications.edit", async (user) => {
     const t = await db.notificationTemplate.delete({ where: { id } });
     await audit({ actorId: user.id, action: "notify.template_reset", entity: "NotificationTemplate", entityId: id, before: t });
     return done("Back to the default text");
@@ -38,7 +38,7 @@ export async function resetTemplate(id: string): Promise<ActionResult> {
 }
 
 export async function retryMessages(ids: string[]): Promise<ActionResult> {
-  return guarded("settings", async (user) => {
+  return guarded("notifications.edit", async (user) => {
     const list = ids.length ? ids : (await db.outboundMessage.findMany({ where: { status: "FAILED" }, select: { id: true }, take: 100 })).map((m) => m.id);
     if (!list.length) return fail("Nothing to retry");
     await db.outboundMessage.updateMany({ where: { id: { in: list }, status: { in: ["FAILED", "SKIPPED"] } }, data: { status: "QUEUED", attempts: 0, sendAfter: new Date() } });

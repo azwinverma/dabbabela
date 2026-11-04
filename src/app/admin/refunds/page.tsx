@@ -15,10 +15,10 @@ import { ApproveButton, RejectForm, ProcessForm, AdjustForm } from "./RefundForm
 export const metadata = { title: "Refunds & credit" };
 
 export default async function Refunds({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  const user = await requirePermission("refunds.request");
+  const user = await requirePermission("refunds.view");
   const sp = await searchParams;
   const view = sp.view ?? "REQUESTED";
-  const approver = can(user.role, "refunds.approve");
+  const approver = can(user, "refunds.approve");
   const counts = await db.refund.groupBy({ by: ["status"], _count: true });
   const n = (s: string) => counts.find((c) => c.status === s)?._count ?? 0;
   const tabs = [
@@ -30,7 +30,7 @@ export default async function Refunds({ searchParams }: { searchParams: Promise<
     <div>
       <PageHeader title="Refunds & credit" description="Requested → approved by finance → processed with proof. Money is never marked returned without a transaction reference or receipt (wallet credit is posted to the ledger)." />
       <Tabs tabs={tabs} current={view} />
-      {view === "ledger" ? <Ledger q={sp.q} canAdjust={approver} pii={can(user.role, "customers.pii")} /> : <Queue status={view as RefundStatus} approver={approver} />}
+      {view === "ledger" ? <Ledger q={sp.q} canAdjust={approver} pii={can(user, "customers.pii")} /> : <Queue status={view as RefundStatus} approver={approver} />}
     </div>
   );
 }

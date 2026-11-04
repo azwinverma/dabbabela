@@ -14,7 +14,7 @@ const STAGES: LeadStatus[] = ["NEW", "CONTACTED", "TRIAL", "PROPOSAL", "WON", "L
 const NEXT: Partial<Record<LeadStatus, LeadStatus>> = { NEW: "CONTACTED", CONTACTED: "TRIAL", TRIAL: "PROPOSAL", PROPOSAL: "WON" };
 
 export default async function Leads() {
-  await requirePermission("leads");
+  await requirePermission("leads.view");
   const leads = await db.corporateLead.findMany({ orderBy: [{ nextFollowUp: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }], take: 300 });
   const today = todayKTM();
   return (

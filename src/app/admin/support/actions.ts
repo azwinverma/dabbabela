@@ -11,7 +11,7 @@ import { guard } from "@/components/admin/ops/scope";
 
 export async function replyAction(ticketId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("support");
+    const user = await requirePermission("support.edit");
     const internal = fd.get("internal") === "on";
     await replyTicket(ticketId, { id: user.id, isStaff: true }, String(fd.get("body") ?? ""), internal);
     revalidatePath(`/admin/support/${ticketId}`);
@@ -21,7 +21,7 @@ export async function replyAction(ticketId: string, _p: ActionResult, fd: FormDa
 
 export async function ticketStatusAction(ticketId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("support");
+    const user = await requirePermission("support.edit");
     const status = String(fd.get("status")) as (typeof TICKET_STATUSES)[number];
     if (!TICKET_STATUSES.includes(status)) return fail("Pick a status");
     const assignee = String(fd.get("assignedToId") ?? "");
@@ -36,7 +36,7 @@ export async function ticketStatusAction(ticketId: string, _p: ActionResult, fd:
 
 export async function messageFlagAction(id: string, flag: "read" | "archive" | "unarchive"): Promise<ActionResult> {
   return guard(async () => {
-    await requirePermission("support");
+    await requirePermission("support.edit");
     await db.contactMessage.update({ where: { id }, data: flag === "read" ? { isRead: true } : { isArchived: flag === "archive", isRead: true } });
     revalidatePath("/admin/messages");
     return done();
@@ -45,7 +45,7 @@ export async function messageFlagAction(id: string, flag: "read" | "archive" | "
 
 export async function messageToTicketAction(id: string): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("support");
+    const user = await requirePermission("support.edit");
     const m = await db.contactMessage.findUniqueOrThrow({ where: { id } });
     if (m.ticketId) redirect(`/admin/support/${m.ticketId}`);
     const linked = await db.user.findUnique({ where: { email: m.email.toLowerCase() }, select: { id: true } });

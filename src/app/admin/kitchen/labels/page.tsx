@@ -19,7 +19,7 @@ function alias(name: string) {
 }
 
 export default async function LabelsPage({ searchParams }: { searchParams: Promise<{ kitchen?: string; date?: string; order?: string; slot?: string }> }) {
-  const user = await requirePermission("kitchen");
+  const user = await requirePermission("kitchen.view");
   const sp = await searchParams;
   const { kitchen } = await pickKitchen(user, sp.kitchen);
   if (!kitchen) return null;

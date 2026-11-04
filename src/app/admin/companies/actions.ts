@@ -18,7 +18,7 @@ const int = (fd: FormData, k: string, min = 0, max = 100000) => {
 const moneyOrNull = (fd: FormData, k: string) => (s(fd, k) ? parseRupees(s(fd, k)) : null);
 
 export async function saveCompanyAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("corporate");
+  const user = await requirePermission("corporate.edit");
   const id = s(fd, "id");
   const name = s(fd, "name");
   if (!name) return fail("Company name is required", { name: "Required" });
@@ -65,7 +65,7 @@ export async function saveCompanyAction(_: ActionResult, fd: FormData): Promise<
 }
 
 export async function regenerateCodeAction(id: string) {
-  const user = await requirePermission("corporate");
+  const user = await requirePermission("corporate.edit");
   const code = randomCode(6);
   await db.company.update({ where: { id }, data: { joinCode: code } });
   await audit({ actorId: user.id, action: "company.join_code", entity: "Company", entityId: id, summary: "Join code regenerated" });
@@ -73,7 +73,7 @@ export async function regenerateCodeAction(id: string) {
 }
 
 export async function updateMemberAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("corporate");
+  const user = await requirePermission("corporate.edit");
   const m = await db.companyMember.findUnique({ where: { id: s(fd, "memberId") } });
   if (!m) return fail("Member not found");
   const status = s(fd, "status") as "PENDING" | "ACTIVE" | "REMOVED";
@@ -97,7 +97,7 @@ export async function updateMemberAction(_: ActionResult, fd: FormData): Promise
 }
 
 export async function addLocationAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("corporate");
+  const user = await requirePermission("corporate.edit");
   const companyId = s(fd, "companyId");
   const name = s(fd, "name");
   const area = s(fd, "area");
@@ -114,14 +114,14 @@ export async function addLocationAction(_: ActionResult, fd: FormData): Promise<
 }
 
 export async function toggleLocationAction(id: string, active: boolean) {
-  const user = await requirePermission("corporate");
+  const user = await requirePermission("corporate.edit");
   await db.officeLocation.update({ where: { id }, data: { isActive: active } });
   await audit({ actorId: user.id, action: "company.location.toggle", entity: "OfficeLocation", entityId: id, after: { isActive: active } });
   return { ok: true };
 }
 
 export async function saveContractAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("corporate");
+  const user = await requirePermission("corporate.edit");
   const title = s(fd, "title");
   const startsOn = s(fd, "startsOn");
   if (!title || !isValidISODate(startsOn)) return fail("Title and start date are required");

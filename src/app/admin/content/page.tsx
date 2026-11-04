@@ -10,7 +10,7 @@ import { HomeLayoutEditor } from "./HomeLayoutEditor";
 import { saveLayoutAction } from "./actions";
 
 export default async function ContentPage() {
-  await requirePermission("content");
+  await requirePermission("content.view");
   const [rows, layout] = await Promise.all([db.contentSection.findMany({ select: { key: true, locale: true, version: true, publishedAt: true, draft: true } }), getHomeLayout()]);
   const groups = [...new Set(SECTIONS.map((s) => s.group))];
   const status = (key: string, locale: string) => rows.find((r) => r.key === key && r.locale === locale);

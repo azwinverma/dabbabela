@@ -12,7 +12,7 @@ import { LEAD_STATUS } from "@/lib/labels";
 const s = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 
 export async function saveLeadAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("leads");
+  const user = await requirePermission("leads.edit");
   const id = s(fd, "id");
   const lead = await db.corporateLead.findUnique({ where: { id } });
   if (!lead) return fail("Lead not found");
@@ -35,7 +35,7 @@ export async function saveLeadAction(_: ActionResult, fd: FormData): Promise<Act
 }
 
 export async function setLeadStatusAction(id: string, status: LeadStatus) {
-  const user = await requirePermission("leads");
+  const user = await requirePermission("leads.edit");
   await db.corporateLead.update({ where: { id }, data: { status } });
   await audit({ actorId: user.id, action: "lead.status", entity: "CorporateLead", entityId: id, after: { status } });
   return { ok: true };
@@ -43,7 +43,7 @@ export async function setLeadStatusAction(id: string, status: LeadStatus) {
 
 /** Won lead → company account (discount and quote carried over as notes; billing set on the company page). */
 export async function convertLeadAction(id: string) {
-  const user = await requirePermission("corporate");
+  const user = await requirePermission("corporate.edit");
   const lead = await db.corporateLead.findUnique({ where: { id } });
   if (!lead) return { ok: false, message: "Lead not found" };
   if (lead.companyId) return { ok: false, message: "Already converted" };

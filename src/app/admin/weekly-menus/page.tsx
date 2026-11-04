@@ -10,7 +10,7 @@ import { createWeekMenu } from "./actions";
 const TONE = { DRAFT: "warn", PUBLISHED: "good", ARCHIVED: "neutral" } as const;
 
 export default async function WeeklyMenusPage() {
-  await requirePermission("menu");
+  await requirePermission("menu.view");
   const thisWeek = weekStartOf(todayKTM());
   const menus = await db.weeklyMenu.findMany({
     orderBy: [{ isDefault: "desc" }, { weekStart: "desc" }, { updatedAt: "desc" }],

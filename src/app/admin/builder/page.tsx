@@ -10,7 +10,7 @@ import { ConfirmAction } from "@/components/admin/ConfirmAction";
 import { addOption, addRule, deleteGroup, deleteRule, removeOption, saveBuilderLimits, saveGroup } from "./actions";
 
 export default async function BuilderPage() {
-  await requirePermission("menu");
+  await requirePermission("menu.view");
   const [groups, dishes, rules, s] = await Promise.all([
     db.customizationGroup.findMany({ orderBy: { sortOrder: "asc" }, include: { options: { orderBy: { sortOrder: "asc" }, include: { menuItem: true } } } }),
     db.menuItem.findMany({ where: { isActive: true }, orderBy: [{ category: "asc" }, { name: "asc" }] }),

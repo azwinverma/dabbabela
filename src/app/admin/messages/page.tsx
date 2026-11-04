@@ -9,9 +9,9 @@ import { piiFor } from "@/components/admin/ops/scope";
 export const metadata = { title: "Contact messages" };
 
 export default async function MessagesPage({ searchParams }: { searchParams: Promise<{ view?: string }> }) {
-  const user = await requirePermission("support");
+  const user = await requirePermission("support.view");
   const { view = "inbox" } = await searchParams;
-  const pii = piiFor(user.role);
+  const pii = piiFor(user);
   const msgs = await db.contactMessage.findMany({ where: { isArchived: view === "archive" }, orderBy: { createdAt: "desc" }, take: 200 });
   return (
     <div>

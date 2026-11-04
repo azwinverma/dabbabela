@@ -9,7 +9,7 @@ import { CompleteForm, RejectForm } from "./PrivacyForms";
 export const metadata = { title: "Privacy requests" };
 
 export default async function Privacy() {
-  await requirePermission("privacy");
+  await requirePermission("privacy.view");
   const [open, done] = await Promise.all([
     db.dataRequest.findMany({ where: { status: "OPEN" }, include: { user: { select: { id: true, name: true, email: true, deletedAt: true } } }, orderBy: { createdAt: "asc" } }),
     db.dataRequest.findMany({ where: { status: { not: "OPEN" } }, include: { user: { select: { id: true, name: true } } }, orderBy: { completedAt: "desc" }, take: 30 }),

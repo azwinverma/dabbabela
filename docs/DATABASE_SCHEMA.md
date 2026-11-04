@@ -66,12 +66,23 @@ Ingredient 1─* StockMovement *─1 Kitchen
 |---|---|
 | `20261103091318_init` | Full schema |
 | `20261104043242_user_allergies_default` | `User.allergies` default `[]` (Better Auth inserts without it) |
+| `20261104100940_super_admin_foundation` | WP-00: 34 new tables + new columns/enum values for the Super Admin Control Center (additive only) |
 
-## Planned: Super Admin foundation migration (not applied yet)
-Status: **planned**. It's tracked as WP-00 in [ADMIN_IMPLEMENTATION_TRACKER.md](ADMIN_IMPLEMENTATION_TRACKER.md), with field-level detail there.
-It's additive only (new tables, nullable or defaulted columns, new enum values `StockMovementType.TRANSFER_OUT/TRANSFER_IN`).
+## Super Admin foundation (WP-00, applied 2026-11-04)
+Migration `20261104100940_super_admin_foundation`. Additive only: new tables, nullable or defaulted columns, new enum values
+`StockMovementType.TRANSFER_OUT/TRANSFER_IN` (the generated SQL has no DROP/RENAME/SET NOT NULL). Field-level detail is in
+[ADMIN_IMPLEMENTATION_TRACKER.md](ADMIN_IMPLEMENTATION_TRACKER.md) and `prisma/schema.prisma` (section "Super Admin foundation").
 
-| Area | Planned models | Planned columns on existing models |
+**Status of use:** the tables exist now. RBAC tables (`StaffRole`, `StaffScope`, `LoginEvent`) are used by WP-01. Every other
+table is created but stays empty/unused until its work package ships (see the tracker) — nothing reads them yet.
+
+**Backfill** (`src/server/foundation.ts`, `ensureFoundationData()`, idempotent): preset custom roles (Kitchen manager,
+Delivery manager), 10 expense categories, one `MealPlanPrice` per plan (and links subscriptions sold at that price), `NavItem`
+rows mirroring the header/footer, `MealCategory` from dabba tags. It runs from `seedCatalog()` (setup / `npm run db:seed`),
+`npm run db:foundation` (part of `vercel-build`, after `prisma migrate deploy`) and the "Install missing presets" button on
+`/admin/roles`. Nav and categories are seeded once per database (marker `Setting` `foundation.v1`), so later admin deletions stick.
+
+| Area | Models | Columns on existing models |
 |---|---|---|
 | RBAC & sessions | `StaffRole`, `StaffScope`, `LoginEvent` | `User.staffRoleId` |
 | Attribution | — | `User.acquisitionSource`, `User.attribution`; `Order.attribution`, `Order.campaignId`; `Subscription.campaignId` |

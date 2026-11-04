@@ -12,7 +12,7 @@ import { draftPurchasesAction } from "../actions";
 export const metadata = { title: "Ingredient requirements" };
 
 export default async function RequirementsPage({ searchParams }: { searchParams: Promise<{ kitchen?: string; date?: string; buffer?: string }> }) {
-  const user = await requirePermission("kitchen");
+  const user = await requirePermission("kitchen.view");
   const sp = await searchParams;
   const { kitchens, kitchen } = await pickKitchen(user, sp.kitchen);
   if (!kitchen) return null;
@@ -28,7 +28,7 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
       <div className="mb-5 grid gap-3 sm:grid-cols-3">
         <StatCard label="Ingredients needed" value={req.rows.length} sub={`${f.meals} meals · ${buffer}% buffer · ${formatDay(date)}`} />
         <StatCard label="Short" value={short.length} tone={short.length ? "warn" : "good"} sub={short.length ? "need buying before cooking" : "stock covers the day"} />
-        <StatCard label="Ingredient cost (est.)" value={can(user.role, "dashboard.finance") || can(user.role, "inventory") ? rs(req.estimatedCost) : "—"} sub="at latest purchase prices" />
+        <StatCard label="Ingredient cost (est.)" value={can(user, "analytics.view") || can(user, "inventory.view") ? rs(req.estimatedCost) : "—"} sub="at latest purchase prices" />
       </div>
       {req.missingRecipe.length > 0 && <p className="mb-4 rounded-lg border border-besar/50 bg-besar-light px-3 py-2 text-sm">No costed recipe for: {req.missingRecipe.join(", ")} — their ingredients aren't counted.</p>}
       <Table>
@@ -56,7 +56,7 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
           {!req.rows.length && <EmptyRow colSpan={6}>No meals booked for this day.</EmptyRow>}
         </tbody>
       </Table>
-      {short.length > 0 && can(user.role, "inventory") && (
+      {short.length > 0 && can(user, "inventory.edit") && (
         <ActionForm action={draftPurchasesAction} className="mt-4">
           <input type="hidden" name="kitchenId" value={kitchen.id} />
           <input type="hidden" name="date" value={date} />

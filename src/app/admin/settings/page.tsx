@@ -39,7 +39,7 @@ function Status({ ok, label, note }: { ok: boolean; label: string; note?: string
 }
 
 export default async function SettingsPage() {
-  await requirePermission("settings");
+  await requirePermission("settings.view");
   const s = await getSettings();
   const dbOk = await db.$queryRaw`SELECT 1`.then(() => true).catch(() => false);
   const sandbox = !process.env.ESEWA_SECRET_KEY;

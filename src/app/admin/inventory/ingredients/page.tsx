@@ -10,7 +10,7 @@ import { IngredientForm } from "../IngredientForm";
 export const metadata = { title: "Ingredients" };
 
 export default async function IngredientsPage({ searchParams }: { searchParams: Promise<{ q?: string; kitchen?: string }> }) {
-  await requirePermission("inventory");
+  await requirePermission("inventory.view");
   const sp = await searchParams;
   const [rows, suppliers, allergens] = await Promise.all([
     db.ingredient.findMany({ where: sp.q ? { name: { contains: sp.q, mode: "insensitive" } } : {}, include: { supplier: { select: { name: true } }, _count: { select: { recipeLines: true } } }, orderBy: [{ isActive: "desc" }, { name: "asc" }] }),

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { dateOnly, isoDate, monthRange } from "@/lib/dates";
 import type { CurrentUser } from "@/lib/auth";
+import { CURRENT_USER_INCLUDE, toCurrentUser } from "@/lib/user-context";
 import { REVENUE_STATUSES } from "./transitions";
 import { notify } from "./notify";
 import { placeCartOrder } from "./orders";
@@ -209,12 +210,9 @@ export async function commitImport(companyId: string, inviter: { id: string; nam
 async function loadMemberUser(userId: string): Promise<CurrentUser> {
   const u = await db.user.findUniqueOrThrow({
     where: { id: userId },
-    include: {
-      membership: { include: { company: true, officeLocation: true } },
-      addresses: { where: { archivedAt: null }, orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }], include: { zone: true } },
-    },
+    include: CURRENT_USER_INCLUDE,
   });
-  return { ...u, sessionId: "team-order" };
+  return toCurrentUser(u, "team-order");
 }
 
 /** Delivery address for a member's team order: their office-location address (created if missing), else their default address. */

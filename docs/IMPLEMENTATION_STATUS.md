@@ -9,12 +9,12 @@ domain, merchant activation or production infrastructure yet.
 |---|---|
 | `npm run typecheck` | ✅ 0 errors |
 | `npm run lint` | ✅ 0 errors (8 warnings: unused vars, `<img>` for QR codes, anonymous default export) |
-| `npm test` (Vitest unit + integration, real Postgres, fresh schema per run) | ✅ 73 / 73 in 8 files |
+| `npm test` (Vitest unit + integration, real Postgres, fresh schema per run) | ✅ 96 / 96 in 10 files |
 | `npm run build` (production) | ✅ all routes compile |
-| `npm run test:e2e` (Playwright, Chromium desktop + Pixel 7 for public pages, against the production build) | ✅ 38 / 38 |
+| `npm run test:e2e` (Playwright, Chromium desktop + Pixel 7 for public pages, against the production build) | ✅ 40 / 40 |
 | HTTP smoke of every owned route per area (owner + role accounts) | ✅ 200, no server errors |
 
-Tests by file: `money`, `pricing`, `calendar`, `rbac-transitions` (unit); `commerce` (orders, payments,
+Tests by file: `money`, `pricing`, `calendar`, `rbac-transitions`, `rbac-granular` (unit); `access` (custom roles, escalation, scopes, sessions, login events, foundation backfill); `commerce` (orders, payments,
 plans, corporate split, lock, disruption), `ops` (kitchen BOM, batch usage idempotency, PO receiving, OTP,
 cash), `finance` (invoices, VAT, void, credit note, tenant isolation, privacy deletion), `catalog` (recipe
 versions, menu publish re-assignment, CMS publish/rollback/locale fallback, staff role limits).
@@ -30,6 +30,14 @@ E2E by file: `public`, `order-flow`, `permissions`, `plans`, `cms`, `fulfilment`
 | 3 Operations (tickets, BOM, forecast, stock, dispatch, rider, admin order tools) | ✅ |
 | 4 Corporate & finance (org accounts, team orders, invoices, gateway adapters/sandbox, reconciliation, exports) | ✅ (gateways sandbox only) |
 | 5 Polish & launch readiness | 🟡 brand assets, SEO, docs, E2E done; audits & content review pending (below) |
+
+## Super Admin Control Center (2026-11-04 brief)
+Tracked in [ADMIN_IMPLEMENTATION_TRACKER.md](ADMIN_IMPLEMENTATION_TRACKER.md); audit in [FEATURE_AUDIT.md](FEATURE_AUDIT.md).
+| Package | Status |
+|---|---|
+| WP-00 foundation schema (34 tables, additive) + idempotent backfill | ✅ applied locally; runs on Vercel via `vercel-build` |
+| WP-01 granular RBAC (module × action), custom roles, kitchen/company scopes, login activity, session revoke | ✅ (email invite links deferred: no email provider yet) |
+| WP-02 … WP-20 | ⬜ not started — their tables exist but nothing reads them yet |
 
 ## Feature status
 | Area | Status | Notes |

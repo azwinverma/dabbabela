@@ -26,13 +26,13 @@ import {
 export const metadata = { title: "Dashboard" };
 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  const user = await requirePermission("dashboard");
+  const user = await requirePermission("dashboard.view");
   const sp = await searchParams;
   const { from, to } = readRange(sp, 30);
   const kitchens = await db.kitchen.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { createdAt: "asc" } });
   const kitchenId = sp.kitchen && kitchens.some((k) => k.id === sp.kitchen) ? sp.kitchen : (user.kitchenId ?? null);
   const r = { from, to, kitchenId };
-  const money = can(user.role, "dashboard.finance");
+  const money = can(user, "analytics.view");
   const today = todayKTM();
 
   const [sales, cash, cust, cost, waste, delivery, boxes, dishes, series, today_, tomorrow, al, coh, acq] = await Promise.all([
@@ -53,12 +53,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   ]);
 
   const alertRows = [
-    al.transfers && { n: al.transfers, text: "bank transfers waiting for verification", href: "/admin/payments?view=verify", show: can(user.role, "payments.view") },
-    al.stuckPending && { n: al.stuckPending, text: "orders stuck awaiting payment for 2h+", href: "/admin/payments?status=PENDING", show: can(user.role, "payments.view") },
-    al.lowStock && { n: al.lowStock, text: "ingredients below safety stock", href: "/admin/inventory", show: can(user.role, "inventory") },
+    al.transfers && { n: al.transfers, text: "bank transfers waiting for verification", href: "/admin/payments?view=verify", show: can(user, "payments.view") },
+    al.stuckPending && { n: al.stuckPending, text: "orders stuck awaiting payment for 2h+", href: "/admin/payments?status=PENDING", show: can(user, "payments.view") },
+    al.lowStock && { n: al.lowStock, text: "ingredients below safety stock", href: "/admin/inventory", show: can(user, "inventory.view") },
     al.failedJobs && { n: al.failedJobs, text: "scheduled jobs failed in the last 24h", href: "/admin/audit", show: true },
     al.failedMessages && { n: al.failedMessages, text: "emails/SMS failed after retries", href: "/admin/notifications", show: true },
-    al.openTickets && { n: al.openTickets, text: "open support tickets", href: "/admin/support", show: can(user.role, "support") },
+    al.openTickets && { n: al.openTickets, text: "open support tickets", href: "/admin/support", show: can(user, "support.view") },
   ].filter((x): x is { n: number; text: string; href: string; show: boolean } => Boolean(x) && Boolean((x as { show: boolean }).show));
 
   const capTone = (m: { meals: number; capacity: number }) => (m.capacity && m.meals / m.capacity > 0.9 ? "warn" : "default");
@@ -68,7 +68,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       <PageHeader
         title={`Namaste, ${user.name.split(" ")[0]}`}
         description={`${formatDay(from, "long")} → ${formatDay(to, "long")} · by delivery date${kitchenId ? ` · ${kitchens.find((k) => k.id === kitchenId)?.name}` : " · all kitchens"}`}
-        actions={can(user.role, "reports") ? <Link href={`/admin/reports?from=${from}&to=${to}`} className="text-sm font-semibold text-sindoor underline">Full reports →</Link> : null}
+        actions={can(user, "reports.view") ? <Link href={`/admin/reports?from=${from}&to=${to}`} className="text-sm font-semibold text-sindoor underline">Full reports →</Link> : null}
       />
       <RangeForm from={from} to={to}>
         {kitchens.length > 1 && (

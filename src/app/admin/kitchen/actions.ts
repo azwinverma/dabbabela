@@ -10,7 +10,7 @@ import { dateOnly, isValidISODate } from "@/lib/dates";
 import { lockDay, setOrderStatus } from "@/server/orders";
 import { advanceBatch, markTicketsPrinted, planBatches, recordPacking, requirements, forecast, suggestQty } from "@/server/kitchen";
 import { createPurchaseOrder } from "@/server/inventory";
-import { assertKitchen, guard } from "@/components/admin/ops/scope";
+import { assertKitchen, guard, kitchenWhere } from "@/components/admin/ops/scope";
 
 function kd(fd: FormData) {
   const kitchenId = String(fd.get("kitchenId") ?? "");
@@ -21,7 +21,7 @@ function kd(fd: FormData) {
 
 export async function lockDayAction(_p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("kitchen.lock");
+    const user = await requirePermission("kitchen.approve");
     const { kitchenId, date } = kd(fd);
     assertKitchen(user, kitchenId);
     const r = await lockDay(kitchenId, date, user.id);
@@ -33,7 +33,7 @@ export async function lockDayAction(_p: ActionResult, fd: FormData): Promise<Act
 
 export async function planBatchesAction(_p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("kitchen");
+    const user = await requirePermission("kitchen.edit");
     const { kitchenId, date } = kd(fd);
     assertKitchen(user, kitchenId);
     const buffer = Math.max(0, Math.min(30, parseInt(String(fd.get("buffer") ?? "5"), 10) || 0));
@@ -45,7 +45,7 @@ export async function planBatchesAction(_p: ActionResult, fd: FormData): Promise
 
 export async function advanceBatchAction(batchId: string, to: BatchStatus, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("kitchen");
+    const user = await requirePermission("kitchen.edit");
     const b = await db.productionBatch.findUniqueOrThrow({ where: { id: batchId } });
     assertKitchen(user, b.kitchenId);
     const num = (k: string) => {
@@ -60,9 +60,9 @@ export async function advanceBatchAction(batchId: string, to: BatchStatus, _p: A
 
 export async function startOrdersAction(_p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("kitchen");
+    const user = await requirePermission("kitchen.edit");
     const ids = fd.getAll("ids").map(String);
-    const orders = await db.order.findMany({ where: { id: { in: ids }, ...(user.kitchenId ? { kitchenId: user.kitchenId } : {}) }, select: { id: true } });
+    const orders = await db.order.findMany({ where: { id: { in: ids }, ...kitchenWhere(user) }, select: { id: true } });
     const r = await setOrderStatus(orders.map((o) => o.id), "PREPARING", user.id, "Kitchen started");
     revalidatePath("/admin/kitchen");
     return r.changed.length ? done(`${r.changed.length} in the kitchen`) : fail(r.rejected[0]?.reason ?? "Nothing to start");
@@ -71,7 +71,7 @@ export async function startOrdersAction(_p: ActionResult, fd: FormData): Promise
 
 export async function packingAction(orderId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("kitchen");
+    const user = await requirePermission("kitchen.edit");
     const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
     assertKitchen(user, o.kitchenId);
     const on = (k: string) => fd.get(k) === "on";
@@ -83,7 +83,7 @@ export async function packingAction(orderId: string, _p: ActionResult, fd: FormD
 
 export async function qcAction(_p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("kitchen");
+    const user = await requirePermission("kitchen.edit");
     const { kitchenId, date } = kd(fd);
     assertKitchen(user, kitchenId);
     const type = String(fd.get("type"));
@@ -99,8 +99,8 @@ export async function qcAction(_p: ActionResult, fd: FormData): Promise<ActionRe
 
 export async function markPrintedAction(orderIds: string[]): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("kitchen");
-    const ok = await db.order.findMany({ where: { id: { in: orderIds }, ...(user.kitchenId ? { kitchenId: user.kitchenId } : {}) }, select: { id: true } });
+    const user = await requirePermission("kitchen.edit");
+    const ok = await db.order.findMany({ where: { id: { in: orderIds }, ...kitchenWhere(user) }, select: { id: true } });
     await markTicketsPrinted(ok.map((o) => o.id));
     return done(`${ok.length} marked printed`);
   });
@@ -109,7 +109,7 @@ export async function markPrintedAction(orderIds: string[]): Promise<ActionResul
 /** One DRAFT purchase order per supplier for today's shortages (inventory team reviews and sends). */
 export async function draftPurchasesAction(_p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("inventory");
+    const user = await requirePermission("inventory.edit");
     const { kitchenId, date } = kd(fd);
     assertKitchen(user, kitchenId);
     const buffer = Math.max(0, parseInt(String(fd.get("buffer") ?? "5"), 10) || 0);

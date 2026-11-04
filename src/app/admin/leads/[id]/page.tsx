@@ -10,7 +10,7 @@ import { PageHeader, Panel, KV, LeadBadge } from "@/components/admin/ui";
 import { LeadForm, ConvertButton } from "../LeadForms";
 
 export default async function LeadPage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requirePermission("leads");
+  const user = await requirePermission("leads.view");
   const { id } = await params;
   const l = await db.corporateLead.findUnique({ where: { id }, include: { company: { select: { id: true, name: true } } } });
   if (!l) notFound();
@@ -39,7 +39,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
               <p className="text-sm">
                 Converted to <Link className="font-semibold text-sindoor underline" href={`/admin/companies/${l.company.id}`}>{l.company.name}</Link>.
               </p>
-            ) : can(user.role, "corporate") ? (
+            ) : can(user, "corporate.edit") ? (
               <ConvertButton id={l.id} />
             ) : null}
           </div>

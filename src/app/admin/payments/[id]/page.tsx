@@ -35,7 +35,7 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
         <Panel title="Summary">
           <KV
             items={[
-              ["Customer", can(user.role, "customers") ? <Link className="text-sindoor underline" href={`/admin/customers/${p.user.id}`}>{p.user.name}</Link> : p.user.name],
+              ["Customer", can(user, "customers.view") ? <Link className="text-sindoor underline" href={`/admin/customers/${p.user.id}`}>{p.user.name}</Link> : p.user.name],
               ["Method", METHOD_LABEL[p.method]],
               ["Amount", rs(p.amount)],
               ["Refunded", rs(p.refundedAmount)],
@@ -51,7 +51,7 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
               View transfer proof
             </a>
           )}
-          {p.method === "BANK_TRANSFER" && p.status === "PENDING" && can(user.role, "payments.verify") && (
+          {p.method === "BANK_TRANSFER" && p.status === "PENDING" && can(user, "payments.approve") && (
             <div className="mt-4 border-t border-ink-line/60 pt-3">
               <VerifyForms id={p.id} />
             </div>
@@ -165,7 +165,7 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
           ) : (
             <p className="mb-3 text-sm text-ink-mute">None.</p>
           )}
-          {can(user.role, "refunds.request") && ["PAID", "PARTIALLY_REFUNDED"].includes(p.status) && available > 0 && (
+          {can(user, "refunds.create") && ["PAID", "PARTIALLY_REFUNDED"].includes(p.status) && available > 0 && (
             <RefundRequestForm paymentId={p.id} max={available} orders={p.orders.map((o) => ({ id: o.id, label: `${o.number} · ${formatDay(isoDate(o.deliveryDate))}` }))} />
           )}
         </Panel>

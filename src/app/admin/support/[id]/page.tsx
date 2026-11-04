@@ -14,7 +14,7 @@ import { replyAction, ticketStatusAction } from "../actions";
 export const metadata = { title: "Ticket" };
 
 export default async function TicketPage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requirePermission("support");
+  const user = await requirePermission("support.view");
   const { id } = await params;
   const t = await db.supportTicket.findUnique({
     where: { id },
@@ -22,7 +22,7 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
   });
   if (!t) notFound();
   const staff = await db.user.findMany({ where: { role: { in: STAFF_ROLES }, isActive: true }, select: { id: true, name: true, role: true }, orderBy: { name: "asc" } });
-  const pii = piiFor(user.role);
+  const pii = piiFor(user);
   return (
     <div>
       <PageHeader back={{ href: "/admin/support", label: "Support" }} title={t.subject} description={<span className="flex items-center gap-2">{t.number} · <Badge tone={t.status === "OPEN" ? "warn" : t.status === "PENDING" ? "info" : "good"}>{t.status.toLowerCase()}</Badge> · {t.category.toLowerCase()} · via {t.source.replace("_", " ")}</span>} />
@@ -54,7 +54,7 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
           <Panel title="Customer">
             <KV
               items={[
-                ["Name", t.user ? (can(user.role, "customers") ? <Link key="u" href={`/admin/customers/${t.user.id}`} className="text-akash underline">{t.user.name}</Link> : t.user.name) : t.name],
+                ["Name", t.user ? (can(user, "customers.view") ? <Link key="u" href={`/admin/customers/${t.user.id}`} className="text-akash underline">{t.user.name}</Link> : t.user.name) : t.name],
                 ["Email", pii.email(t.user?.email ?? t.email)],
                 ["Phone", pii.phone(t.user?.phoneNumber ?? t.phone)],
                 ["Order", t.order ? <Link key="o" href={`/admin/orders/${t.order.id}`} className="text-akash underline">{t.order.number} ({t.order.status.toLowerCase()})</Link> : null],

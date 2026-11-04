@@ -8,7 +8,7 @@ import { guarded } from "../_kit/guard";
 import { f, FieldError } from "../_kit/form";
 
 export async function saveTaxRule(id: string | null, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("pricing", async (user) => {
+  return guarded("pricing.edit", async (user) => {
     const name = f.str(fd, "name", 60);
     if (!name) throw new FieldError("name", "Name is required");
     const ratePct = f.num(fd, "rate", -1);
@@ -28,7 +28,7 @@ export async function saveTaxRule(id: string | null, _prev: ActionResult, fd: Fo
 }
 
 export async function deleteTaxRule(id: string): Promise<ActionResult> {
-  return guarded("pricing", async (user) => {
+  return guarded("pricing.edit", async (user) => {
     const r = await db.taxRule.findUnique({ where: { id } });
     if (!r) return fail("Not found");
     if (r.isActive) return fail("Deactivate it first");

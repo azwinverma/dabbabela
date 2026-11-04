@@ -4,7 +4,7 @@ import { fail, done, type ActionResult } from "@/lib/action";
 import { completeDataRequest, rejectDataRequest } from "@/server/privacy";
 
 export async function completeRequestAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("privacy");
+  const user = await requirePermission("privacy.edit");
   const confirm = String(fd.get("confirm") ?? "");
   const type = String(fd.get("type"));
   if (type === "DELETE" && confirm !== "DELETE") return fail('Type DELETE to confirm — this can\'t be undone');
@@ -17,7 +17,7 @@ export async function completeRequestAction(_: ActionResult, fd: FormData): Prom
 }
 
 export async function rejectRequestAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("privacy");
+  const user = await requirePermission("privacy.edit");
   try {
     await rejectDataRequest(String(fd.get("id")), user.id, String(fd.get("note") ?? ""));
     return done("Rejected");

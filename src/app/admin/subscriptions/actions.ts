@@ -11,7 +11,7 @@ import { guard, reasonOf } from "@/components/admin/ops/scope";
 
 export async function staffSkipAction(subId: string, orderId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("subscriptions");
+    const user = await requirePermission("subscriptions.edit");
     const reason = reasonOf(fd);
     const r = await skipMeal(orderId, { id: user.id, isStaff: true }, null);
     await audit({ actorId: user.id, action: "plan.skip", entity: "Subscription", entityId: subId, summary: `Meal ${orderId} skipped (${r.policy})`, reason, after: r });
@@ -22,7 +22,7 @@ export async function staffSkipAction(subId: string, orderId: string, _p: Action
 
 export async function staffUnskipAction(subId: string, orderId: string): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("subscriptions");
+    const user = await requirePermission("subscriptions.edit");
     await unskipMeal(orderId, { id: user.id, isStaff: true }, null);
     await audit({ actorId: user.id, action: "plan.unskip", entity: "Subscription", entityId: subId, summary: `Meal ${orderId} restored` });
     revalidatePath(`/admin/subscriptions/${subId}`);
@@ -32,7 +32,7 @@ export async function staffUnskipAction(subId: string, orderId: string): Promise
 
 export async function pauseAction(subId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("subscriptions");
+    const user = await requirePermission("subscriptions.edit");
     const reason = reasonOf(fd);
     const from = String(fd.get("from") ?? "") || undefined;
     const n = await pauseSubscription(subId, { id: user.id, isStaff: true }, { from, reason });
@@ -44,7 +44,7 @@ export async function pauseAction(subId: string, _p: ActionResult, fd: FormData)
 
 export async function resumeAction(subId: string): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("subscriptions");
+    const user = await requirePermission("subscriptions.edit");
     const n = await resumeSubscription(subId, { id: user.id, isStaff: true });
     await audit({ actorId: user.id, action: "plan.resume", entity: "Subscription", entityId: subId, summary: `${n} meals re-added` });
     revalidatePath(`/admin/subscriptions/${subId}`);
@@ -54,7 +54,7 @@ export async function resumeAction(subId: string): Promise<ActionResult> {
 
 export async function cancelPlanAction(subId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
-    const user = await requirePermission("subscriptions");
+    const user = await requirePermission("subscriptions.edit");
     const reason = reasonOf(fd);
     const settlement = fd.get("settlement") === "REFUND" ? "REFUND" : "CREDIT";
     const sub = await db.subscription.findUniqueOrThrow({ where: { id: subId } });

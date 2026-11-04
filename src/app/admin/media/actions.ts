@@ -30,7 +30,7 @@ async function usages(url: string) {
 }
 
 export async function saveMediaMeta(id: string, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("media", async (user) => {
+  return guarded("media.edit", async (user) => {
     const data = { alt: f.opt(fd, "alt", 200), credit: f.opt(fd, "credit", 200), isPlaceholder: f.bool(fd, "isPlaceholder") };
     await db.mediaAsset.update({ where: { id }, data });
     await audit({ actorId: user.id, action: "media.update", entity: "MediaAsset", entityId: id, after: data });
@@ -39,7 +39,7 @@ export async function saveMediaMeta(id: string, _prev: ActionResult, fd: FormDat
 }
 
 export async function deleteMedia(id: string): Promise<ActionResult> {
-  return guarded("media", async (user) => {
+  return guarded("media.edit", async (user) => {
     const m = await db.mediaAsset.findUnique({ where: { id } });
     if (!m) return fail("Not found");
     const used = await usages(m.url);

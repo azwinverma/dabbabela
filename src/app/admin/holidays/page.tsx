@@ -19,7 +19,7 @@ const KIND_OPTS = [
 ];
 
 export default async function HolidaysPage({ searchParams }: { searchParams: Promise<{ disrupt?: string; kitchen?: string; past?: string }> }) {
-  await requirePermission("rules");
+  await requirePermission("rules.view");
   const sp = await searchParams;
   const today = todayKTM();
   const [holidays, kitchens] = await Promise.all([

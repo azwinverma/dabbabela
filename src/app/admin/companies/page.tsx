@@ -12,7 +12,7 @@ export const metadata = { title: "Companies" };
 const MODE = { EMPLOYEE_PAID: "Employees pay", COMPANY_PAID: "Company pays", SPLIT: "Split" } as const;
 
 export default async function Companies({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
-  await requirePermission("corporate");
+  await requirePermission("corporate.view");
   const { q } = await searchParams;
   const companies = await db.company.findMany({
     where: q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { joinCode: { equals: q.toUpperCase() } }] } : {},

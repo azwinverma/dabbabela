@@ -15,7 +15,7 @@ import { cancelPlanAction, pauseAction, resumeAction, staffSkipAction, staffUnsk
 export const metadata = { title: "Meal plan" };
 
 export default async function SubPage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requirePermission("subscriptions");
+  const user = await requirePermission("subscriptions.view");
   const { id } = await params;
   const s = await db.subscription.findUnique({
     where: { id },
@@ -31,7 +31,7 @@ export default async function SubPage({ params }: { params: Promise<{ id: string
     },
   });
   if (!s) notFound();
-  const pii = piiFor(user.role);
+  const pii = piiFor(user);
   const today = todayKTM();
   const delivered = s.orders.filter((o) => o.status === "DELIVERED").length;
   const live = s.orders.filter((o) => !["CANCELLED", "SKIPPED"].includes(o.status)).length;

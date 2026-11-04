@@ -8,7 +8,7 @@ import { guarded } from "../_kit/guard";
 import { f, FieldError } from "../_kit/form";
 
 export async function saveTestimonial(id: string | null, _prev: ActionResult, fd: FormData): Promise<ActionResult> {
-  return guarded("content", async (user) => {
+  return guarded("content.edit", async (user) => {
     const name = f.str(fd, "name", 80);
     const quote = f.str(fd, "quote", 600);
     const consentNote = f.str(fd, "consentNote", 300);
@@ -35,7 +35,7 @@ export async function saveTestimonial(id: string | null, _prev: ActionResult, fd
 }
 
 export async function toggleTestimonial(id: string): Promise<ActionResult> {
-  return guarded("content", async (user) => {
+  return guarded("content.edit", async (user) => {
     const t = await db.testimonial.findUnique({ where: { id } });
     if (!t) return fail("Not found");
     if (!t.published && (t.consentNote ?? "").length < 10) return fail("Add a consent note before publishing");
@@ -46,7 +46,7 @@ export async function toggleTestimonial(id: string): Promise<ActionResult> {
 }
 
 export async function deleteTestimonial(id: string): Promise<ActionResult> {
-  return guarded("content", async (user) => {
+  return guarded("content.edit", async (user) => {
     const t = await db.testimonial.delete({ where: { id } });
     await audit({ actorId: user.id, action: "testimonial.delete", entity: "Testimonial", entityId: id, before: t });
     return done("Deleted", "/admin/testimonials");
@@ -55,7 +55,7 @@ export async function deleteTestimonial(id: string): Promise<ActionResult> {
 
 /** Turn consented customer feedback into a (hidden) testimonial — first name only. */
 export async function promoteFeedback(feedbackId: string): Promise<ActionResult> {
-  return guarded("content", async (user) => {
+  return guarded("content.edit", async (user) => {
     const fb = await db.feedback.findUnique({ where: { id: feedbackId }, include: { user: { select: { name: true } }, order: { select: { number: true } } } });
     if (!fb || !fb.publishConsent || !fb.comment?.trim()) return fail("Only feedback with a comment and the customer's consent can be quoted");
     if (await db.testimonial.findFirst({ where: { feedbackId } })) return fail("Already promoted");

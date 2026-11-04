@@ -15,7 +15,7 @@ type Def = { inApp: { title: string; body: string } | null; email: { subject: st
 const TONE = { QUEUED: "warn", SENT: "good", FAILED: "bad", SKIPPED: "neutral" } as const;
 
 export default async function NotificationsPage({ searchParams }: { searchParams: Promise<{ tab?: string; status?: string }> }) {
-  await requirePermission("settings");
+  await requirePermission("notifications.view");
   const sp = await searchParams;
   const tab = sp.tab === "outbox" ? "outbox" : "templates";
   const [overrides, outbox, counts] = await Promise.all([

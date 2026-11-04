@@ -9,7 +9,7 @@ import { pickDate, pickKitchen } from "@/components/admin/ops/scope";
 export const metadata = { title: "Prep sheets" };
 
 export default async function PrepPage({ searchParams }: { searchParams: Promise<{ kitchen?: string; date?: string; buffer?: string }> }) {
-  const user = await requirePermission("kitchen");
+  const user = await requirePermission("kitchen.view");
   const sp = await searchParams;
   const { kitchen } = await pickKitchen(user, sp.kitchen);
   if (!kitchen) return null;

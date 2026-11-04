@@ -6,7 +6,7 @@ import { CompanyForm } from "../CompanyForms";
 export const metadata = { title: "New company" };
 
 export default async function NewCompany() {
-  await requirePermission("corporate");
+  await requirePermission("corporate.view");
   const zones = await db.deliveryZone.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { sortOrder: "asc" } });
   return (
     <div>

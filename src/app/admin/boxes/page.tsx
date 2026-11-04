@@ -12,7 +12,7 @@ import { ConfirmAction } from "@/components/admin/ConfirmAction";
 import { toggleBox } from "./actions";
 
 export default async function BoxesPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string }> }) {
-  await requirePermission("menu");
+  await requirePermission("menu.view");
   const sp = await searchParams;
   const boxes = await db.lunchBox.findMany({
     where: {

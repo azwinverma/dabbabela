@@ -7,7 +7,7 @@ import { Input, Textarea, Checkbox } from "@/components/ui/Fields";
 import { saveFaq } from "../actions";
 
 export default async function FaqEdit({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("content");
+  await requirePermission("content.view");
   const { id } = await params;
   const [f, cats] = await Promise.all([id === "new" ? null : db.faq.findUnique({ where: { id } }), db.faq.findMany({ distinct: ["category"], select: { category: true } })]);
   if (id !== "new" && !f) notFound();

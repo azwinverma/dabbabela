@@ -14,8 +14,8 @@ import { AdjustForm } from "../../refunds/RefundForms";
 import { ActiveForm, NoteForm, PrivacyRequestForm } from "../CustomerForms";
 
 export default async function CustomerDetail({ params }: { params: Promise<{ id: string }> }) {
-  const staff = await requirePermission("customers");
-  const pii = can(staff.role, "customers.pii");
+  const staff = await requirePermission("customers.view");
+  const pii = can(staff, "customers.pii");
   const { id } = await params;
   const c = await db.user.findUnique({
     where: { id },
@@ -71,7 +71,7 @@ export default async function CustomerDetail({ params }: { params: Promise<{ id:
               ["Credit balance", <span key="b" className="font-bold">{rs(balance)}</span>],
             ]}
           />
-          {can(staff.role, "refunds.approve") && !c.deletedAt && (
+          {can(staff, "refunds.approve") && !c.deletedAt && (
             <div className="mt-3 border-t border-ink-line/60 pt-3">
               <AdjustForm userId={c.id} />
             </div>
@@ -91,7 +91,7 @@ export default async function CustomerDetail({ params }: { params: Promise<{ id:
           <div className="space-y-4">
             <NoteForm id={c.id} note={c.internalNote ?? ""} />
             {pii && !c.deletedAt && <ActiveForm id={c.id} active={c.isActive} />}
-            {can(staff.role, "privacy") && !c.deletedAt && (
+            {can(staff, "privacy.edit") && !c.deletedAt && (
               <div>
                 <p className="mb-1 text-xs font-semibold text-ink-mute">Privacy request received by phone/email?</p>
                 <PrivacyRequestForm id={c.id} />

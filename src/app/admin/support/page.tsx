@@ -12,7 +12,7 @@ const PER = 40;
 const PRIORITY_TONE = { LOW: "neutral", NORMAL: "info", HIGH: "warn", URGENT: "bad" } as const;
 
 export default async function SupportPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  const user = await requirePermission("support");
+  const user = await requirePermission("support.view");
   const sp = await searchParams;
   const status = sp.status ?? "OPEN";
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
