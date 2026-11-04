@@ -1,0 +1,1889 @@
+// Dabba Bela — data model
+//
+// Conventions
+// - Money is integer PAISA (Rs 1 = 100). Never floats for money.
+// - A delivery day is a calendar day in Asia/Kathmandu stored as @db.Date (UTC midnight of that day).
+// - Timestamps are timestamptz.
+// - Financial records (Payment, PaymentAttempt, Refund, CreditLedger, Invoice) are never hard-deleted (onDelete: Restrict).
+// - Order/recipe/price data is snapshotted onto orders so later menu edits never rewrite history.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+// ═════════════════════════════ Identity (Better Auth tables + profile) ═════════════════════════════
+
+enum Role {
+  SUPER_ADMIN
+  OWNER
+  OPERATIONS_MANAGER
+  CONTENT_EDITOR
+  MENU_MANAGER
+  KITCHEN_STAFF
+  INVENTORY_MANAGER
+  DISPATCHER
+  DELIVERY_AGENT
+  FINANCE
+  SUPPORT
+  CUSTOMER
+}
+
+enum DietPreference {
+  ANY
+  VEG
+  EGG_OK
+  VEGAN
+}
+
+model User {
+  id                  String    @id @default(cuid())
+  name                String
+  email               String    @unique
+  emailVerified       Boolean   @default(false)
+  image               String?
+  phoneNumber         String?   @unique
+  phoneNumberVerified Boolean?  @default(false)
+  twoFactorEnabled    Boolean?  @default(false)
+  role                Role      @default(CUSTOMER)
+  isActive            Boolean   @default(true)
+  locale              String    @default("en")
+  kitchenId           String? // staff scoped to one kitchen (null = all kitchens)
+
+  // food preferences (customer profile)
+  diet             DietPreference @default(ANY)
+  spiceTolerance   Int            @default(2) // 0 none … 4 very hot
+  allergies        String[] @default([]) // Allergen codes the customer wants to avoid
+  avoidOnionGarlic Boolean        @default(false)
+  dietaryNotes     String?
+  marketingOptIn   Boolean        @default(false)
+
+  internalNote String?
+  lastLoginAt  DateTime?
+  deletedAt    DateTime? // anonymised after a privacy deletion request
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sessions        Session[]
+  accounts        Account[]
+  twoFactors      TwoFactor[]
+  addresses       Address[]
+  membership      CompanyMember?
+  orders          Order[]          @relation("OrderCustomer")
+  ordersPlaced    Order[]          @relation("OrderPlacedBy")
+  subscriptions   Subscription[]
+  customBoxes     CustomBox[]
+  favorites       Favorite[]
+  payments        Payment[]
+  credits         CreditLedger[]   @relation("CreditOwner")
+  auditLogs       AuditLog[]
+  statusEvents    OrderStatusEvent[]
+  notifications   Notification[]
+  tickets         SupportTicket[]  @relation("TicketCustomer")
+  ticketsAssigned SupportTicket[]  @relation("TicketAssignee")
+  ticketMessages  SupportMessage[]
+  feedback        Feedback[]
+  routes          DeliveryRoute[]
+  deliveryEvents  DeliveryEvent[]
+  dataRequests    DataRequest[]
+  notificationPrefs NotificationPreference[]
+
+  @@index([role])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+
+  @@index([identifier])
+}
+
+model TwoFactor {
+  id                      String    @id @default(cuid())
+  secret                  String
+  backupCodes             String
+  userId                  String
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verified                Boolean?  @default(true)
+  failedVerificationCount Int?      @default(0)
+  lockedUntil             DateTime?
+
+  @@index([userId])
+}
+
+model RateLimit {
+  id          String @id @default(cuid())
+  key         String @unique
+  count       Int
+  lastRequest BigInt
+}
+
+enum AddressType {
+  HOME
+  OFFICE
+  SHOP
+  COLLEGE
+  SITE
+  OTHER
+}
+
+model Address {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label         String // "Office", "Home", "Mum's shop"
+  type          AddressType @default(OFFICE)
+  recipientName String
+  phone         String
+  placeName     String? // office / shop / college / building name
+  line1         String // street, tole, building + floor
+  area          String // locality, e.g. "Baneshwor"
+  ward          Int?
+  municipality  String? // e.g. "Kathmandu Metropolitan City"
+  city          String      @default("Kathmandu")
+  landmark      String?
+  lat           Float?
+  lng           Float?
+  instructions  String?
+  zoneId        String?
+  zone          DeliveryZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  isDefault     Boolean     @default(false)
+  archivedAt    DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  orders        Order[]
+  subscriptions Subscription[]
+
+  @@index([userId])
+}
+
+// ═════════════════════════════ Kitchens, coverage, slots, calendar ═════════════════════════════
+
+model Kitchen {
+  id            String   @id @default(cuid())
+  name          String
+  code          String   @unique
+  city          String   @default("Kathmandu")
+  address       String?
+  phone         String?
+  dailyCapacity Int      @default(300) // meals per service day
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  zones       DeliveryZone[]
+  slots       DeliverySlot[]
+  capacities  KitchenCapacity[]
+  locks       DayLock[]
+  batches     ProductionBatch[]
+  qcLogs      QcLog[]
+  movements   StockMovement[]
+  purchases   PurchaseOrder[]
+  routes      DeliveryRoute[]
+  orders      Order[]
+  menus       WeeklyMenu[]
+  holidays    Holiday[]
+}
+
+model DeliveryZone {
+  id           String   @id @default(cuid())
+  name         String
+  city         String   @default("Kathmandu")
+  areas        String[] // localities matched by the coverage lookup
+  wards        String[] // "KMC-10", "LMC-2" …
+  kitchenId    String
+  kitchen      Kitchen  @relation(fields: [kitchenId], references: [id], onDelete: Restrict)
+  fee          Int      @default(0) // paisa per delivery day
+  freeAbove    Int? // paisa; day subtotal at/above which delivery is free
+  minOrder     Int      @default(0) // paisa per delivery day
+  etaNote      String?
+  isActive     Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  addresses   Address[]
+  companies   Company[]
+  locations   OfficeLocation[]
+  orders      Order[]
+  routes      DeliveryRoute[]
+
+  @@index([kitchenId])
+}
+
+model DeliverySlot {
+  id        String   @id @default(cuid())
+  kitchenId String
+  kitchen   Kitchen  @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  label     String // "12:30 – 13:00"
+  startTime String // "12:30" Kathmandu time
+  endTime   String
+  capacity  Int      @default(80) // orders per slot per day
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders        Order[]
+  subscriptions Subscription[]
+  routes        DeliveryRoute[]
+  locations     OfficeLocation[]
+}
+
+/// Per-date capacity override for a kitchen (festival rush, staff shortage).
+model KitchenCapacity {
+  id        String   @id @default(cuid())
+  kitchenId String
+  kitchen   Kitchen  @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  date      DateTime @db.Date
+  maxMeals  Int
+  note      String?
+
+  @@unique([kitchenId, date])
+}
+
+model Holiday {
+  id        String   @id @default(cuid())
+  date      DateTime @db.Date
+  name      String
+  kind      String   @default("HOLIDAY") // HOLIDAY | BANDH | WEATHER | CLOSURE
+  kitchenId String? // null = every kitchen
+  kitchen   Kitchen? @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([date, kitchenId])
+}
+
+/// After the cut-off a kitchen locks a day: orders become CONFIRMED and production is planned.
+model DayLock {
+  id         String   @id @default(cuid())
+  kitchenId  String
+  kitchen    Kitchen  @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  date       DateTime @db.Date
+  lockedAt   DateTime @default(now())
+  lockedById String?
+  orderCount Int      @default(0)
+
+  @@unique([kitchenId, date])
+}
+
+// ═════════════════════════════ Menu, recipes, allergens ═════════════════════════════
+
+enum ItemCategory {
+  BASE
+  MAIN
+  PROTEIN
+  VEGETABLE
+  SIDE
+  ACHAR
+  ADDON
+}
+
+enum Diet {
+  VEGAN
+  VEG
+  EGG
+  CHICKEN
+  MUTTON
+  BUFF
+  PORK
+  FISH
+}
+
+enum NutritionSource {
+  NONE
+  ESTIMATED
+  VERIFIED
+}
+
+model Allergen {
+  id         String   @id @default(cuid())
+  code       String   @unique // GLUTEN, DAIRY, EGG, SOY, PEANUT, TREE_NUT, SESAME, MUSTARD, FISH, SHELLFISH
+  name       String
+  nameNe     String?
+  sortOrder  Int      @default(0)
+
+  items MenuItemAllergen[]
+}
+
+model MenuItem {
+  id            String          @id @default(cuid())
+  name          String
+  nameNe        String?
+  description   String?
+  descriptionNe String?
+  category      ItemCategory
+  diet          Diet            @default(VEG)
+  dietVerified  Boolean         @default(false) // kitchen confirmed preparation (e.g. no egg wash)
+  hasOnionGarlic Boolean        @default(true)
+  spiceLevel    Int             @default(1) // 0–4
+  portionLabel  String? // "1 bowl (≈250 g)"
+  prepMinutes   Int?
+  station       String? // "Wok", "Tandoor/roll", "Dal & rice"
+  // nutrition per portion — only shown with its source label
+  calories        Int?
+  proteinG        Int?
+  carbsG          Int?
+  fatG            Int?
+  nutritionSource NutritionSource @default(NONE)
+  nutritionNote   String?
+
+  price        Int     @default(0) // paisa, when picked in Build-a-Dabba
+  costPrice    Int     @default(0) // paisa, manual cost when no recipe is costed
+  dailyLimit   Int? // portions per day for Build-a-Dabba (null = unlimited)
+  image        String?
+  isActive     Boolean @default(true)
+  allowCustom  Boolean @default(true)
+  sortOrder    Int     @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  allergens     MenuItemAllergen[]
+  boxItems      BoxItem[]
+  recipe        Recipe?
+  options       CustomizationOption[]
+  favorites     Favorite[]
+  batches       ProductionBatch[]
+  subsFrom      BoxSubstitution[] @relation("SubFrom")
+  subsTo        BoxSubstitution[] @relation("SubTo")
+  combosA       ComboRule[]       @relation("ComboA")
+  combosB       ComboRule[]       @relation("ComboB")
+
+  @@index([category, isActive])
+}
+
+model MenuItemAllergen {
+  menuItemId String
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  allergenId String
+  allergen   Allergen @relation(fields: [allergenId], references: [id], onDelete: Cascade)
+  mayContain Boolean  @default(false) // shared-equipment trace risk rather than an ingredient
+
+  @@id([menuItemId, allergenId])
+}
+
+model Recipe {
+  id               String         @id @default(cuid())
+  menuItemId       String         @unique
+  menuItem         MenuItem       @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  currentVersionId String?        @unique
+  currentVersion   RecipeVersion? @relation("CurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  versions RecipeVersion[] @relation("RecipeVersions")
+}
+
+/// Immutable once another version supersedes it.
+model RecipeVersion {
+  id            String   @id @default(cuid())
+  recipeId      String
+  recipe        Recipe   @relation("RecipeVersions", fields: [recipeId], references: [id], onDelete: Cascade)
+  version       Int
+  yieldPortions Int      @default(1) // ingredient quantities below make this many portions
+  method        String?
+  notes         String?
+  costPerPortion Int     @default(0) // paisa, computed when the version is saved
+  createdById   String?
+  createdAt     DateTime @default(now())
+
+  ingredients RecipeIngredient[]
+  current     Recipe?            @relation("CurrentVersion")
+
+  @@unique([recipeId, version])
+}
+
+model RecipeIngredient {
+  id           String        @id @default(cuid())
+  versionId    String
+  version      RecipeVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  ingredientId String
+  ingredient   Ingredient    @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  quantity     Float // in the ingredient's unit, for the whole yield
+  wastePct     Int           @default(0) // trimming/peeling loss
+
+  @@unique([versionId, ingredientId])
+}
+
+model LunchBox {
+  id            String   @id @default(cuid())
+  name          String
+  nameNe        String?
+  slug          String   @unique
+  tagline       String?
+  taglineNe     String?
+  description   String?
+  descriptionNe String?
+  healthNote    String? // honest "why it works" note — no medical claims
+  healthNoteNe  String?
+  kitchenNote   String? // internal: batching / efficiency
+  portionNote   String?
+  price         Int // paisa
+  costPrice     Int      @default(0) // paisa; derived from items when recipes are costed
+  image         String?
+  accent        String   @default("achar")
+  isSpecial     Boolean  @default(false)
+  tags          String[]
+  isActive      Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  items         BoxItem[]
+  substitutions BoxSubstitution[]
+  menuDayItems  MenuDayItem[]
+  orderItems    OrderItem[]
+  favorites     Favorite[]
+}
+
+model BoxItem {
+  id         String   @id @default(cuid())
+  boxId      String
+  box        LunchBox @relation(fields: [boxId], references: [id], onDelete: Cascade)
+  menuItemId String
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+  quantity   Int      @default(1)
+  sortOrder  Int      @default(0)
+
+  @@unique([boxId, menuItemId])
+}
+
+/// Chef-approved swap inside a set box ("aloo tikki → extra salad", +Rs 0).
+model BoxSubstitution {
+  id         String   @id @default(cuid())
+  boxId      String
+  box        LunchBox @relation(fields: [boxId], references: [id], onDelete: Cascade)
+  fromItemId String
+  fromItem   MenuItem @relation("SubFrom", fields: [fromItemId], references: [id], onDelete: Cascade)
+  toItemId   String
+  toItem     MenuItem @relation("SubTo", fields: [toItemId], references: [id], onDelete: Cascade)
+  priceDelta Int      @default(0) // paisa, can be negative
+  isActive   Boolean  @default(true)
+
+  @@unique([boxId, fromItemId, toItemId])
+}
+
+/// Build-a-Dabba step ("Pick a base", 1–1).
+model CustomizationGroup {
+  id        String       @id @default(cuid())
+  key       String       @unique
+  name      String
+  nameNe    String?
+  category  ItemCategory
+  minSelect Int          @default(0)
+  maxSelect Int          @default(1)
+  sortOrder Int          @default(0)
+  isActive  Boolean      @default(true)
+
+  options CustomizationOption[]
+}
+
+model CustomizationOption {
+  id          String             @id @default(cuid())
+  groupId     String
+  group       CustomizationGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  menuItemId  String
+  menuItem    MenuItem           @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  priceOverride Int? // paisa; null = dish price
+  isDefault   Boolean            @default(false)
+  sortOrder   Int                @default(0)
+
+  @@unique([groupId, menuItemId])
+}
+
+/// Combination rules for Build-a-Dabba. EXCLUDE = never together; REQUIRE = A needs B.
+model ComboRule {
+  id       String   @id @default(cuid())
+  kind     String   @default("EXCLUDE")
+  itemAId  String
+  itemA    MenuItem @relation("ComboA", fields: [itemAId], references: [id], onDelete: Cascade)
+  itemBId  String
+  itemB    MenuItem @relation("ComboB", fields: [itemBId], references: [id], onDelete: Cascade)
+  message  String?
+
+  @@unique([kind, itemAId, itemBId])
+}
+
+enum Weekday {
+  SUN
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+}
+
+enum MenuStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model WeeklyMenu {
+  id          String     @id @default(cuid())
+  title       String
+  // Sunday of the week this menu covers. Null + isDefault = standing rotation template.
+  weekStart   DateTime?  @db.Date
+  isDefault   Boolean    @default(false)
+  status      MenuStatus @default(DRAFT)
+  kitchenId   String?
+  kitchen     Kitchen?   @relation(fields: [kitchenId], references: [id], onDelete: SetNull)
+  note        String?
+  publishedAt DateTime?
+  publishedById String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  days MenuDay[]
+
+  @@index([weekStart, status])
+}
+
+model MenuDay {
+  id       String     @id @default(cuid())
+  menuId   String
+  menu     WeeklyMenu @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  day      Weekday
+  isClosed Boolean    @default(false)
+  note     String?
+
+  items MenuDayItem[]
+
+  @@unique([menuId, day])
+}
+
+model MenuDayItem {
+  id        String   @id @default(cuid())
+  menuDayId String
+  menuDay   MenuDay  @relation(fields: [menuDayId], references: [id], onDelete: Cascade)
+  boxId     String
+  box       LunchBox @relation(fields: [boxId], references: [id], onDelete: Restrict)
+  isPrimary Boolean  @default(false) // the chef's pick that rotation plans receive
+  capacity  Int? // portions that day (null = kitchen capacity only)
+  soldOut   Boolean  @default(false)
+  priceOverride Int? // paisa
+  sortOrder Int      @default(0)
+
+  @@unique([menuDayId, boxId])
+}
+
+model CustomBox {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  // [{ menuItemId, qty }] — always re-priced from current dishes
+  items     Json
+  price     Int // paisa, last computed (display only)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orderItems OrderItem[]
+}
+
+model Favorite {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  boxId      String?
+  box        LunchBox? @relation(fields: [boxId], references: [id], onDelete: Cascade)
+  menuItemId String?
+  menuItem   MenuItem? @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+
+  @@unique([userId, boxId])
+  @@unique([userId, menuItemId])
+}
+
+// ═════════════════════════════ Plans & subscriptions ═════════════════════════════
+
+enum PlanKind {
+  WEEKLY
+  MONTHLY
+  OFFICE
+  CUSTOM
+}
+
+model MealPlan {
+  id               String   @id @default(cuid())
+  name             String
+  nameNe           String?
+  slug             String   @unique
+  kind             PlanKind @default(WEEKLY)
+  tagline          String?
+  description      String?
+  durationWeeks    Int      @default(1)
+  minDaysPerWeek   Int      @default(3)
+  pricePerMeal     Int // paisa
+  compareAtPrice   Int? // paisa: the regular single-order price, for honest savings maths
+  includesDelivery Boolean  @default(true)
+  maxPauseDays     Int      @default(10)
+  policyNote       String? // pause / refund wording shown before purchase
+  features         String[]
+  isPopular        Boolean  @default(false)
+  isCorporate      Boolean  @default(false)
+  isActive         Boolean  @default(true)
+  effectiveFrom    DateTime? @db.Date
+  effectiveTo      DateTime? @db.Date
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  subscriptions Subscription[]
+}
+
+enum SubscriptionStatus {
+  PENDING_PAYMENT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum BoxChoice {
+  ROTATION
+  CUSTOM
+}
+
+model Subscription {
+  id           String             @id @default(cuid())
+  reference    String             @unique
+  userId       String
+  user         User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  planId       String
+  plan         MealPlan           @relation(fields: [planId], references: [id], onDelete: Restrict)
+  status       SubscriptionStatus @default(PENDING_PAYMENT)
+  startDate    DateTime           @db.Date
+  endDate      DateTime           @db.Date
+  days         Weekday[]
+  boxChoice    BoxChoice          @default(ROTATION)
+  dayChoices   Json? // { SUN: { boxId? , customBoxId? } }
+  vegOnly      Boolean            @default(false)
+  addressId    String?
+  address      Address?           @relation(fields: [addressId], references: [id], onDelete: SetNull)
+  slotId       String?
+  slot         DeliverySlot?      @relation(fields: [slotId], references: [id], onDelete: SetNull)
+  companyId    String?
+  mealsTotal   Int
+  pricePerMeal Int
+  subtotal     Int
+  deliveryFee  Int                @default(0)
+  discount     Int                @default(0)
+  tax          Int                @default(0)
+  total        Int
+  couponCode   String?
+  renewal      String             @default("MANUAL") // MANUAL only until auto-debit is approved
+  pausedUntil  DateTime?          @db.Date
+  notes        String?
+  cancelReason String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  orders   Order[]
+  payments Payment[]
+  changes  SubscriptionChange[]
+  pauses   SubscriptionPause[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model SubscriptionChange {
+  id             String       @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  type           String // SKIP, UNSKIP, PAUSE, RESUME, CANCEL, SWAP, EXTEND, CREDIT, ADDRESS
+  date           DateTime?    @db.Date
+  detail         String?
+  amount         Int? // paisa credited / charged by the change
+  actorId        String?
+  createdAt      DateTime     @default(now())
+
+  @@index([subscriptionId])
+}
+
+model SubscriptionPause {
+  id             String       @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  fromDate       DateTime     @db.Date
+  toDate         DateTime?    @db.Date
+  reason         String?
+  createdAt      DateTime     @default(now())
+}
+
+// ═════════════════════════════ Orders ═════════════════════════════
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  SCHEDULED // confirmed for a future day, still editable before the cut-off
+  CONFIRMED // locked for the kitchen
+  PREPARING
+  PACKED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED_DELIVERY
+  CANCELLED
+  SKIPPED
+}
+
+enum OrderPaymentStatus {
+  UNPAID
+  PENDING
+  PAID
+  INVOICED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+enum OrderSource {
+  SINGLE
+  SUBSCRIPTION
+  CORPORATE
+  ADMIN
+}
+
+model Order {
+  id              String             @id @default(cuid())
+  number          String             @unique
+  code            String // short code printed on the label / spoken at hand-off
+  userId          String
+  user            User               @relation("OrderCustomer", fields: [userId], references: [id], onDelete: Restrict)
+  placedById      String?
+  placedBy        User?              @relation("OrderPlacedBy", fields: [placedById], references: [id], onDelete: SetNull)
+  source          OrderSource        @default(SINGLE)
+  status          OrderStatus        @default(PENDING_PAYMENT)
+  paymentStatus   OrderPaymentStatus @default(UNPAID)
+  deliveryDate    DateTime           @db.Date
+  kitchenId       String
+  kitchen         Kitchen            @relation(fields: [kitchenId], references: [id], onDelete: Restrict)
+  slotId          String?
+  slot            DeliverySlot?      @relation(fields: [slotId], references: [id], onDelete: SetNull)
+  slotLabel       String?
+  followsRotation Boolean            @default(false)
+
+  // delivery snapshot (copied from the address at order time)
+  addressId     String?
+  address       Address?      @relation(fields: [addressId], references: [id], onDelete: SetNull)
+  contactName   String
+  contactPhone  String
+  addressType   AddressType   @default(OFFICE)
+  placeName     String?
+  addressLine   String
+  area          String
+  ward          Int?
+  landmark      String?
+  lat           Float?
+  lng           Float?
+  instructions  String?
+  zoneId        String?
+  zone          DeliveryZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  companyId     String?
+  company       Company?      @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  officeLocationId String?
+
+  // money (paisa)
+  subtotal      Int
+  deliveryFee   Int     @default(0)
+  discount      Int     @default(0)
+  tax           Int     @default(0)
+  taxInclusive  Boolean @default(true)
+  total         Int
+  companyShare  Int     @default(0) // part billed to the employer
+  customerShare Int     @default(0) // part the eater pays
+  refundedAmount Int    @default(0)
+  costTotal     Int     @default(0)
+  couponCode    String?
+
+  allergenNote  String? // snapshot of the customer's declared allergies
+  notes         String?
+  kitchenNote   String?
+  deliveryOtp   String?
+  version       Int     @default(0) // optimistic concurrency for staff edits
+
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  paymentId      String?
+  payment        Payment?      @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  invoiceId      String?
+  invoice        Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  lockedAt    DateTime?
+  deliveredAt DateTime?
+  cancelledAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  items        OrderItem[]
+  events       OrderStatusEvent[]
+  adjustments  OrderAdjustment[]
+  ticket       KitchenTicket?
+  packing      PackingCheck[]
+  assignment   DeliveryAssignment?
+  deliveryEvents DeliveryEvent[]
+  refunds      Refund[]
+  feedback     Feedback?
+  supportTickets SupportTicket[]
+  invoiceLines InvoiceLine[]
+  redemptions  CouponRedemption[]
+
+  @@index([deliveryDate, status])
+  @@index([kitchenId, deliveryDate])
+  @@index([userId])
+  @@index([subscriptionId])
+  @@index([companyId, deliveryDate])
+  @@index([paymentId])
+}
+
+model OrderItem {
+  id          String     @id @default(cuid())
+  orderId     String
+  order       Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  boxId       String?
+  box         LunchBox?  @relation(fields: [boxId], references: [id], onDelete: SetNull)
+  customBoxId String?
+  customBox   CustomBox? @relation(fields: [customBoxId], references: [id], onDelete: SetNull)
+  name        String
+  details     String?
+  // immutable snapshot: [{ menuItemId, name, qty, diet, allergens[], station, recipeVersionId }]
+  components  Json
+  diet        Diet       @default(VEG)
+  quantity    Int        @default(1)
+  unitPrice   Int
+  unitCost    Int        @default(0)
+  lineTotal   Int
+
+  customizations OrderItemCustomization[]
+}
+
+model OrderItemCustomization {
+  id          String    @id @default(cuid())
+  orderItemId String
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  kind        String // SUBSTITUTE | ADD | REMOVE
+  label       String
+  priceDelta  Int       @default(0)
+}
+
+model OrderStatusEvent {
+  id         String       @id @default(cuid())
+  orderId    String
+  order      Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  fromStatus OrderStatus?
+  toStatus   OrderStatus
+  note       String?
+  actorId    String?
+  actor      User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  createdAt  DateTime     @default(now())
+
+  @@index([orderId])
+}
+
+/// Compensating money change on an order after it was placed (never a silent edit).
+model OrderAdjustment {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  amount    Int // paisa: +charge / −credit
+  reason    String
+  actorId   String?
+  createdAt DateTime @default(now())
+}
+
+// ═════════════════════════════ Payments, refunds, ledger, invoices ═════════════════════════════
+
+enum PaymentMethod {
+  ESEWA
+  KHALTI
+  BANK_TRANSFER
+  CASH
+  COMPANY_INVOICE
+  WALLET
+}
+
+enum PaymentStatus {
+  PENDING // awaiting gateway / manual verification
+  PAID
+  FAILED
+  CANCELLED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+model Payment {
+  id             String        @id @default(cuid())
+  reference      String        @unique
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  method         PaymentMethod
+  status         PaymentStatus @default(PENDING)
+  amount         Int // paisa the customer owes on this payment
+  refundedAmount Int           @default(0)
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  companyId      String?
+  idempotencyKey String?       @unique // checkout submit key — a retried submit returns the same payment
+  proofUrl       String? // bank slip / QR screenshot uploaded by the customer
+  verifiedById   String?
+  paidAt         DateTime?
+  note           String?
+  version        Int           @default(0)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  orders   Order[]
+  attempts PaymentAttempt[]
+  events   PaymentProviderEvent[]
+  refunds  Refund[]
+
+  @@index([status])
+  @@index([userId])
+}
+
+model PaymentAttempt {
+  id          String        @id @default(cuid())
+  paymentId   String
+  payment     Payment       @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  method      PaymentMethod
+  providerRef String        @unique // eSewa transaction_uuid / Khalti pidx / our manual ref
+  amount      Int
+  status      String        @default("STARTED") // STARTED | SUCCESS | FAILED | EXPIRED
+  request     Json?
+  response    Json?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([paymentId])
+}
+
+/// Every callback / lookup we receive, deduplicated by eventKey.
+model PaymentProviderEvent {
+  id          String   @id @default(cuid())
+  provider    String
+  eventKey    String   @unique
+  paymentId   String?
+  payment     Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  verified    Boolean  @default(false)
+  outcome     String? // PAID | FAILED | IGNORED | MISMATCH
+  payload     Json
+  createdAt   DateTime @default(now())
+}
+
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  PROCESSED
+  REJECTED
+}
+
+enum RefundMethod {
+  ORIGINAL // back through the gateway (manual in merchant portal until API refunds are enabled)
+  BANK
+  CASH
+  WALLET_CREDIT
+}
+
+model Refund {
+  id            String       @id @default(cuid())
+  paymentId     String
+  payment       Payment      @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  orderId       String?
+  order         Order?       @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  amount        Int
+  reason        String
+  method        RefundMethod @default(WALLET_CREDIT)
+  status        RefundStatus @default(REQUESTED)
+  providerRef   String? // gateway refund id / bank txn id — required to mark PROCESSED (except wallet)
+  proofUrl      String?
+  requestedById String?
+  approvedById  String?
+  processedById String?
+  processedAt   DateTime?
+  note          String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([status])
+}
+
+/// Append-only wallet ledger. Balance = SUM(amount). Rows are never updated or deleted.
+model CreditLedger {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation("CreditOwner", fields: [userId], references: [id], onDelete: Restrict)
+  amount    Int // paisa: + credit / − spend
+  reason    String // SKIP_CREDIT | REFUND | ADJUSTMENT | SPEND | REVERSAL | GOODWILL
+  orderId   String?
+  paymentId String?
+  refundId  String?
+  actorId   String?
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  VOID
+}
+
+model Invoice {
+  id             String        @id @default(cuid())
+  number         String        @unique
+  kind           String        @default("INVOICE") // INVOICE | CREDIT_NOTE
+  companyId      String?
+  company        Company?      @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  userId         String?
+  periodStart    DateTime      @db.Date
+  periodEnd      DateTime      @db.Date
+  status         InvoiceStatus @default(DRAFT)
+  billingName    String
+  billingAddress String?
+  panVat         String?
+  subtotal       Int
+  discount       Int           @default(0)
+  tax            Int           @default(0)
+  total          Int
+  paidAmount     Int           @default(0)
+  dueDate        DateTime?     @db.Date
+  issuedAt       DateTime?
+  relatedId      String? // credit note → original invoice
+  note           String?
+  createdById    String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  lines  InvoiceLine[]
+  orders Order[]
+
+  @@index([companyId, status])
+}
+
+model InvoiceLine {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  orderId     String?
+  order       Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  description String
+  quantity    Int     @default(1)
+  unitPrice   Int
+  amount      Int
+}
+
+model TaxRule {
+  id            String    @id @default(cuid())
+  name          String // "VAT 13%"
+  rateBps       Int // basis points: 1300 = 13%
+  inclusive     Boolean   @default(true) // menu prices already include it
+  isActive      Boolean   @default(false)
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+  createdAt     DateTime  @default(now())
+}
+
+enum DiscountType {
+  PERCENT
+  FLAT
+}
+
+enum CouponScope {
+  ALL
+  ORDERS
+  SUBSCRIPTIONS
+}
+
+model Coupon {
+  id             String       @id @default(cuid())
+  code           String       @unique
+  description    String?
+  type           DiscountType @default(PERCENT)
+  value          Int // percent (whole number) or paisa
+  scope          CouponScope  @default(ALL)
+  minSubtotal    Int          @default(0)
+  maxDiscount    Int?
+  startsAt       DateTime?
+  endsAt         DateTime?
+  usageLimit     Int?
+  perUserLimit   Int?         @default(1)
+  usedCount      Int          @default(0)
+  firstOrderOnly Boolean      @default(false)
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  redemptions CouponRedemption[]
+}
+
+model CouponRedemption {
+  id        String   @id @default(cuid())
+  couponId  String
+  coupon    Coupon   @relation(fields: [couponId], references: [id], onDelete: Restrict)
+  userId    String
+  paymentId String?
+  orderId   String?
+  order     Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  amount    Int
+  createdAt DateTime @default(now())
+
+  @@index([couponId, userId])
+}
+
+// ═════════════════════════════ Corporate ═════════════════════════════
+
+enum BillingMode {
+  EMPLOYEE_PAID
+  COMPANY_PAID
+  SPLIT
+}
+
+model Company {
+  id              String      @id @default(cuid())
+  name            String
+  legalName       String?
+  slug            String      @unique
+  contactPerson   String?
+  contactEmail    String?
+  contactPhone    String?
+  billingAddress  String?
+  panVat          String?
+  zoneId          String?
+  zone            DeliveryZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  billingMode     BillingMode @default(EMPLOYEE_PAID)
+  // SPLIT: the company pays subsidyPct of each meal up to subsidyCap paisa; the rest is the employee's
+  subsidyPct      Int         @default(0)
+  subsidyCap      Int? // paisa per meal
+  monthlyAllowance Int? // paisa per member per month the company will cover
+  discountPct     Int         @default(0)
+  freeDelivery    Boolean     @default(true)
+  invoiceTermsDays Int        @default(15)
+  creditLimit     Int? // paisa outstanding before new company-paid orders are blocked
+  requireApproval Boolean     @default(true) // new members wait for a company admin
+  joinCode        String?     @unique
+  cutoffOverride  String? // "10:00"
+  isActive        Boolean     @default(true)
+  notes           String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  members   CompanyMember[]
+  locations OfficeLocation[]
+  contracts CorporateContract[]
+  invites   CompanyInvite[]
+  leads     CorporateLead[]
+  orders    Order[]
+  invoices  Invoice[]
+}
+
+enum MemberRole {
+  ADMIN
+  MEMBER
+}
+
+enum MemberStatus {
+  PENDING
+  ACTIVE
+  REMOVED
+}
+
+model CompanyMember {
+  id               String         @id @default(cuid())
+  companyId        String
+  company          Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId           String         @unique
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role             MemberRole     @default(MEMBER)
+  status           MemberStatus   @default(PENDING)
+  department       String?
+  costCenter       String?
+  employeeCode     String?
+  officeLocationId String?
+  officeLocation   OfficeLocation? @relation(fields: [officeLocationId], references: [id], onDelete: SetNull)
+  allowanceOverride Int? // paisa per month
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([companyId, status])
+}
+
+model OfficeLocation {
+  id         String        @id @default(cuid())
+  companyId  String
+  company    Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name       String // "Head office, 4th floor"
+  line1      String
+  area       String
+  ward       Int?
+  landmark   String?
+  zoneId     String?
+  zone       DeliveryZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  slotId     String?
+  slot       DeliverySlot? @relation(fields: [slotId], references: [id], onDelete: SetNull)
+  receiverName  String?
+  receiverPhone String?
+  isActive   Boolean       @default(true)
+  createdAt  DateTime      @default(now())
+
+  members CompanyMember[]
+}
+
+model CorporateContract {
+  id           String    @id @default(cuid())
+  companyId    String
+  company      Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  title        String
+  startsOn     DateTime  @db.Date
+  endsOn       DateTime? @db.Date
+  pricePerMeal Int? // paisa agreed rate
+  minMealsPerDay Int?
+  terms        String?
+  documentUrl  String?
+  status       String    @default("DRAFT") // DRAFT | ACTIVE | ENDED
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model CompanyInvite {
+  id         String     @id @default(cuid())
+  companyId  String
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  email      String
+  name       String?
+  department String?
+  role       MemberRole @default(MEMBER)
+  tokenHash  String     @unique
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  invitedById String?
+  createdAt  DateTime   @default(now())
+
+  @@index([companyId])
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  TRIAL
+  PROPOSAL
+  WON
+  LOST
+}
+
+model CorporateLead {
+  id           String     @id @default(cuid())
+  companyName  String
+  contactName  String
+  email        String
+  phone        String
+  headcount    Int?
+  location     String?
+  mealsPerWeek Int?
+  budget       String?
+  message      String?
+  source       String     @default("website")
+  status       LeadStatus @default(NEW)
+  notes        String?
+  quotePerMeal Int? // paisa
+  quoteValidUntil DateTime? @db.Date
+  nextFollowUp DateTime?  @db.Date
+  companyId    String?
+  company      Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([status])
+}
+
+// ═════════════════════════════ Kitchen operations ═════════════════════════════
+
+enum BatchStatus {
+  PLANNED
+  COOKING
+  DONE
+  CANCELLED
+}
+
+model ProductionBatch {
+  id             String      @id @default(cuid())
+  kitchenId      String
+  kitchen        Kitchen     @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  date           DateTime    @db.Date
+  menuItemId     String
+  menuItem       MenuItem    @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+  recipeVersionId String?
+  station        String?
+  plannedPortions Int
+  bufferPortions Int         @default(0)
+  actualPortions Int?
+  wastePortions  Int?
+  status         BatchStatus @default(PLANNED)
+  assignedTo     String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  stockPosted    Boolean     @default(false) // ingredient usage written to the stock ledger
+  notes          String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  qcLogs QcLog[]
+
+  @@unique([kitchenId, date, menuItemId])
+}
+
+model KitchenTicket {
+  id           String    @id @default(cuid())
+  orderId      String    @unique
+  order        Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  printedAt    DateTime?
+  reprintCount Int       @default(0)
+  createdAt    DateTime  @default(now())
+}
+
+model PackingCheck {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  itemsOk     Boolean
+  labelOk     Boolean
+  allergenOk  Boolean
+  sealedOk    Boolean  @default(true)
+  note        String?
+  checkedById String?
+  createdAt   DateTime @default(now())
+}
+
+model QcLog {
+  id        String           @id @default(cuid())
+  kitchenId String
+  kitchen   Kitchen          @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  date      DateTime         @db.Date
+  batchId   String?
+  batch     ProductionBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  type      String // TEMPERATURE | TASTE | HYGIENE | PACKAGING | OTHER
+  result    String // PASS | FAIL
+  value     String? // "74°C"
+  note      String?
+  actorId   String?
+  createdAt DateTime         @default(now())
+}
+
+// ═════════════════════════════ Inventory ═════════════════════════════
+
+enum StockUnit {
+  KG
+  G
+  L
+  ML
+  PC
+  PACK
+}
+
+model Supplier {
+  id        String   @id @default(cuid())
+  name      String
+  contact   String?
+  phone     String?
+  email     String?
+  address   String?
+  panVat    String?
+  notes     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ingredients Ingredient[]
+  purchases   PurchaseOrder[]
+}
+
+/// A stock item. Quantity on hand = SUM(StockMovement.quantity) per kitchen.
+model Ingredient {
+  id           String    @id @default(cuid())
+  name         String    @unique
+  nameNe       String?
+  unit         StockUnit @default(KG)
+  costPerUnit  Int // paisa per unit (latest purchase price)
+  safetyStock  Float     @default(0)
+  reorderQty   Float     @default(0)
+  shelfLifeDays Int?
+  allergenCodes String[]
+  supplierId   String?
+  supplier     Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  recipeLines RecipeIngredient[]
+  movements   StockMovement[]
+  poLines     PurchaseOrderLine[]
+}
+
+enum StockMovementType {
+  RECEIPT
+  USAGE
+  WASTE
+  ADJUSTMENT
+  RETURN
+}
+
+model StockMovement {
+  id           String            @id @default(cuid())
+  ingredientId String
+  ingredient   Ingredient        @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  kitchenId    String
+  kitchen      Kitchen           @relation(fields: [kitchenId], references: [id], onDelete: Restrict)
+  type         StockMovementType
+  quantity     Float // + in / − out, in the ingredient unit
+  unitCost     Int? // paisa
+  reference    String? // PO number / batch id
+  idempotencyKey String?         @unique // e.g. "batch:<id>:usage"
+  expiresOn    DateTime?         @db.Date
+  note         String?
+  actorId      String?
+  createdAt    DateTime          @default(now())
+
+  @@index([ingredientId, kitchenId])
+}
+
+enum PurchaseStatus {
+  DRAFT
+  SENT
+  PARTIAL
+  RECEIVED
+  CANCELLED
+}
+
+model PurchaseOrder {
+  id          String         @id @default(cuid())
+  number      String         @unique
+  supplierId  String
+  supplier    Supplier       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  kitchenId   String
+  kitchen     Kitchen        @relation(fields: [kitchenId], references: [id], onDelete: Restrict)
+  status      PurchaseStatus @default(DRAFT)
+  expectedOn  DateTime?      @db.Date
+  total       Int            @default(0)
+  notes       String?
+  createdById String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  lines PurchaseOrderLine[]
+}
+
+model PurchaseOrderLine {
+  id           String        @id @default(cuid())
+  poId         String
+  po           PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  ingredientId String
+  ingredient   Ingredient    @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  quantity     Float
+  unitCost     Int
+  receivedQty  Float         @default(0)
+}
+
+// ═════════════════════════════ Dispatch ═════════════════════════════
+
+model DeliveryRoute {
+  id          String        @id @default(cuid())
+  kitchenId   String
+  kitchen     Kitchen       @relation(fields: [kitchenId], references: [id], onDelete: Restrict)
+  date        DateTime      @db.Date
+  name        String
+  slotId      String?
+  slot        DeliverySlot? @relation(fields: [slotId], references: [id], onDelete: SetNull)
+  zoneId      String?
+  zone        DeliveryZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  riderId     String?
+  rider       User?         @relation(fields: [riderId], references: [id], onDelete: SetNull)
+  status      String        @default("PLANNED") // PLANNED | OUT | DONE
+  cashCollected Int         @default(0)
+  cashHandedIn  Int?
+  cashCheckedById String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  notes       String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  assignments DeliveryAssignment[]
+
+  @@index([date])
+}
+
+model DeliveryAssignment {
+  id        String        @id @default(cuid())
+  orderId   String        @unique
+  order     Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  routeId   String
+  route     DeliveryRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  sequence  Int           @default(0)
+  createdAt DateTime      @default(now())
+}
+
+model DeliveryEvent {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type      String // PICKED_UP | DELIVERED | FAILED | RETRY | NOTE | CASH_COLLECTED
+  note      String?
+  photoUrl  String?
+  otpOk     Boolean?
+  amount    Int?
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+}
+
+// ═════════════════════════════ Support, feedback, notifications ═════════════════════════════
+
+model SupportTicket {
+  id           String   @id @default(cuid())
+  number       String   @unique
+  userId       String?
+  user         User?    @relation("TicketCustomer", fields: [userId], references: [id], onDelete: SetNull)
+  name         String?
+  email        String?
+  phone        String?
+  orderId      String?
+  order        Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  subject      String
+  category     String   @default("GENERAL") // ORDER | PAYMENT | DELIVERY | FOOD | ACCOUNT | CORPORATE | GENERAL
+  status       String   @default("OPEN") // OPEN | PENDING | RESOLVED | CLOSED
+  priority     String   @default("NORMAL") // LOW | NORMAL | HIGH | URGENT
+  source       String   @default("account") // account | contact_form | staff
+  assignedToId String?
+  assignedTo   User?    @relation("TicketAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  resolvedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  messages SupportMessage[]
+
+  @@index([status])
+}
+
+model SupportMessage {
+  id        String        @id @default(cuid())
+  ticketId  String
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorId  String?
+  author    User?         @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  body      String
+  internal  Boolean       @default(false) // staff-only note
+  createdAt DateTime      @default(now())
+}
+
+model Feedback {
+  id          String   @id @default(cuid())
+  orderId     String   @unique
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rating      Int // 1–5
+  taste       Int?
+  portion     Int?
+  onTime      Boolean?
+  comment     String?
+  publishConsent Boolean @default(false) // may be quoted on the website with first name only
+  createdAt   DateTime @default(now())
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String?
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt])
+}
+
+model NotificationTemplate {
+  id        String   @id @default(cuid())
+  key       String
+  channel   String // EMAIL | SMS | IN_APP
+  locale    String   @default("en")
+  subject   String?
+  body      String // {{name}}, {{orderNumber}} …
+  isActive  Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+
+  @@unique([key, channel, locale])
+}
+
+model NotificationPreference {
+  id      String  @id @default(cuid())
+  userId  String
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topic   String // ORDER_UPDATES | PLAN_REMINDERS | MARKETING
+  channel String // EMAIL | SMS | IN_APP
+  enabled Boolean @default(true)
+
+  @@unique([userId, topic, channel])
+}
+
+/// Durable outbox: rows are sent by the cron worker with retries.
+model OutboundMessage {
+  id          String    @id @default(cuid())
+  channel     String // EMAIL | SMS
+  to          String
+  templateKey String?
+  subject     String?
+  body        String
+  status      String    @default("QUEUED") // QUEUED | SENT | FAILED | SKIPPED
+  attempts    Int       @default(0)
+  lastError   String?
+  dedupeKey   String?   @unique
+  sendAfter   DateTime  @default(now())
+  sentAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([status, sendAfter])
+}
+
+model JobRun {
+  id         String    @id @default(cuid())
+  name       String
+  key        String    @unique // idempotency key, e.g. "lock-day:2026-11-04:ktm-1"
+  status     String    @default("RUNNING") // RUNNING | DONE | FAILED
+  result     Json?
+  error      String?
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+}
+
+model DataRequest {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        String // EXPORT | DELETE
+  status      String    @default("OPEN") // OPEN | DONE | REJECTED
+  note        String?
+  handledById String?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model ContactMessage {
+  id         String   @id @default(cuid())
+  name       String
+  email      String
+  phone      String?
+  subject    String?
+  message    String
+  isRead     Boolean  @default(false)
+  isArchived Boolean  @default(false)
+  ticketId   String?
+  createdAt  DateTime @default(now())
+}
+
+model Subscriber {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  name           String?
+  source         String    @default("website")
+  consentAt      DateTime  @default(now())
+  unsubscribedAt DateTime?
+}
+
+// ═════════════════════════════ CMS ═════════════════════════════
+
+/// Published + draft copy of one website section in one locale.
+model ContentSection {
+  id          String   @id @default(cuid())
+  key         String
+  locale      String   @default("en")
+  data        Json // published
+  draft       Json? // unpublished edits
+  version     Int      @default(1)
+  publishedAt DateTime?
+  updatedBy   String?
+  updatedAt   DateTime @updatedAt
+
+  revisions ContentRevision[]
+
+  @@unique([key, locale])
+}
+
+model ContentRevision {
+  id        String         @id @default(cuid())
+  sectionId String
+  section   ContentSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  version   Int
+  data      Json
+  action    String // PUBLISH | ROLLBACK
+  actorId   String?
+  createdAt DateTime       @default(now())
+
+  @@index([sectionId])
+}
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model Page {
+  id             String   @id @default(cuid())
+  slug           String   @unique
+  title          String
+  titleNe        String?
+  body           String // markdown, rendered with raw HTML escaped
+  bodyNe         String?
+  seoTitle       String?
+  seoDescription String?
+  published      Boolean  @default(true)
+  showInFooter   Boolean  @default(true)
+  needsLegalReview Boolean @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Post {
+  id          String    @id @default(cuid())
+  slug        String    @unique
+  title       String
+  titleNe     String?
+  excerpt     String?
+  body        String
+  bodyNe      String?
+  coverImage  String?
+  tags        String[]
+  author      String?
+  published   Boolean   @default(false)
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Banner {
+  id        String    @id @default(cuid())
+  placement String    @default("TOP") // TOP | HOME | MENU | CHECKOUT
+  text      String
+  textNe    String?
+  link      String?
+  linkLabel String?
+  tone      String    @default("turmeric")
+  startsAt  DateTime?
+  endsAt    DateTime?
+  isActive  Boolean   @default(true)
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+}
+
+/// Only shown on the site when consent is recorded.
+model Testimonial {
+  id          String   @id @default(cuid())
+  name        String
+  role        String?
+  company     String?
+  quote       String
+  rating      Int?
+  avatar      String?
+  consentNote String // how / when consent was given
+  feedbackId  String?
+  published   Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+}
+
+model Faq {
+  id         String   @id @default(cuid())
+  question   String
+  questionNe String?
+  answer     String
+  answerNe   String?
+  category   String   @default("General")
+  published  Boolean  @default(true)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+}
+
+model MediaAsset {
+  id           String   @id @default(cuid())
+  url          String
+  name         String
+  type         String
+  size         Int
+  width        Int?
+  height       Int?
+  alt          String?
+  credit       String? // photographer / licence — required for anything not shot in-house
+  isPlaceholder Boolean @default(false)
+  uploadedById String?
+  createdAt    DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  summary   String?
+  reason    String?
+  before    Json?
+  after     Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@index([actorId])
+}

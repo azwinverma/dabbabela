@@ -1,0 +1,15 @@
+node_modules
+.next
+out
+.env
+.env*.local
+*.tsbuildinfo
+next-env.d.ts
+.vercel
+public/uploads
+.DS_Store
+
+/.next-*/
+/test-results/
+/playwright-report/
+/public/uploads/

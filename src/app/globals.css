@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-paper font-sans text-ink antialiased;
+    overflow-x: clip;
+    font-feature-settings: "ss01", "cv11";
+  }
+  h1, h2, h3, h4 {
+    @apply font-display tracking-tight;
+    text-wrap: balance;
+  }
+  p { text-wrap: pretty; }
+  ::selection { background: #E3A83B; color: #27221D; }
+  :focus-visible { outline: 3px solid #E3A83B; outline-offset: 2px; border-radius: 4px; }
+  input, select, textarea { font: inherit; }
+}
+
+@layer components {
+  /* paper grain — subtle, CSS only */
+  .grain {
+    background-image:
+      radial-gradient(rgba(39,34,29,.045) 1px, transparent 1px),
+      radial-gradient(rgba(39,34,29,.03) 1px, transparent 1px);
+    background-size: 7px 7px, 13px 13px;
+    background-position: 0 0, 3px 5px;
+  }
+  /* brick wall for graffiti sections */
+  .wall {
+    background-color: #27221D;
+    background-image:
+      linear-gradient(rgba(255,255,255,.035) 2px, transparent 2px),
+      linear-gradient(90deg, rgba(255,255,255,.035) 2px, transparent 2px),
+      linear-gradient(90deg, rgba(255,255,255,.035) 2px, transparent 2px);
+    background-size: 100% 44px, 120px 44px, 120px 44px;
+    background-position: 0 0, 0 0, 60px 22px;
+  }
+  .stencil {
+    @apply font-display font-extrabold uppercase tracking-[0.08em];
+  }
+  .tag-sticker {
+    @apply inline-flex items-center gap-1.5 rounded-full border-2 border-ink bg-besar px-3 py-1 text-xs font-bold uppercase tracking-wider text-ink shadow-sticker-sm;
+  }
+  .card {
+    @apply rounded-2xl border-2 border-ink bg-paper-card;
+  }
+  .link-underline {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-size: 0% 2px;
+    background-repeat: no-repeat;
+    background-position: 0 100%;
+    transition: background-size .25s ease;
+  }
+  .link-underline:hover { background-size: 100% 2px; }
+
+  .skeleton { @apply animate-pulse rounded-md bg-ink/10; }
+  .sr-only-focusable:not(:focus) { @apply sr-only; }
+  .lang-ne { font-family: var(--font-deva), var(--font-body), sans-serif; }
+  .prose-poko { @apply text-[1.05rem] leading-relaxed text-ink-soft; }
+  .prose-poko h2 { @apply mb-3 mt-8 text-2xl font-bold text-ink; }
+  .prose-poko h3 { @apply mb-2 mt-6 text-xl font-bold text-ink; }
+  .prose-poko p { @apply my-4; }
+  .prose-poko a { @apply font-semibold text-sindoor underline decoration-2 underline-offset-2; }
+  .prose-poko ul { @apply my-4 list-disc pl-6; }
+  .prose-poko ol { @apply my-4 list-decimal pl-6; }
+  .prose-poko li { @apply my-1; }
+  .prose-poko em { @apply font-marker not-italic text-sindoor; }
+  .prose-poko blockquote { @apply my-6 border-l-4 border-besar pl-4 italic; }
+  .prose-poko img { @apply my-6 rounded-xl border-2 border-ink; }
+  .prose-poko strong { @apply text-ink; }
+
+  /* admin form controls */
+  .field {
+    @apply block w-full rounded-lg border border-ink-line bg-white px-3 py-2 text-sm text-ink shadow-sm outline-none transition placeholder:text-ink-mute/70 focus:border-ink focus:ring-2 focus:ring-besar/50 disabled:bg-paper-deep;
+  }
+  .label {
+    @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-soft;
+  }
+}
+
+@layer utilities {
+  .text-shadow-spray { text-shadow: 0 0 18px rgba(227,168,59,.35); }
+  .scrollbar-none { scrollbar-width: none; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: #fff; }
+}
