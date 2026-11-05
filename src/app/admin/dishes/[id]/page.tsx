@@ -13,6 +13,7 @@ import { ImageField } from "@/components/admin/ImageField";
 import { ConfirmAction } from "@/components/admin/ConfirmAction";
 import { RecipeEditor } from "../RecipeEditor";
 import { deleteDish, restoreRecipeVersion, saveDish, saveRecipe } from "../actions";
+import { setKitchenAvailability } from "../../boxes/actions";
 
 export default async function DishPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("menu.view");
@@ -197,6 +198,9 @@ export default async function DishPage({ params }: { params: Promise<{ id: strin
             </Panel>
           )}
           {!isNew && (
+            <DishKitchens dishId={dish!.id} canEdit={can(user, "menu.edit")} />
+          )}
+          {!isNew && (
             <Panel title="Used in">
               {dish!.boxItems.length ? (
                 <ul className="space-y-1 text-sm">
@@ -216,5 +220,29 @@ export default async function DishPage({ params }: { params: Promise<{ id: strin
         </div>
       </div>
     </>
+  );
+}
+
+/** Per-kitchen availability of a dish. Dabbas containing an unavailable dish are hidden at that kitchen. */
+async function DishKitchens({ dishId, canEdit }: { dishId: string; canEdit: boolean }) {
+  const [kitchens, rows] = await Promise.all([
+    db.kitchen.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    db.kitchenAvailability.findMany({ where: { menuItemId: dishId, isAvailable: false }, select: { kitchenId: true } }),
+  ]);
+  const off = new Set(rows.map((r) => r.kitchenId));
+  return (
+    <Panel title="Kitchen availability">
+      <p className="mb-3 text-sm text-ink-mute">Marking a dish unavailable hides every dabba that contains it at that kitchen.</p>
+      <ul className="space-y-2">
+        {kitchens.map((k) => (
+          <li key={k.id} className="flex items-center justify-between gap-2 rounded-lg border border-ink-line/60 px-3 py-2 text-sm">
+            <span>
+              {k.name} <span className={`ml-1 text-xs font-semibold ${off.has(k.id) ? "text-sindoor" : "text-saag"}`}>{off.has(k.id) ? "unavailable" : "available"}</span>
+            </span>
+            {canEdit && <ConfirmAction action={setKitchenAvailability.bind(null, { menuItemId: dishId }, k.id, off.has(k.id))} label={off.has(k.id) ? "Make available" : "Mark unavailable"} variant="ghost" />}
+          </li>
+        ))}
+      </ul>
+    </Panel>
   );
 }

@@ -8,6 +8,7 @@ import { guarded } from "../_kit/guard";
 import { f, FieldError } from "../_kit/form";
 import { recipeCost, refreshBoxCosts } from "../_kit/costing";
 import { CATEGORY_LABEL, DIET_LABEL } from "@/lib/labels";
+import { revalidatePublicMenu } from "@/server/menu";
 
 const CATS = Object.keys(CATEGORY_LABEL) as ItemCategory[];
 const DIETS = Object.keys(DIET_LABEL) as Diet[];
@@ -66,6 +67,7 @@ export async function saveDish(id: string | null, _prev: ActionResult, fd: FormD
     });
     await refreshBoxCosts({ menuItemId: row.id });
     await audit({ actorId: user.id, action: id ? "dish.update" : "dish.create", entity: "MenuItem", entityId: row.id, summary: row.name, before, after: { ...data, allergenIds, mayContain: [...mayIds] } });
+    revalidatePublicMenu();
     return done(id ? "Dish saved" : "Dish created", id ? undefined : `/admin/dishes/${row.id}`);
   }, ["/admin/dishes", "/menu"]);
 }
@@ -126,7 +128,8 @@ export async function toggleDish(id: string): Promise<ActionResult> {
     const d = await db.menuItem.findUnique({ where: { id } });
     if (!d) return fail("Not found");
     await db.menuItem.update({ where: { id }, data: { isActive: !d.isActive } });
-    await audit({ actorId: user.id, action: d.isActive ? "dish.archive" : "dish.activate", entity: "MenuItem", entityId: id, summary: d.name });
+    await audit({ actorId: user.id, action: d.isActive ? "dish.archive" : "dish.activate", entity: "MenuItem", entityId: id, summary: d.name, before: { isActive: d.isActive }, after: { isActive: !d.isActive } });
+    revalidatePublicMenu();
     return done(d.isActive ? "Archived" : "Active again");
   }, ["/admin/dishes"]);
 }

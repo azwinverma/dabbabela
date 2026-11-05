@@ -50,7 +50,7 @@ export const ADMIN_NAV_ALL: NavGroup[] = [
     items: [
       { href: "/admin/dishes", label: "Dishes & recipes", icon: "Soup", perm: "menu.view" },
       { href: "/admin/boxes", label: "Dabbas", icon: "Package", perm: "menu.view" },
-      { href: "/admin/categories", label: "Meal categories", icon: "Tags", perm: "menu.view", ready: false, owner: "WP-04" },
+      { href: "/admin/categories", label: "Meal categories", icon: "Tags", perm: "menu.view", ready: true, owner: "WP-04" },
       { href: "/admin/weekly-menus", label: "Weekly menus", icon: "CalendarDays", perm: "menu.view" },
       { href: "/admin/builder", label: "Build-a-Dabba rules", icon: "Blocks", perm: "menu.view" },
       { href: "/admin/plans", label: "Plan catalogue", icon: "Layers", perm: "plans.view" },

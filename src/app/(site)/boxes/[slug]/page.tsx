@@ -15,7 +15,8 @@ import { Splatter } from "@/components/art/Graffiti";
 type Params = Promise<{ slug: string }>;
 
 async function load(slug: string) {
-  return db.lunchBox.findFirst({ where: { slug, isActive: true }, include: boxInclude });
+  // Hidden dabbas stay orderable by staff but have no public page.
+  return db.lunchBox.findFirst({ where: { slug, isActive: true, isVisible: true }, include: boxInclude });
 }
 
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
@@ -23,7 +24,7 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   if (!box) return { title: "Dabba not found" };
   return {
     title: box.name,
-    description: box.description ?? box.tagline ?? undefined,
+    description: box.shortDescription ?? box.description ?? box.tagline ?? undefined,
     alternates: { canonical: `/boxes/${box.slug}` },
     openGraph: box.image ? { images: [box.image] } : undefined,
   };
@@ -61,12 +62,22 @@ export default async function BoxPage({ params }: { params: Params }) {
           </nav>
           <h1 className="mt-3 text-4xl font-extrabold leading-[1.03] md:text-5xl">{box.name}</h1>
           {box.tagline && <p className="mt-3 text-lg text-ink-soft">{box.tagline}</p>}
+          {(box.category || box.isFeatured) && (
+            <p className="mt-2 flex flex-wrap gap-2 text-xs font-bold uppercase tracking-wider">
+              {box.isFeatured && <span className="rounded-full border-2 border-ink bg-besar px-2 py-0.5">{locale === "ne" ? "विशेष" : "Featured"}</span>}
+              {box.category && (
+                <Link href={`/menu?cat=${box.category.slug}`} className="rounded-full border-2 border-ink/30 px-2 py-0.5 hover:border-ink">
+                  {box.category.name}
+                </Link>
+              )}
+            </p>
+          )}
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <span className="font-display text-3xl font-extrabold text-sindoor">{rs(box.price)}</span>
             <DietBadge diet={box.diet} t={t} verified={box.dietVerified} />
             <SpiceMeter level={box.spice} />
           </div>
-          {box.description && <p className="mt-5 leading-relaxed text-ink-soft">{box.description}</p>}
+          {box.description ? <p className="mt-5 leading-relaxed text-ink-soft">{box.description}</p> : box.shortDescription && <p className="mt-5 leading-relaxed text-ink-soft">{box.shortDescription}</p>}
 
           {hit.length > 0 && (
             <p role="alert" className="mt-5 rounded-xl border-2 border-sindoor bg-sindoor-light px-4 py-3 text-sm font-semibold text-sindoor-dark">
@@ -81,6 +92,14 @@ export default async function BoxPage({ params }: { params: Params }) {
               subs={box.subs}
               labels={{ add: t.site.addToList, added: t.site.added, checkout: t.site.checkout, day: t.site.pickDay, none: t.site.noDays, swaps: t.site.swaps, swapNone: t.site.swapNone }}
             />
+            {(() => {
+              const low = dates.filter((d) => !d.soldOut && d.remaining != null && d.remaining <= 10);
+              return low.length > 0 ? (
+                <p className="mt-3 text-sm font-semibold text-besar-dark">
+                  {low.map((d) => `${d.label}: ${locale === "ne" ? `${d.remaining} वटा मात्र बाँकी` : `only ${d.remaining} left`}`).join(" · ")}
+                </p>
+              ) : null;
+            })()}
             {dates.length === 0 && (
               <p className="mt-3 text-sm">
                 <Link href="/build" className="font-semibold text-sindoor underline underline-offset-2">{t.nav.build}</Link>
