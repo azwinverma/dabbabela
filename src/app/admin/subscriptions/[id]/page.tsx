@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requirePermission } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { formatDay, formatStamp, isoDate, todayKTM } from "@/lib/dates";
 import { rs } from "@/lib/money";
 import { METHOD_LABEL, PAYMENT_STATUS } from "@/lib/labels";
@@ -10,7 +11,9 @@ import { Badge } from "@/components/ui/Badge";
 import { ConfirmAction } from "@/components/admin/ConfirmAction";
 import { ReasonForm } from "@/components/admin/ops/ReasonForm";
 import { piiFor } from "@/components/admin/ops/scope";
-import { cancelPlanAction, pauseAction, resumeAction, staffSkipAction, staffUnskipAction } from "../actions";
+import { getOffersForDates } from "@/server/menu";
+import { extraMeals, planMealPrice } from "@/server/subscriptions";
+import { cancelPlanAction, pauseAction, resumeAction, staffSkipAction, staffSwapAction, staffUnskipAction } from "../actions";
 
 export const metadata = { title: "Meal plan" };
 
@@ -22,9 +25,12 @@ export default async function SubPage({ params }: { params: Promise<{ id: string
     include: {
       user: { select: { id: true, name: true, email: true, phoneNumber: true } },
       plan: true,
+      price: true,
+      renewedFrom: { select: { id: true, reference: true } },
+      renewals: { select: { id: true, reference: true, status: true } },
       address: true,
       slot: { select: { label: true } },
-      orders: { include: { items: { select: { name: true } } }, orderBy: { deliveryDate: "asc" } },
+      orders: { include: { items: { select: { name: true, boxId: true } } }, orderBy: { deliveryDate: "asc" } },
       payments: true,
       changes: { orderBy: { createdAt: "desc" } },
       pauses: { orderBy: { createdAt: "desc" } },
@@ -36,6 +42,11 @@ export default async function SubPage({ params }: { params: Promise<{ id: string
   const delivered = s.orders.filter((o) => o.status === "DELIVERED").length;
   const live = s.orders.filter((o) => !["CANCELLED", "SKIPPED"].includes(o.status)).length;
   const open = s.status === "ACTIVE" || s.status === "PAUSED" || s.status === "PENDING_PAYMENT";
+  const editable = can(user, "subscriptions.edit");
+  const swappable = s.status === "ACTIVE" && editable ? s.orders.filter((o) => o.status === "SCHEDULED" && isoDate(o.deliveryDate) >= today) : [];
+  const offers = new Map<string, Awaited<ReturnType<typeof getOffersForDates>>>();
+  for (const k of new Set(swappable.map((o) => o.kitchenId))) offers.set(k, await getOffersForDates(swappable.filter((o) => o.kitchenId === k).map((o) => isoDate(o.deliveryDate)), k));
+  const extras = await extraMeals(s.id);
   return (
     <div>
       <PageHeader back={{ href: "/admin/subscriptions", label: "Meal plans" }} title={`${s.reference} · ${s.plan.name}`} description={<span className="flex items-center gap-2"><SubBadge status={s.status} /> {formatDay(isoDate(s.startDate))} → {formatDay(isoDate(s.endDate))} · {delivered}/{s.mealsTotal} delivered</span>} />
@@ -58,12 +69,38 @@ export default async function SubPage({ params }: { params: Promise<{ id: string
                         <div className="mt-2"><ReasonForm action={staffSkipAction.bind(null, s.id, o.id)} label="Skip meal" placeholder="Why (e.g. customer called)" /></div>
                       </details>
                     )}
+                    {swappable.includes(o) && (offers.get(o.kitchenId)?.get(d)?.items.length ?? 0) > 1 && (
+                      <details className="mt-1">
+                        <summary className="cursor-pointer text-xs font-semibold text-akash">Swap dabba</summary>
+                        <div className="mt-2">
+                          <ReasonForm action={staffSwapAction.bind(null, s.id, o.id)} label="Swap" placeholder="Why (e.g. customer called)">
+                            <select name="boxId" className="field" aria-label="New dabba" defaultValue={o.items[0]?.boxId ?? ""}>
+                              {offers.get(o.kitchenId)!.get(d)!.items.filter((i) => !i.soldOut || i.box.id === o.items[0]?.boxId).map((i) => (
+                                <option key={i.box.id} value={i.box.id}>{i.box.name} · {rs(planMealPrice(s, i.price))}</option>
+                              ))}
+                            </select>
+                          </ReasonForm>
+                        </div>
+                      </details>
+                    )}
                     {o.status === "SKIPPED" && d >= today && o.paymentStatus !== "REFUNDED" && <div className="mt-1"><ConfirmAction action={staffUnskipAction.bind(null, s.id, o.id)} label="Undo skip" variant="ghost" className="h-7 px-2 text-xs" /></div>}
                   </li>
                 );
               })}
             </ul>
           </Panel>
+          {extras.length > 0 && (
+            <Panel title={`Extra meals (${extras.length})`}>
+              <ul className="space-y-1 text-sm">
+                {extras.map((o) => (
+                  <li key={o.id} className="flex justify-between gap-3">
+                    <Link href={`/admin/orders/${o.id}`} className="hover:text-sindoor">{formatDay(isoDate(o.deliveryDate))} · {o.items.map((i) => i.name).join(", ")}</Link>
+                    <span className="flex items-center gap-2 tabular-nums">{rs(o.total)} <OrderBadge status={o.status} /></span>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          )}
           <Panel title="History">
             <ul className="space-y-2 text-sm">
               {s.changes.map((c) => (
@@ -87,7 +124,9 @@ export default async function SubPage({ params }: { params: Promise<{ id: string
                 ["Veg only", s.vegOnly ? "Yes" : "No"],
                 ["Address", s.address ? `${s.address.label} · ${s.address.area}` : "—"],
                 ["Slot", s.slot?.label],
-                ["Per meal", rs(s.pricePerMeal)],
+                ["Per meal", `${rs(s.pricePerMeal)}${s.price ? ` (price version from ${isoDate(s.price.effectiveFrom)})` : ""}`],
+                ["Renewal of", s.renewedFrom ? <Link key="rf" href={`/admin/subscriptions/${s.renewedFrom.id}`} className="text-akash underline">{s.renewedFrom.reference}</Link> : null],
+                ["Renewed as", s.renewals.length ? <span key="rn">{s.renewals.map((r) => <Link key={r.id} href={`/admin/subscriptions/${r.id}`} className="mr-2 text-akash underline">{r.reference} ({r.status.toLowerCase()})</Link>)}</span> : null],
                 ["Total", `${rs(s.total)}${s.discount ? ` (−${rs(s.discount)})` : ""}`],
                 ["Renewal", s.renewal.toLowerCase()],
                 ["Cancel reason", s.cancelReason],

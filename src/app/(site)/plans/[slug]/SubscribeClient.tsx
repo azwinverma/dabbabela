@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { PaymentMethod, Weekday } from "@prisma/client";
-import { quotePlanAction, subscribeAction, type PlanQuoteDTO } from "@/lib/actions/shop";
+import type { PlanQuoteDTO } from "@/lib/actions/shop";
+import { quotePlanLengthAction, subscribePlanAction } from "@/lib/actions/plans";
 import { AddressCard, AddressForm, PaymentPicker, SummaryRow, type AddressView } from "@/components/site/DeliveryFields";
 import { buttonClass } from "@/components/ui/Button";
 import { formatDay, weekdayOf } from "@/lib/dates";
@@ -21,7 +22,7 @@ const ORDER: Weekday[] = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 
 type Props = {
   t: AccountDict["plan"];
-  plan: { id: string; slug: string; name: string; durationWeeks: number; minDaysPerWeek: number; includesDelivery: boolean };
+  plan: { id: string; slug: string; name: string; durationWeeks: number; minDaysPerWeek: number; includesDelivery: boolean; weeks: { min: number; max: number; default: number } };
   starts: string[];
   deliveryDays: Weekday[];
   dayOptions: DayOptions;
@@ -41,6 +42,7 @@ export function SubscribeClient(p: Props) {
   const [startDate, setStartDate] = useState(p.starts[0] ?? "");
   const [days, setDays] = useState<Weekday[]>(p.deliveryDays.filter((d) => d !== "SAT"));
   const [vegOnly, setVegOnly] = useState(Boolean(p.user?.vegDefault));
+  const [weeks, setWeeks] = useState(p.plan.weeks.default);
   const [addressId, setAddressId] = useState<string | null>(p.addresses.find((a) => a.isDefault && a.zoneId)?.id ?? p.addresses.find((a) => a.zoneId)?.id ?? null);
   const [adding, setAdding] = useState(false);
   const [slotId, setSlotId] = useState("");
@@ -64,7 +66,7 @@ export function SubscribeClient(p: Props) {
     let live = true;
     setLoading(true);
     const id = setTimeout(() => {
-      quotePlanAction({ planId: p.plan.id, startDate, days, picks: cleanPicks, vegOnly, addressId, couponCode: coupon })
+      quotePlanLengthAction({ planId: p.plan.id, startDate, days, weeks, picks: cleanPicks, vegOnly, addressId, couponCode: coupon })
         .then((q) => {
           if (!live) return;
           if ("meals" in q) {
@@ -82,7 +84,7 @@ export function SubscribeClient(p: Props) {
       live = false;
       clearTimeout(id);
     };
-  }, [p.plan.id, startDate, days, cleanPicks, vegOnly, addressId, coupon]);
+  }, [p.plan.id, startDate, days, weeks, cleanPicks, vegOnly, addressId, coupon]);
 
   function toggleDay(d: Weekday) {
     setDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : ORDER.filter((x) => x === d || cur.includes(x))));
@@ -96,7 +98,7 @@ export function SubscribeClient(p: Props) {
     if (!address || !effectiveMethod) return;
     setError(null);
     startSubmit(async () => {
-      const r = await subscribeAction({ planId: p.plan.id, startDate, days, picks: cleanPicks, vegOnly, addressId: address.id, slotId: slotId || null, couponCode: coupon, method: effectiveMethod, idempotencyKey });
+      const r = await subscribePlanAction({ planId: p.plan.id, startDate, days, weeks, picks: cleanPicks, vegOnly, addressId: address.id, slotId: slotId || null, couponCode: coupon, method: effectiveMethod, idempotencyKey });
       if (!r.ok) {
         setError(r.error ?? "We couldn't start your plan");
         if (r.redirectTo) router.push(r.redirectTo);
@@ -123,6 +125,18 @@ export function SubscribeClient(p: Props) {
                 ))}
               </select>
             </label>
+            {p.plan.weeks.max > p.plan.weeks.min && (
+              <label>
+                <span className="label">Length</span>
+                <select value={weeks} onChange={(e) => setWeeks(parseInt(e.target.value, 10))} className="field">
+                  {Array.from({ length: p.plan.weeks.max - p.plan.weeks.min + 1 }, (_, i) => p.plan.weeks.min + i).map((w) => (
+                    <option key={w} value={w}>
+                      {w} week{w === 1 ? "" : "s"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label className="flex items-end gap-2 pb-2 text-sm font-semibold">
               <input type="checkbox" checked={vegOnly} onChange={(e) => setVegOnly(e.target.checked)} className="h-4 w-4 accent-sindoor" />
               {t.vegOnly}

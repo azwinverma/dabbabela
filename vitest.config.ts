@@ -9,7 +9,7 @@ try {
 const BASE = process.env.DATABASE_URL_TEST ?? "";
 if (!/test/.test(BASE)) throw new Error("Set DATABASE_URL_TEST to a throwaway database whose name contains 'test'");
 // Each run gets its own schema (created + migrated in global-setup, dropped in teardown).
-const SCHEMA = process.env.TEST_SCHEMA ?? `t${Date.now()}`;
+const SCHEMA = process.env.TEST_SCHEMA ?? `t${Date.now()}${process.pid}`; // pid avoids clashes between runs started in the same millisecond
 process.env.TEST_SCHEMA = SCHEMA;
 const u = new URL(BASE);
 u.searchParams.set("schema", SCHEMA);

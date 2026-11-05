@@ -6,6 +6,7 @@ import { rs } from "@/lib/money";
 import { SUB_STATUS } from "@/lib/labels";
 import { Badge } from "@/components/ui/Badge";
 import { LinkButton } from "@/components/ui/Button";
+import { cancelPolicyFor } from "@/server/subscriptions";
 import { PlanActions } from "./PlanActions";
 
 export default async function PlansPage() {
@@ -13,7 +14,9 @@ export default async function PlansPage() {
   const subs = await db.subscription.findMany({
     where: { userId: user.id },
     include: {
-      plan: { select: { name: true, slug: true } },
+      plan: { select: { name: true, slug: true, isActive: true, cancelPolicy: true } },
+      renewedFrom: { select: { id: true, reference: true } },
+      renewals: { where: { status: { not: "CANCELLED" } }, select: { id: true, reference: true } },
       address: { select: { label: true, area: true } },
       payments: { where: { status: { in: ["PENDING", "FAILED"] } }, select: { id: true } },
       _count: { select: { orders: { where: { status: "DELIVERED" } } } },
@@ -49,6 +52,12 @@ export default async function PlansPage() {
                     <p className="text-xs text-ink-mute">
                       {s.reference} · {rs(s.total)} · to {s.address ? `${s.address.label} (${s.address.area})` : "—"}
                     </p>
+                    {(s.renewedFrom || s.renewals[0]) && (
+                      <p className="text-xs text-ink-mute">
+                        {s.renewedFrom && <>Renewal of <Link href={`/account/plans/${s.renewedFrom.id}`} className="underline">{s.renewedFrom.reference}</Link>. </>}
+                        {s.renewals[0] && <>Renewed as <Link href={`/account/plans/${s.renewals[0].id}`} className="underline">{s.renewals[0].reference}</Link>.</>}
+                      </p>
+                    )}
                   </div>
                   <Badge tone={SUB_STATUS[s.status].tone}>{SUB_STATUS[s.status].label}</Badge>
                 </div>
@@ -59,8 +68,14 @@ export default async function PlansPage() {
                 {s.payments[0] && s.status === "PENDING_PAYMENT" && (
                   <LinkButton href={`/pay/${s.payments[0].id}`} size="sm" className="mt-3">Finish payment</LinkButton>
                 )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <LinkButton href={`/account/plans/${s.id}`} size="sm" variant="outline">History, swaps &amp; extra meals</LinkButton>
+                  {!s.renewals[0] && s.plan.isActive && ["ACTIVE", "PAUSED", "COMPLETED"].includes(s.status) && (
+                    <LinkButton href={`/account/plans/${s.id}#renew`} size="sm">Renew</LinkButton>
+                  )}
+                </div>
                 <div className="mt-4">
-                  <PlanActions id={s.id} status={s.status} addresses={addresses} currentAddressId={s.addressId} />
+                  <PlanActions id={s.id} status={s.status} addresses={addresses} currentAddressId={s.addressId} cancelPolicy={cancelPolicyFor(s.plan)} />
                 </div>
               </li>
             );

@@ -7,10 +7,12 @@ import { PageHeader, Table, Th, Td, EmptyRow } from "@/components/admin/ui";
 import { Badge } from "@/components/ui/Badge";
 import { buttonClass } from "@/components/ui/Button";
 import { ConfirmAction } from "@/components/admin/ConfirmAction";
+import { syncPlanPriceMirrors, weeksRange } from "@/server/subscriptions";
 import { togglePlan } from "./actions";
 
 export default async function PlansPage() {
   await requirePermission("plans.view");
+  await syncPlanPriceMirrors(); // a scheduled price version that became current today
   const plans = await db.mealPlan.findMany({
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     include: { _count: { select: { subscriptions: true } }, subscriptions: { where: { status: "ACTIVE" }, select: { id: true } } },
@@ -46,7 +48,12 @@ export default async function PlansPage() {
               </Td>
               <Td className="text-xs">{p.kind.toLowerCase()}</Td>
               <Td className="text-sm">
-                {p.durationWeeks} wk · min {p.minDaysPerWeek} d/wk
+                {(() => {
+                  const r = weeksRange(p);
+                  return r.min === r.max ? `${r.min} wk` : `${r.min}–${r.max} wk`;
+                })()}{" "}
+                · min {p.minDaysPerWeek} d/wk
+                <div className="text-xs text-ink-mute">skip: {(p.skipPolicy ?? "global").toLowerCase()} · cancel: {(p.cancelPolicy ?? "credit").toLowerCase().replace("_", " ")}</div>
               </Td>
               <Td className="text-right font-semibold tabular-nums">{rs(p.pricePerMeal)}</Td>
               <Td className="text-right text-xs tabular-nums text-ink-mute">{p.compareAtPrice ? `${rs(p.compareAtPrice - p.pricePerMeal)} / meal` : "—"}</Td>
