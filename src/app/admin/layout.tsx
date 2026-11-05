@@ -31,6 +31,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       kitchen={kitchen?.name ?? null}
       twoFactor={Boolean(user.twoFactorEnabled)}
       logoutAction={signOutAction}
+      search={(["orders.view", "customers.view", "menu.view", "corporate.view"] as const).some((p) => can(user, p))}
       badges={{
         "/admin/leads": leads,
         "/admin/messages": messages,
