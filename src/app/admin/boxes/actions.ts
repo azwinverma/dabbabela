@@ -8,6 +8,7 @@ import { parseRupees } from "@/lib/money";
 import { guarded } from "../_kit/guard";
 import { f, FieldError } from "../_kit/form";
 import { refreshBoxCosts } from "../_kit/costing";
+import { revalidatePublicMenu } from "@/server/menu";
 
 const ACCENTS = ["achar", "turmeric", "saag", "charcoal"];
 
@@ -45,8 +46,17 @@ export async function saveBox(id: string | null, _prev: ActionResult, fd: FormDa
       tags: f.list(fd, "tags").slice(0, 8),
       isActive: f.bool(fd, "isActive"),
       sortOrder: f.int(fd, "sortOrder", 0),
+      categoryId: f.opt(fd, "categoryId", 40),
+      shortDescription: f.opt(fd, "shortDescription", 200),
+      shortDescriptionNe: f.opt(fd, "shortDescriptionNe", 200),
+      isFeatured: f.bool(fd, "isFeatured"),
+      isVisible: f.bool(fd, "isVisible"),
+      maxDailyQty: f.intOpt(fd, "maxDailyQty"),
+      packagingCost: f.moneyOpt(fd, "packagingCost", "Packaging cost") ?? 0,
     };
     if (data.price <= 0) throw new FieldError("price", "Price must be above zero");
+    if (data.maxDailyQty != null && (data.maxDailyQty < 0 || data.maxDailyQty > 100000)) throw new FieldError("maxDailyQty", "Max per day: a whole number, or blank for no limit");
+    if (data.categoryId && !(await db.mealCategory.findUnique({ where: { id: data.categoryId } }))) throw new FieldError("categoryId", "Unknown category");
     const dishes = await db.menuItem.count({ where: { id: { in: rows.map((r) => r.menuItemId) } } });
     if (dishes !== rows.length) return fail("One of the dishes no longer exists");
     const before = id ? await db.lunchBox.findUnique({ where: { id }, include: { items: true } }) : null;
@@ -60,6 +70,7 @@ export async function saveBox(id: string | null, _prev: ActionResult, fd: FormDa
     });
     await refreshBoxCosts({ boxId: box.id });
     await audit({ actorId: user.id, action: id ? "box.update" : "box.create", entity: "LunchBox", entityId: box.id, summary: box.name, before, after: { ...data, items: rows } });
+    revalidatePublicMenu();
     return done(id ? "Dabba saved" : "Dabba created", id ? undefined : `/admin/boxes/${box.id}`);
   }, ["/admin/boxes", "/menu"]);
 }
@@ -108,7 +119,8 @@ export async function toggleBox(id: string): Promise<ActionResult> {
     const b = await db.lunchBox.findUnique({ where: { id } });
     if (!b) return fail("Not found");
     await db.lunchBox.update({ where: { id }, data: { isActive: !b.isActive } });
-    await audit({ actorId: user.id, action: b.isActive ? "box.archive" : "box.activate", entity: "LunchBox", entityId: id, summary: b.name });
+    await audit({ actorId: user.id, action: b.isActive ? "box.archive" : "box.activate", entity: "LunchBox", entityId: id, summary: b.name, before: { isActive: b.isActive }, after: { isActive: !b.isActive } });
+    revalidatePublicMenu();
     return done(b.isActive ? "Archived — it stays on past orders" : "Active again");
   }, ["/admin/boxes", "/menu"]);
 }
@@ -121,4 +133,38 @@ export async function deleteBox(id: string): Promise<ActionResult> {
     await audit({ actorId: user.id, action: "box.delete", entity: "LunchBox", entityId: id, summary: b.name, before: b });
     return done("Deleted", "/admin/boxes");
   }, ["/admin/boxes"]);
+}
+
+/**
+ * Per-kitchen availability of a dabba or dish. A missing row means available, so turning one back on deletes the row.
+ * (Builder options are handled by the builder package.)
+ */
+export async function setKitchenAvailability(target: { boxId: string } | { menuItemId: string }, kitchenId: string, isAvailable: boolean): Promise<ActionResult> {
+  return guarded("menu.edit", async (user) => {
+    const boxId = "boxId" in target ? target.boxId : null;
+    const menuItemId = "menuItemId" in target ? target.menuItemId : null;
+    if (!boxId && !menuItemId) return fail("Nothing to update");
+    const [kitchen, exists] = await Promise.all([
+      db.kitchen.findUnique({ where: { id: kitchenId }, select: { name: true } }),
+      boxId ? db.lunchBox.count({ where: { id: boxId } }) : db.menuItem.count({ where: { id: menuItemId! } }),
+    ]);
+    if (!kitchen || !exists) return fail("Not found");
+    // Unique keys with NULL columns don't conflict in Postgres, so find-then-write instead of upsert.
+    const where = { kitchenId, boxId, menuItemId, optionId: null };
+    const before = await db.kitchenAvailability.findFirst({ where });
+    if (isAvailable) await db.kitchenAvailability.deleteMany({ where });
+    else if (before) await db.kitchenAvailability.update({ where: { id: before.id }, data: { isAvailable: false } });
+    else await db.kitchenAvailability.create({ data: { ...where, isAvailable: false } });
+    await audit({
+      actorId: user.id,
+      action: "menu.availability",
+      entity: boxId ? "LunchBox" : "MenuItem",
+      entityId: boxId ?? menuItemId,
+      summary: `${kitchen.name}: ${isAvailable ? "available" : "unavailable"}`,
+      before: { kitchenId, isAvailable: before ? before.isAvailable : true },
+      after: { kitchenId, isAvailable },
+    });
+    revalidatePublicMenu();
+    return done(isAvailable ? `Available at ${kitchen.name}` : `Hidden at ${kitchen.name}`);
+  }, "boxId" in target ? [`/admin/boxes/${target.boxId}`, "/admin/boxes"] : [`/admin/dishes/${target.menuItemId}`]);
 }

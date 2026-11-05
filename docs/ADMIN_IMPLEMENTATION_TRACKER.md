@@ -167,7 +167,40 @@ Note: Postgres treats NULLs as distinct in unique keys, so `DailySettlement(date
 
 **Depends:** WP-01.
 
-## WP-04: Menu catalogue and weekly menu builder ⬜ (L)
+## WP-04: Menu catalogue and weekly menu builder ✅ (L)
+**Done 2026-11-05.**
+- **Services (`src/server/menu.ts`):** `liveMenuWhere()` — a menu is live when PUBLISHED *or* a DRAFT whose `publishAt` has passed, so
+  scheduled menus appear at read time with no cron dependency. `publishMenu` (claim via `updateMany`, archives the other live menu for the
+  week/kitchen, revision, rotation re-sync, audit, revalidate), `scheduleMenu`, `cancelSchedule`, `unpublishMenu` (refused while
+  `orphanedOrders()` finds booked customer-picked orders whose dabba would vanish; rotation meals re-sync), `publishDueMenus()` (idempotent
+  cron hook for WP-16), `menuSnapshot` / `diffSnapshots`, `recordLiveEdit` (editing a live menu writes an EDIT revision),
+  `revalidatePublicMenu()` (tag `menu` + `/menu`, `/`, `/boxes/[slug]`, `/plans/[slug]`, `/corporate/sample-menu`, `/build`),
+  `bookedBoxes()` (remaining counts), `unavailableBoxIds()` (KitchenAvailability on box or any dish; without a kitchen = unavailable in every
+  active kitchen). `DayOffer` gains `cutoff`, `kind`, `menuId`, `replacement`; `capacity` = min(menu-day qty, `LunchBox.maxDailyQty`), so the
+  existing capacity checks in `orders.ts`/`subscriptions.ts` enforce max daily qty without edits there. `previewMenuId` / `excludeMenuId` options.
+- **Revisions:** `WeeklyMenuRevision` on SCHEDULE, PUBLISH, EDIT (live save) and UNPUBLISH; `WeeklyMenu.version` = latest revision.
+  Diff view on the editor page.
+- **Admin:** `/admin/categories` (CRUD, ▲▼ ordering, hide, delete only when unused; nav `ready: true`). Dabba form: category, short
+  description EN/NE, featured, visible, max per day, packaging cost, per-kitchen availability panel (dishes too). Week editor: kind
+  (STANDARD/SEASONAL/PROMO), drag-and-drop between days with a keyboard "Move to" menu + live-region announcements, qty/day, per-day cut-off,
+  "if sold out, offer" replacement, read-only when the user lacks `menu.edit`. Editor page: Publish now / Unpublish / Archive / Schedule /
+  Cancel schedule (only with `menu.publish`), copy to next week, revision history with diffs, "Preview as customer"
+  → `/admin/preview/menu/[id]` (staff-only, ordering disabled). Create form: copy any previous week (quantities, cut-offs, replacements;
+  sold-out flags reset), kind, kitchen.
+- **Public:** `getPublicWeek` hides `isVisible=false` and kitchen-unavailable dabbas, adds `remaining`, sold-out when the cap is reached,
+  replacement link, per-day cut-off ("Order by HH:MM"), week kind, `isFeatured`, `category`, `shortDescription`. `/menu`: category chips,
+  featured eyebrow + featured-first sort, "Only N left", "Sold out — try X", This week / Next week links. `/boxes/[slug]`: 404 for hidden
+  dabbas, category/featured chips, low-stock dates. Photo vs illustration and nutrition-with-source unchanged (`BoxCard`, `boxFacts`).
+- **Audit:** box/dish/category create-update-archive (before/after incl. price, packaging, visibility), availability, menu
+  create/update/schedule/publish/unpublish/archive.
+- **Tests:** `tests/integration/menu-admin.test.ts` (9): save validation, copy week, scheduled visibility before/after `publishAt`,
+  `publishDueMenus` idempotent, revisions + diff, revalidation called, max daily qty → remaining/sold out/replacement, hidden dabbas,
+  kitchen availability (box + dish level), unpublish guard with booked orders, publish permission, categories. Full suite 105/105.
+- **Limits / deferred:** per-day cut-off is shown and applied to public orderability, but checkout enforcement needs WP-03 (see requests);
+  without a kitchen (public site) remaining counts sum all kitchens; scheduled menus are visible at `publishAt` but booked rotation meals
+  are only re-assigned when `publishDueMenus()` runs (WP-16 cron) or staff press "Publish now"; E2E acceptance 1–2 (Playwright) not written
+  in this run; `LunchBox.packagingCost` is stored but `refreshBoxCosts` (`_kit/costing.ts`) still uses the "dabba" ingredient.
+
 **Owns:**
 - `src/server/menu.ts`, `src/lib/public.ts`
 - `src/app/admin/dishes/**`, `src/app/admin/boxes/**`, `src/app/admin/weekly-menus/**`, `src/app/admin/categories/**` (new), `src/app/admin/preview/menu/**` (new)
@@ -479,6 +512,10 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-16 | WP-02 | Dashboard "Needs attention" banner reads open `Alert` rows (`src/app/admin/page.tsx`) | planned |
 | WP-17 | (middleware owner / WP-20) | `src/middleware.ts`: stamp `x-request-id` on the request (`NextResponse.next({ request: { headers } })`) and echo it on the response, for all routes (matcher today covers only protected paths). Until then `request-context.ts` falls back to `x-vercel-id` or a generated id per request | open |
 | WP-19 | WP-18 | Admin `loading.tsx` / `error.tsx` can use `LoadingState` / `ErrorState` from `src/components/admin/States.tsx` | open |
+| WP-04 | WP-03 | Enforce per-day cut-off at checkout: in `quoteCart` use `offer.cutoff` (from `getOffersForDates`) — earliest of it and `company.cutoffOverride` — when calling `dateProblem` | open |
+| WP-04 | WP-06 | Same per-day cut-off (`DayOffer.cutoff`) for plan picks/swaps (`changeWindowOpen(…, cutoff)`) in `subscriptions.ts` | open |
+| WP-04 | WP-16 | Call `publishDueMenus()` (exported from `src/server/menu.ts`) in the housekeeping / frequent cron so scheduled menus get their revision + rotation re-sync | open |
+| WP-04 | WP-09 / WP-03 | Use `LunchBox.packagingCost` (when > 0) in `refreshBoxCosts` (`src/app/admin/_kit/costing.ts`) and snapshot it to `Order.packagingCost` | open |
 | WP-06 | WP-11 | Renew / swap / add-meal server actions in `src/lib/actions/shop.ts` (WP-06 may add new exported actions in a new file `src/lib/actions/plans.ts` instead) | planned |
 
 ## External blockers (⛔)
@@ -500,3 +537,4 @@ _Record here when a package needs a change in a file owned by another package._
 | 2026-11-05 | WP-05 | Builder engine: portions, diet rules, REQUIRE, kitchen availability, stock warning, preview + server price; pricing: free-delivery and box-scoped coupons, no stacking, non-negative totals |
 | 2026-11-05 | WP-17 | Request context, audit requestId/IP/UA/approver, secret redaction, searchable audit UI; 13 tests |
 | 2026-11-05 | WP-19 | Admin UI kit, ⌘K global search with permission filtering, saved views; audit page migrated; 17 tests |
+| 2026-11-05 | WP-04 | Menu catalogue and weekly menu builder: categories, dabba fields, kitchen availability, DnD editor, scheduled publish (read-time), safe unpublish, revisions + diff, preview, public menu upgrades; 9 integration tests |

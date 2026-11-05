@@ -66,6 +66,10 @@ export default async function BoxesPage({ searchParams }: { searchParams: Promis
                       <div className="text-xs text-ink-mute">
                         {b.items.map((i) => i.menuItem.name).join(" · ")}
                         {b.isSpecial && <span className="ml-1.5 font-semibold text-besar-dark">special</span>}
+                        {b.isFeatured && <span className="ml-1.5 font-semibold text-sindoor">featured</span>}
+                        {!b.isVisible && <span className="ml-1.5 font-semibold text-ink">hidden from site</span>}
+                        {b.maxDailyQty != null && <span className="ml-1.5">max {b.maxDailyQty}/day</span>}
+                        {b.category && <span className="ml-1.5 rounded bg-ink/5 px-1">{b.category.name}</span>}
                       </div>
                     </div>
                   </div>

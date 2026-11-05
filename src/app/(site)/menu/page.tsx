@@ -5,9 +5,9 @@ import { getI18n } from "@/lib/i18n/server";
 import { getSection } from "@/lib/cms";
 import { getCurrentUser } from "@/lib/auth";
 import { addDays, formatDay, todayKTM, weekStartOf } from "@/lib/dates";
-import { getPublicWeek, resolveWeek, type PublicDay } from "@/lib/public";
+import { getPublicWeek, resolveWeek, weekCategories, type PublicDay } from "@/lib/public";
 import { PageHero, EmptyState } from "@/components/site/Section";
-import { BoxCard } from "@/components/site/BoxCard";
+import { MenuDays, menuLabels } from "./MenuDays";
 import { LinkButton } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
 
@@ -17,12 +17,13 @@ export const metadata: Metadata = {
   alternates: { canonical: "/menu" },
 };
 
-type SP = Promise<{ week?: string; diet?: string; mild?: string; avoid?: string }>;
+type SP = Promise<{ week?: string; diet?: string; mild?: string; avoid?: string; cat?: string }>;
 
 const DIETS = ["veg", "egg", "chicken"] as const;
 
-function keep(item: PublicDay["items"][number], f: { diet?: string; mild: boolean; avoid: string[] }) {
+function keep(item: PublicDay["items"][number], f: { diet?: string; mild: boolean; avoid: string[]; cat?: string }) {
   const b = item.box;
+  if (f.cat && b.category?.slug !== f.cat) return false;
   if (f.diet === "veg" && !b.isVeg) return false;
   if (f.diet === "egg" && !["VEGAN", "VEG", "EGG"].includes(b.diet)) return false;
   if (f.diet === "chicken" && b.diet !== "CHICKEN") return false;
@@ -41,12 +42,15 @@ export default async function MenuPage({ searchParams }: { searchParams: SP }) {
   const diet = DIETS.includes(sp.diet as (typeof DIETS)[number]) ? sp.diet : undefined;
   const mild = sp.mild === "1";
   const avoidOn = sp.avoid === "1" && Boolean(user?.allergies.length);
-  const filters = { diet, mild, avoid: avoidOn ? user!.allergies : [] };
-  const anyFilter = Boolean(diet || mild || avoidOn);
+  const categories = weekCategories(data.days);
+  const cat = categories.some((c) => c.slug === sp.cat) ? sp.cat : undefined;
+  const filters = { diet, mild, avoid: avoidOn ? user!.allergies : [], cat };
+  const anyFilter = Boolean(diet || mild || avoidOn || cat);
+  const l = menuLabels(locale);
 
   const qs = (patch: Record<string, string | undefined>) => {
     const p = new URLSearchParams();
-    const merged = { week: week === current ? undefined : week, diet, mild: mild ? "1" : undefined, avoid: avoidOn ? "1" : undefined, ...patch };
+    const merged = { week: week === current ? undefined : week, diet, mild: mild ? "1" : undefined, avoid: avoidOn ? "1" : undefined, cat, ...patch };
     Object.entries(merged).forEach(([k, v]) => v && p.set(k, v));
     const s = p.toString();
     return `/menu${s ? `?${s}` : ""}`;
@@ -74,9 +78,13 @@ export default async function MenuPage({ searchParams }: { searchParams: SP }) {
             <Link href={qs({ week: addDays(week, 7) })} className="rounded-full p-2 hover:bg-ink/5" aria-label={t.site.nextWeekShort}>
               <ChevronRight className="h-5 w-5" />
             </Link>
-            {week !== current && (
+            {week !== current ? (
               <Link href={qs({ week: undefined })} className="ml-1 text-sm font-semibold text-sindoor underline underline-offset-2">
                 {t.menu.thisWeek}
+              </Link>
+            ) : (
+              <Link href={qs({ week: addDays(current, 7) })} className="ml-1 text-sm font-semibold text-sindoor underline underline-offset-2">
+                {t.menu.nextWeek}
               </Link>
             )}
           </nav>
@@ -94,7 +102,7 @@ export default async function MenuPage({ searchParams }: { searchParams: SP }) {
               </Link>
             )}
             {anyFilter && (
-              <Link href={qs({ diet: undefined, mild: undefined, avoid: undefined })} className="text-sm font-semibold text-sindoor underline underline-offset-2">
+              <Link href={qs({ diet: undefined, mild: undefined, avoid: undefined, cat: undefined })} className="text-sm font-semibold text-sindoor underline underline-offset-2">
                 {t.site.clearFilters}
               </Link>
             )}
@@ -102,51 +110,23 @@ export default async function MenuPage({ searchParams }: { searchParams: SP }) {
         </div>
       </div>
 
+      {categories.length > 1 && (
+        <div className="container flex flex-wrap items-center gap-2 pt-6" role="group" aria-label={l.category}>
+          <Link href={qs({ cat: undefined })} className={chip(!cat)} aria-pressed={!cat}>{l.allCategories}</Link>
+          {categories.map((c) => (
+            <Link key={c.slug} href={qs({ cat: c.slug })} className={chip(cat === c.slug)} aria-pressed={cat === c.slug}>
+              {c.name}
+            </Link>
+          ))}
+        </div>
+      )}
       <div className="container py-10">
         {!data.hasMenu ? (
           <EmptyState title={t.site.noMenuTitle} text={t.site.noMenuText}>
             <LinkButton href="/build" variant="outline">{t.nav.build}</LinkButton>
           </EmptyState>
         ) : (
-          <ol className="space-y-12">
-            {data.days.map((day) => {
-              const items = day.items.filter((i) => keep(i, filters)).sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary));
-              const canOrder = !day.problem && !data.isPast;
-              return (
-                <li key={day.date} id={day.date} className="scroll-mt-40">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2 border-b-2 border-ink pb-2">
-                    <h2 className="font-display text-2xl font-extrabold">
-                      {t.days[day.day]} <span className="text-base font-semibold text-ink-mute">{day.label.split(" ").slice(1).join(" ")}</span>
-                    </h2>
-                    {day.closed ? (
-                      <span className="text-sm font-semibold text-ink-mute">{day.closure ? `${t.common.closed} — ${day.closure}` : t.common.closed}</span>
-                    ) : day.problem ? (
-                      <span className="text-sm font-semibold text-ink-mute">{day.date < todayKTM() ? t.site.past : day.problem}</span>
-                    ) : null}
-                  </div>
-                  {day.note && <p className="mt-2 text-sm text-ink-soft">{day.note}</p>}
-                  {day.closed ? null : items.length === 0 ? (
-                    <p className="mt-4 text-sm text-ink-mute">{day.items.length ? t.site.nothingMatches : t.site.noMenuTitle}</p>
-                  ) : (
-                    <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                      {items.map((i) => (
-                        <BoxCard
-                          key={i.box.id}
-                          box={i.box}
-                          t={t}
-                          eyebrow={i.isPrimary ? t.site.chefPick : i.box.isVeg ? t.site.vegOption : t.site.alsoToday}
-                          date={day.date}
-                          soldOut={i.soldOut}
-                          disabledReason={canOrder ? null : t.site.orderClosed}
-                          highlightAllergens={user?.allergies ?? []}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
+          <MenuDays days={data.days} t={t} locale={locale} keep={(i) => keep(i, filters)} isPast={data.isPast} allergies={user?.allergies ?? []} />
         )}
         <p className="mt-12 max-w-3xl rounded-xl border-2 border-ink/15 bg-paper-card px-4 py-3 text-sm text-ink-soft">
           {t.site.sharedKitchen} {t.menu.nutritionNote}
