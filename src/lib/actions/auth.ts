@@ -1,6 +1,6 @@
 "use server";
 
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -16,6 +16,8 @@ import { audit } from "@/lib/audit";
 import { log } from "@/lib/logger";
 import { done, fail, type ActionResult } from "@/lib/action";
 import { str } from "@/lib/utils";
+import { readAttribution } from "@/lib/attribution";
+import { storeUserAttribution } from "@/server/crm";
 
 /** Only same-site relative paths are allowed as ?next= targets. */
 function safeNext(next: string | null | undefined) {
@@ -37,6 +39,15 @@ function authMessage(e: unknown, fallback: string) {
   }
   log.warn("auth.action_error", { error: e });
   return fallback;
+}
+
+/** First-touch attribution from the consented cookies onto a new account (stored once, never overwritten). Never throws. */
+async function captureAttribution(userId: string) {
+  try {
+    await storeUserAttribution(userId, readAttribution(await cookies()));
+  } catch (e) {
+    log.warn("auth.attribution_failed", { error: e });
+  }
 }
 
 async function landingFor(userId: string, next: string | null) {
@@ -107,6 +118,7 @@ export async function verifyOtpAction(_: ActionResult, fd: FormData): Promise<Ac
     if (!res.user) return fail("That code isn't right");
     // New phone-only accounts get a placeholder email; send them to finish their profile.
     const fresh = res.user.email?.endsWith("@phone.dabbabela.local");
+    if (fresh) await captureAttribution(res.user.id);
     return done("Signed in", fresh ? "/account/profile?welcome=1" : await landingFor(res.user.id, next));
   } catch (e) {
     return fail(authMessage(e, "That code isn't right"));
@@ -154,6 +166,7 @@ export async function registerAction(_: ActionResult, fd: FormData): Promise<Act
   } catch {
     // race on the unique phone — account still created, ask them to add it later
   }
+  await captureAttribution(userId);
   if (company) {
     await db.companyMember.create({ data: { companyId: company.id, userId, status: company.requireApproval ? "PENDING" : "ACTIVE" } }).catch(() => null);
   }
