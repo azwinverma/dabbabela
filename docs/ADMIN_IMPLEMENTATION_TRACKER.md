@@ -329,7 +329,58 @@ Note: Postgres treats NULLs as distinct in unique keys, so `DailySettlement(date
 
 **Depends:** WP-01, and coordination with WP-07 on the `postBatchStock` move (done first in WP-08).
 
-## WP-09: Finance: expenses, payables, settlement, profitability ⬜ (L)
+## WP-09: Finance: expenses, payables, settlement, profitability ✅ (L)
+**Done 2026-11-05** (invoice-numbering settings and live gateway formats deferred, see below).
+- **Server** `src/server/finance/`: `common.ts` (actor permission checks `assertCan` → `FinanceDenied`, period guard `assertPeriodOpen`,
+  finance config in `Setting "finance.config"` = `{ feeBps per method, chartOfAccounts }`, `estimateGatewayFee`), `expenses.ts`,
+  `payables.ts`, `settlement.ts` (daily settlement, accounting periods, cash flow), `statements.ts`, `journal.ts`, `profitability.ts`.
+  Every write re-checks permissions on the server and is audited; approvals carry `approvedById`.
+- **Expenses:** DRAFT → APPROVED → PAID, DRAFT → VOID; numbers `EXP-YYYYMM-NNNN`; receipt upload (existing `storeUpload`, image/PDF);
+  effective date + kitchen (kitchen-scoped staff must tag one of theirs). No self-approval (owner / super admin excepted). Approved
+  entries are immutable: `reverseExpense` posts a negative mirror (`reference = REV:<number>`, same status) dated in an open month;
+  `correctExpense` = reversal + new draft. Reversals net out in every total (analytics `profitability()` sums amounts).
+- **Accounting periods:** `closePeriod` (month ended; no drafts; no open settlements) / `reopenPeriod` (owner / super admin, reason).
+  A closed month refuses create / edit / approve / void / reversal / supplier invoice / supplier payment / settlement dated in it.
+- **Payables:** supplier invoices (unique per supplier + number, optional PO, scan upload), payments ≤ outstanding (advisory lock),
+  reversing payments (negative row), void only when nothing paid, ageing by supplier (not due / 1–30 / 31–60 / 61–90 / 90+ from due date
+  or invoice date), three-way match hint (PO ordered vs received qty × cost vs invoiced subtotal, Rs 1 / 1 % tolerance).
+- **Daily settlement:** cash per kitchen (expected = Σ route `cashCollected`, suggested = Σ `cashHandedIn`), eSewa / Khalti company-wide
+  (expected = payments paid that KTM day, suggested = matched statement lines), bank (verified transfers). Expected is recomputed on save
+  and close; variance = counted − expected; a non-zero variance needs a note to close; closed rows are locked. NULL-kitchen rows are
+  de-duplicated in code (find-first under an advisory lock).
+- **Gateway statements:** CSV upload (loose header matching: transaction UUID / pidx / purchase order id / reference, amount, fee, date;
+  rupees or paisa; DD/MM/YYYY accepted) → `GatewayStatementLine`, matched by `PaymentAttempt.providerRef`, `Payment.reference` or
+  `<reference>-<n>`; idempotent on `(provider, providerRef)`; report: unmatched, wrong-method, repeated in file, duplicate payments (a
+  payment on > 1 line), amount differences, settled-but-not-paid-here, row errors. Manual match for unmatched lines.
+  `duplicatePaymentSuspects` = same customer + amount paid within 10 minutes (shown on `/admin/payments?view=reconcile`).
+- **Fees:** `markPaymentPaid` (and cash `recordCashCollected` completing a payment) sets `Payment.gatewayFee` from the configured rate
+  (0 when not configured — nothing invented); statement import sets `feeActual` = Σ matched line fees.
+- **Cash flow:** by KTM day: in = eSewa/Khalti/bank/cash payments paid; out = refunds paid out (not wallet), expenses PAID (by expense
+  date, incl. VAT), supplier payments, gateway fees (actual else estimate). Company-invoice receipts excluded (no per-payment dates).
+- **Journal export** `/admin/settlements/journal` (CSV: date, journal, entry, account_key, account, debit, credit, memo): receipts, gateway
+  fees, refunds, expenses (+ input VAT, + payment when PAID; reversals post the opposite way), supplier invoices and payments; every entry
+  balances. ⛔ Chart of accounts: lines carry internal keys (`cash.ESEWA`, `expense.RENT`, …) mapped through `chartOfAccounts`
+  (editable on `/admin/settlements?tab=settings`, `settlements.approve`); unmapped keys export as `UNMAPPED <key>`. Needs
+  `expenses.export`; audited (`finance.journal_export`, with unmapped keys).
+- **Profitability** `/admin/profitability`: `profitAndLoss()` wraps analytics `profitability()` (same Estimated / Recorded split) and adds
+  column totals, estimated vs recorded profit, per-month coverage (expenses, drafts, settlements, statement lines) and period
+  close / re-open. The bottom line reads "Net profit (closed periods)" only when every month in range is closed, else "Operating estimate".
+- **UI:** `/admin/expenses` (+ `[id]`: edit draft, approve, pay, void, reverse, correct, receipt, history), `/admin/payables` (invoices,
+  ageing; `[id]`: 3-way hint, payments, reverse, void), `/admin/settlements` (daily, statements import, cash flow, journal, fees &
+  accounts), `/admin/profitability`; payment detail shows fee estimate / statement fee / statement lines. Nav entries flipped to ready.
+- **WP-04 request:** `refreshBoxCosts` uses `LunchBox.packagingCost` when > 0 (falls back to the stocked dabba ingredient).
+- **Permissions used:** expenses.{view,create,approve,export}, purchasing.{view,create,approve}, settlements.{view,edit,approve},
+  analytics.view (profitability). Period close = settlements.approve + expenses.approve. Journal / cash-flow tabs need expenses.view
+  (cash flow also analytics.view).
+- Tests: `tests/integration/finance-erp.test.ts` (16): approval + approver in audit + no self-approval, draft edit/void rules, reversal not
+  overwrite, closed period blocks back-dated writes / re-open, payables partial pay + reversal + ageing, three-way match, settlement
+  variance + note + lock, null-kitchen de-dup, fee estimate on mark-paid, statement import match / unmatched / in-file duplicate /
+  duplicate payment / not-paid-here / fee actuals / idempotent re-import, double-checkout detection, profitability estimated vs recorded
+  + honest label before/after close, cash flow, journal balance + mapping + permission + audit, box packaging cost.
+- **Deferred:** invoice-numbering settings (company invoices are `invoices.ts`, not owned here); live eSewa/Khalti statement formats
+  (⛔ merchant keys — header aliases in `statements.ts COLUMNS` to extend); expense allocation of overheads by meals per kitchen;
+  automatic Alert rows for duplicates (WP-16, request below).
+
 **Owns:**
 - `src/server/finance/**` (new: `expenses.ts`, `payables.ts`, `settlement.ts`, `profitability.ts`, `statements.ts`, `journal.ts`)
 - `src/server/payments/index.ts` (fee capture only)
@@ -539,10 +590,13 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-04 | WP-03 | Enforce per-day cut-off at checkout: in `quoteCart` use `offer.cutoff` (from `getOffersForDates`) — earliest of it and `company.cutoffOverride` — when calling `dateProblem` | open |
 | WP-04 | WP-06 | Same per-day cut-off (`DayOffer.cutoff`) for plan picks/swaps (`changeWindowOpen(…, cutoff)`) in `subscriptions.ts` | open |
 | WP-04 | WP-16 | Call `publishDueMenus()` (exported from `src/server/menu.ts`) in the housekeeping / frequent cron so scheduled menus get their revision + rotation re-sync | open |
-| WP-04 | WP-09 / WP-03 | Use `LunchBox.packagingCost` (when > 0) in `refreshBoxCosts` (`src/app/admin/_kit/costing.ts`) and snapshot it to `Order.packagingCost` | open |
+| WP-04 | WP-09 / WP-03 | Use `LunchBox.packagingCost` (when > 0) in `refreshBoxCosts` (`src/app/admin/_kit/costing.ts`) and snapshot it to `Order.packagingCost` | WP-09 part done (`refreshBoxCosts`). Snapshot `box.packagingCost × qty` to `Order.packagingCost` in `orders.ts` → WP-03 (the profitability "Packaging estimated" line reads it) |
 | WP-16 | WP-02 | Dashboard "Needs attention" banner reads open `Alert` rows (`src/app/admin/page.tsx`) | done (WP-02: counts open/ack alerts by severity → `/admin/alerts`; the computed rows stay until WP-16 removes them) |
 | WP-02 | WP-10 | `/admin/reports` still labels `salesSummary` "Gross sales"/"Net sales"; relabel to "Booked by delivery date" (formula text already updated in `KPI_FORMULAS`) and reuse `src/server/analytics` for report totals | planned |
-| WP-02 | WP-09 | `/admin/profitability` should build on `analytics/revenue.ts profitability()` (same Estimated/Recorded split) and add period close | planned |
+| WP-02 | WP-09 | `/admin/profitability` should build on `analytics/revenue.ts profitability()` (same Estimated/Recorded split) and add period close | done (WP-09: `finance/profitability.ts profitAndLoss()` wraps it) |
+| WP-09 | WP-16 | Raise `Alert` rows for duplicate payments: call `duplicatePaymentSuspects(since)` and `statementDuplicates()` (`src/server/finance/statements.ts`) from the alerts detector cron; also unmatched statement lines older than 3 days (`unmatchedLines()`) and settlements with a variance left open | open |
+| WP-09 | WP-10 | Reports center can reuse `cashFlow`, `payablesAgeing`, `buildJournal`, `expenseTotals` (`src/server/finance/*`) for finance reports instead of re-querying | open |
+| WP-09 | `invoices.ts` owner | Company-invoice payments are only `Invoice.paidAmount` (no dated rows), so cash flow and the journal can't include them; record each receipt with a date (e.g. reuse `Payment` with method COMPANY_INVOICE, or a receipt table) | open |
 | WP-06 | WP-11 | Renew / swap / add-meal server actions in `src/lib/actions/shop.ts` (WP-06 may add new exported actions in a new file `src/lib/actions/plans.ts` instead) | planned |
 
 ## External blockers (⛔)
@@ -566,3 +620,4 @@ _Record here when a package needs a change in a file owned by another package._
 | 2026-11-05 | WP-19 | Admin UI kit, ⌘K global search with permission filtering, saved views; audit page migrated; 17 tests |
 | 2026-11-05 | WP-04 | Menu catalogue and weekly menu builder: categories, dabba fields, kitchen availability, DnD editor, scheduled publish (read-time), safe unpublish, revisions + diff, preview, public menu upgrades; 9 integration tests |
 | 2026-11-05 | WP-02 | Analytics engine, `/admin/analytics` + drill-down + CSV export, dashboard relabel; 20 integration tests |
+| 2026-11-05 | WP-09 | Finance: expenses (approval, reversals), payables + ageing + 3-way hint, daily settlement + lock, statement import + duplicate detection, fee estimate/actual, period close, cash flow, journal CSV (mappable accounts), `/admin/profitability`; 16 integration tests |
