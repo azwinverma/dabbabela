@@ -49,12 +49,15 @@ describe("audit() correlation and approval", () => {
       await audit({ actorId: ownerId, action: "refund.request", entity: "Refund", entityId: `${TAG}-r1`, summary: "requested" });
       await audit({ actorId: ownerId, action: "refund.approve", entity: "Refund", entityId: `${TAG}-r1`, summary: "approved", reason: "duplicate charge", approvedById: approverId });
     });
-    const rows = await db.auditLog.findMany({ where: { entityId: `${TAG}-r1` }, orderBy: { createdAt: "asc" } });
+    // Both rows can share a millisecond timestamp, so look them up by action rather than by order.
+    const rows = await db.auditLog.findMany({ where: { entityId: `${TAG}-r1` } });
     expect(rows).toHaveLength(2);
     expect(rows.every((r) => r.requestId === `${TAG}-req-A` && r.userAgent === "cron")).toBe(true);
-    expect(rows[0]!.approvedById).toBeNull();
-    expect(rows[1]!.approvedById).toBe(approverId);
-    expect(rows[1]!.reason).toBe("duplicate charge");
+    const requested = rows.find((r) => r.action === "refund.request")!;
+    const approved = rows.find((r) => r.action === "refund.approve")!;
+    expect(requested.approvedById).toBeNull();
+    expect(approved.approvedById).toBe(approverId);
+    expect(approved.reason).toBe("duplicate charge");
   });
 
   it("keeps the legacy positional signature working", async () => {
