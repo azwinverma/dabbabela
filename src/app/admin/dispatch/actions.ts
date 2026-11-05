@@ -7,7 +7,7 @@ import { audit } from "@/lib/audit";
 import { done, fail, type ActionResult } from "@/lib/action";
 import { parseRupees, rs } from "@/lib/money";
 import { isValidISODate } from "@/lib/dates";
-import { assignOrders, completeRoute, createRoute, moveStop, recordHandIn, resolveFailed, routeCash, setRouteRider, startRoute, unassignOrder } from "@/server/dispatch";
+import { acknowledgeChange, assignOrders, autoGroupRoutes, completeRoute, createRoute, moveStop, recordHandIn, resolveFailed, routeCash, setRouteCost, setRouteRider, startRoute, unassignOrder } from "@/server/dispatch";
 import { assertKitchen, guard, reasonOf } from "@/components/admin/ops/scope";
 
 async function route(id: string, user: { kitchenId: string | null }) {
@@ -39,6 +39,7 @@ export async function assignAction(_p: ActionResult, fd: FormData): Promise<Acti
     if (!String(fd.get("routeId") ?? "")) return createRouteAction(_p, fd);
     const r = await route(String(fd.get("routeId")), user);
     const n = await assignOrders(r.id, ids);
+    await audit({ actorId: user.id, action: "dispatch.assign", entity: "DeliveryRoute", entityId: r.id, summary: `${r.name}: ${n} stop(s) added`, after: { orderIds: ids } });
     revalidatePath("/admin/dispatch");
     return done(`${n} stop(s) added to ${r.name}`);
   });
@@ -49,7 +50,9 @@ export async function unassignAction(orderId: string): Promise<ActionResult> {
     const user = await requirePermission("dispatch.edit");
     const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
     assertKitchen(user, o.kitchenId);
+    const a = await db.deliveryAssignment.findUnique({ where: { orderId }, select: { routeId: true } });
     await unassignOrder(orderId);
+    await audit({ actorId: user.id, action: "dispatch.unassign", entity: "Order", entityId: orderId, summary: `${o.number} removed from route`, before: a });
     revalidatePath("/admin/dispatch");
     return done("Removed from route");
   });
@@ -68,8 +71,11 @@ export async function moveAction(routeId: string, orderId: string, dir: -1 | 1):
 export async function riderAction(routeId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
     const user = await requirePermission("dispatch.edit");
-    await route(routeId, user);
-    await setRouteRider(routeId, String(fd.get("riderId") ?? "") || null);
+    const r = await route(routeId, user);
+    const riderId = String(fd.get("riderId") ?? "") || null;
+    if (riderId === r.riderId) return done("No change");
+    await setRouteRider(routeId, riderId);
+    await audit({ actorId: user.id, action: "dispatch.reassign_rider", entity: "DeliveryRoute", entityId: routeId, summary: `${r.name}: rider changed`, before: { riderId: r.riderId }, after: { riderId } });
     revalidatePath("/admin/dispatch");
     return done("Rider updated");
   });
@@ -121,5 +127,44 @@ export async function resolveFailedAction(orderId: string, action: "RETRY" | "CA
     await audit({ actorId: user.id, action: `dispatch.failed_${action.toLowerCase()}`, entity: "Order", entityId: orderId, summary: o.number, reason });
     revalidatePath("/admin/dispatch");
     return done(action === "RETRY" ? "Sent out again" : "Cancelled and credited");
+  });
+}
+
+export async function autoGroupAction(kitchenId: string, date: string): Promise<ActionResult> {
+  return guard(async () => {
+    const user = await requirePermission("dispatch.edit");
+    assertKitchen(user, kitchenId);
+    if (!isValidISODate(date)) return fail("Bad date");
+    const r = await autoGroupRoutes(kitchenId, date);
+    if (!r.stops) return done("Nothing left to group — every open order is on a route");
+    await audit({ actorId: user.id, action: "dispatch.auto_group", entity: "Kitchen", entityId: kitchenId, summary: `${date}: ${r.stops} stop(s) grouped, ${r.routes} new route(s)` });
+    revalidatePath("/admin/dispatch");
+    return done(`${r.stops} stop(s) grouped by slot and zone · ${r.routes} new route(s)`);
+  });
+}
+
+export async function routeCostAction(routeId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
+  return guard(async () => {
+    const user = await requirePermission("dispatch.edit");
+    const r = await route(routeId, user);
+    const raw = String(fd.get("cost") ?? "").trim();
+    const cost = raw ? parseRupees(raw) : null;
+    if (raw && (cost == null || cost < 0)) return fail("Enter the route cost in rupees");
+    await setRouteCost(routeId, cost);
+    await audit({ actorId: user.id, action: "dispatch.route_cost", entity: "DeliveryRoute", entityId: routeId, summary: `${r.name}: cost ${cost == null ? "cleared" : rs(cost)}`, before: { cost: r.cost }, after: { cost } });
+    revalidatePath("/admin/dispatch");
+    return done("Route cost saved");
+  });
+}
+
+export async function acknowledgeChangeAction(orderId: string): Promise<ActionResult> {
+  return guard(async () => {
+    const user = await requirePermission("dispatch.edit");
+    const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
+    assertKitchen(user, o.kitchenId);
+    await acknowledgeChange(orderId);
+    await audit({ actorId: user.id, action: "dispatch.change_checked", entity: "Order", entityId: orderId, summary: `${o.number}: changed delivery checked against its route` });
+    revalidatePath("/admin/dispatch");
+    return done("Marked as checked");
   });
 }

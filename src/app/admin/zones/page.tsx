@@ -8,23 +8,28 @@ import { buttonClass } from "@/components/ui/Button";
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
 import { Input } from "@/components/ui/Fields";
 import { ConfirmAction } from "@/components/admin/ConfirmAction";
+import { parseZoneRules } from "@/server/coverage";
 import { testArea, toggleZone } from "./actions";
 
 export default async function ZonesPage() {
   await requirePermission("rules.view");
-  const [zones, uncovered] = await Promise.all([
+  const [zones, uncovered, slots] = await Promise.all([
     db.deliveryZone.findMany({ orderBy: [{ city: "asc" }, { sortOrder: "asc" }], include: { kitchen: { select: { name: true } }, _count: { select: { addresses: true, orders: true } } } }),
     db.address.groupBy({ by: ["area"], where: { zoneId: null, archivedAt: null }, _count: true, orderBy: { _count: { area: "desc" } }, take: 10 }),
+    db.deliverySlot.findMany({ select: { id: true, label: true } }),
   ]);
+  const slotLabel = new Map(slots.map((s) => [s.id, s.label]));
   return (
     <>
-      <PageHeader title="Delivery zones" description="Coverage is matched on the locality / ward a customer types — no GPS promises. Fees are per delivery day." actions={<Link href="/admin/zones/new" className={buttonClass("primary", "sm")}>New zone</Link>} />
+      <PageHeader title="Delivery zones" description="Coverage is matched on the locality / ward a customer types; optional distance bands use the address pin when there is one. No live tracking. Fees are per delivery day." actions={<Link href="/admin/zones/new" className={buttonClass("primary", "sm")}>New zone</Link>} />
       <div className="mb-6 grid gap-4 lg:grid-cols-2">
         <Panel title="Does an area match?">
-          <ActionForm action={testArea} className="grid gap-2 sm:grid-cols-[1fr_90px_1fr_auto] sm:items-end">
+          <ActionForm action={testArea} className="grid gap-2 sm:grid-cols-[1fr_80px_1fr] sm:items-end">
             <Input name="area" label="Locality" placeholder="Baneshwor" />
             <Input name="ward" type="number" label="Ward" />
             <Input name="municipality" label="Municipality" placeholder="KMC" />
+            <Input name="lat" label="Pin lat (optional)" inputMode="decimal" />
+            <Input name="lng" label="Pin lng (optional)" inputMode="decimal" />
             <SubmitButton size="sm" variant="dark">Test</SubmitButton>
           </ActionForm>
         </Panel>
@@ -51,12 +56,13 @@ export default async function ZonesPage() {
             <Th className="text-right">Fee</Th>
             <Th className="text-right">Free above</Th>
             <Th className="text-right">Min order</Th>
+            <Th>Bands · windows</Th>
             <Th>Use</Th>
             <Th />
           </tr>
         </thead>
         <tbody>
-          {zones.length === 0 && <EmptyRow colSpan={8}>No zones yet.</EmptyRow>}
+          {zones.length === 0 && <EmptyRow colSpan={9}>No zones yet.</EmptyRow>}
           {zones.map((z) => (
             <tr key={z.id} className={z.isActive ? "" : "opacity-60"}>
               <Td>
@@ -72,6 +78,17 @@ export default async function ZonesPage() {
               <Td className="text-right tabular-nums">{rs(z.fee)}</Td>
               <Td className="text-right tabular-nums text-ink-mute">{z.freeAbove != null ? rs(z.freeAbove) : "global"}</Td>
               <Td className="text-right tabular-nums text-ink-mute">{z.minOrder ? rs(z.minOrder) : "—"}</Td>
+              <Td className="text-xs text-ink-mute">
+                {(() => {
+                  const r = parseZoneRules(z.distanceRules);
+                  return (
+                    <>
+                      {r.bands.length ? r.bands.map((b) => `≤${b.maxKm} km ${rs(b.fee)}`).join(" · ") : "flat"}
+                      <div>{r.slotIds.length ? r.slotIds.map((id) => slotLabel.get(id) ?? "?").join(", ") : "all slots"}</div>
+                    </>
+                  );
+                })()}
+              </Td>
               <Td className="text-xs text-ink-mute">
                 {z._count.addresses} addr · {z._count.orders} orders
               </Td>

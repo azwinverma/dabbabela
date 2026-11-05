@@ -28,7 +28,7 @@ export async function deliverAction(orderId: string, _p: ActionResult, fd: FormD
 export async function failAction(orderId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
   return guard(async () => {
     const user = await requirePermission("rider.edit");
-    await failStop(orderId, { id: user.id, isStaff: !isRider(user.role) }, String(fd.get("reason") ?? ""));
+    await failStop(orderId, { id: user.id, isStaff: !isRider(user.role) }, String(fd.get("reason") ?? ""), String(fd.get("detail") ?? ""));
     revalidatePath("/rider", "layout");
     return done("Marked failed — dispatch will follow up");
   });

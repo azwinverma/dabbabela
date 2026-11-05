@@ -582,7 +582,37 @@ Note: Postgres treats NULLs as distinct in unique keys, so `DailySettlement(date
 
 **Depends:** WP-01.
 
-## WP-13: Delivery and logistics ⬜ (M)
+## WP-13: Delivery and logistics ✅ (M)
+**Done 2026-11-05.** No schema change. No live GPS tracking is built or advertised (copy on dispatch, zones and riders says so).
+- **Riders** (`/admin/riders`, `/admin/riders/[id]`; view `dispatch.view`, edit `dispatch.edit`): `dispatch.ts` `listRiders`, `saveRider`,
+  `setRiderAvailable`, `deleteRiderProfile` take the actor and re-check permission + kitchen scope. A profile links an existing
+  DELIVERY_AGENT user (logins stay under Staff): vehicle, work phone, available, zones (must belong to the rider's kitchen).
+  The rider's kitchen is `User.kitchenId` and notes are `User.internalNote` (RiderProfile has no such columns). Audited:
+  `rider.create|update|availability|delete`. Dispatch only offers available riders of the route's kitchen (or riders with no kitchen);
+  `createRoute`/`setRouteRider` refuse unavailable riders and riders of another kitchen.
+- **Zones** (`coverage.ts`): `DeliveryZone.distanceRules` = `{ origin {lat,lng}, bands [{maxKm, fee}], slotIds }` (a bare array is read as bands).
+  `zoneFee(zone, pin)` is the fee hook: flat `zone.fee` unless bands + origin + address pin exist; straight-line km picks the band; past the
+  last band = `beyond` (outside radius). `zoneSlots` = the zone's time windows (empty = all of the kitchen's slots). `quoteCoverage` =
+  zone → kitchen → fee → windows → serviceable. Zone form edits origin, bands ("km, Rs" lines, `parseBandLines`) and windows; the
+  area tester takes an optional pin. Fee/band edits are audited as `zone.fee_change` (other edits `zone.update`). **Checkout does not use
+  the bands yet** (pricing/orders not owned, see cross-package request).
+- **Dispatch:** "Group unrouted by slot × zone" (`autoGroupRoutes`, reuses open routes of the same slot/zone); route cost entry
+  (`setRouteCost`, shown per stop; already read by `analytics/revenue.ts profitability()`); `routeChanges(routeIds)` flags routed orders
+  whose delivery changed after routing (`order.reassign_delivery` audit newer than the assignment's routed-at stamp, or slot/zone no longer
+  matching the route) with a "checked" action (`acknowledgeChange`); proof (photo link, code ✓) per stop; failed reason shown.
+  `assignOrders` re-stamps `DeliveryAssignment.createdAt` as routed-at and no longer double-increments sequences. Audited:
+  `dispatch.assign|unassign|reassign_rider|route_cost|auto_group|change_checked`.
+- **Failed deliveries:** reason always required (`failedReason`): preset list (`FAILED_REASONS`) or "Other" + details.
+  Retry after a failure sends the customer a fresh "on the way" message through the notify outbox (status changes already notify).
+- **Rider app:** day strip + date input (`riderDayWindow`: 14 days back → 7 ahead; `riderRoutes`, `riderRoute`, `riderRouteDays`). Riders see
+  only their own routes, staff their kitchens'. Past days are read-only in the UI and on the server (`deliverStop`/`failStop` refuse).
+- **Performance** (`deliveryPerformance({from,to,kitchenIds})`, on `/admin/riders`): per rider (event actor) and per zone from DeliveryEvent
+  rows — delivered, on-time rate (DELIVERED at/before slot end, Kathmandu, on the delivery day), failed attempts and rate
+  (FAILED ÷ (DELIVERED+FAILED)), deliveries/day, cash handled (Σ CASH_COLLECTED), routes + route cost.
+- **Tests:** `tests/integration/delivery.test.ts` (10): rider CRUD + permission/scope, unavailable/other-kitchen rider refused, band parsing
+  and validation, band fee/flat/beyond, zone→kitchen→windows coverage, auto-grouping + route cost, re-routed order flagged + cleared,
+  failed reason required, rider own-routes + date window + past read-only, performance equals the event records.
+
 **Owns:** `src/server/dispatch.ts`, `src/server/coverage.ts`, `src/app/admin/dispatch/**`, `src/app/admin/zones/**`, `src/app/admin/riders/**` (new), `src/app/rider/**`.
 
 **Delivers:**
@@ -747,7 +777,10 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-06 | WP-00 / WP-20 | `tests/integration/access.test.ts` assumes exactly one `MealPlanPrice` per plan; limit it to seeded plans (WP-06's test trims its plans' history in `afterAll` meanwhile) | open |
 | WP-03 | WP-09 / WP-12 | Company invoices and finance/analytics totals read `Order.companyShare`/`customerShare` only. Staff edits never rewrite those; they add `OrderAdjustment` rows (customer part; company part has `reason` starting `Company share`). Include adjustments in invoice lines / receivables / net revenue | open |
 | WP-03 | settings page owner (WP-14 / WP-16) | Settings UI for the staff modification window: `Setting` key `orders.modificationWindow` = `{ "cutoff": "HH:MM" }` (read by `staffEditWindow` in `orders-admin.ts`; absent = order cut-off) | open |
-| WP-03 | WP-13 | `reassignDelivery` may change slot/address of an order already on a route (kitchen moves are refused while routed). Dispatch should flag routed orders whose `slotId`/`addressId` changed (audit `order.reassign_delivery`) | open |
+| WP-03 | WP-13 | `reassignDelivery` may change slot/address of an order already on a route (kitchen moves are refused while routed). Dispatch should flag routed orders whose `slotId`/`addressId` changed (audit `order.reassign_delivery`) | done (WP-13: `routeChanges()` in `dispatch.ts`, "changed" badge + checked action on `/admin/dispatch`) |
+| WP-13 | WP-03 / WP-06 | Distance fee bands at checkout: build `ZoneSpec.fee` from `zoneFee(zone, { lat, lng })` (`coverage.ts`) instead of `zone.fee` in `quoteCart` (`orders.ts`), plan quotes (`subscriptions.ts`) and staff re-pricing (`orders-admin.ts`); refuse when `.beyond` is true. Also limit the slot picker / validation to `zoneSlots(zone, slots)` (zone time windows). Flat fee is unchanged when a zone has no bands or the address has no pin | open |
+| WP-13 | WP-18 / address form owner | Capture an optional map pin (lat/lng) on customer addresses so distance bands can apply; `/delivery-areas` could show a zone's bands (`parseZoneRules`) next to the flat fee | open |
+| WP-13 | WP-00 (optional) | `RiderProfile` has no `kitchenId`/`notes`; WP-13 uses `User.kitchenId` and `User.internalNote`. Add dedicated columns only if those user fields need to mean something else for riders | open |
 
 ## External blockers (⛔)
 | Blocker | Affects |
@@ -774,3 +807,4 @@ _Record here when a package needs a change in a file owned by another package._
 | 2026-11-05 | WP-09 | Finance: expenses (approval, reversals), payables + ageing + 3-way hint, daily settlement + lock, statement import + duplicate detection, fee estimate/actual, period close, cash flow, journal CSV (mappable accounts), `/admin/profitability`; 16 integration tests |
 | 2026-11-05 | WP-06 | Subscription engine: versioned plan prices, per-plan weeks/skip/cancel/reminder policies, swap with exact-once settlement, add a meal, one-click idempotent renewal, per-day cut-offs, `/admin/production-calendar`; 14 integration tests |
 | 2026-11-05 | WP-03 | Staff phone and corporate bulk orders, line edits/substitutions with adjustments, kitchen/delivery reassignment, kit order list + export, order timeline/receipt; orders.ts: negotiated price, per-day cut-off, packaging, attribution; 14 integration tests |
+| 2026-11-05 | WP-13 | Riders page + profiles, distance fee bands / zone windows (coverage hook), route grouping + cost, changed-after-routing flags, required failed reasons, rider date picker (past read-only), per-rider/zone performance; 10 integration tests |

@@ -28,7 +28,7 @@ export const ADMIN_NAV_ALL: NavGroup[] = [
       { href: "/admin/production-calendar", label: "Production calendar", icon: "CalendarRange", perm: "kitchen.view", ready: true, owner: "WP-06" },
       { href: "/admin/inventory", label: "Inventory", icon: "Warehouse", perm: "inventory.view" },
       { href: "/admin/dispatch", label: "Dispatch", icon: "Bike", perm: "dispatch.view" },
-      { href: "/admin/riders", label: "Riders", icon: "UserRoundCheck", perm: "dispatch.view", ready: false, owner: "WP-13" },
+      { href: "/admin/riders", label: "Riders", icon: "UserRoundCheck", perm: "dispatch.view", ready: true, owner: "WP-13" },
       { href: "/admin/subscriptions", label: "Meal plans sold", icon: "CalendarCheck", perm: "subscriptions.view" },
       { href: "/admin/support", label: "Support tickets", icon: "LifeBuoy", perm: "support.view" },
     ],

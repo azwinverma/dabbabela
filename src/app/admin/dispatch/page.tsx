@@ -3,15 +3,16 @@ import { db } from "@/lib/db";
 import { requirePermission } from "@/lib/auth";
 import { dateOnly } from "@/lib/dates";
 import { rs } from "@/lib/money";
-import { manifest, routeCash } from "@/server/dispatch";
+import { manifest, ridersForKitchen, routeCash, routeChanges } from "@/server/dispatch";
 import { PageHeader, Panel, StatCard, OrderBadge } from "@/components/admin/ui";
+import { rupeesInput } from "@/lib/money";
 import { Badge } from "@/components/ui/Badge";
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
 import { ConfirmAction } from "@/components/admin/ConfirmAction";
 import { DayPicker } from "@/components/admin/ops/DayPicker";
 import { ReasonForm } from "@/components/admin/ops/ReasonForm";
 import { pickDate, pickKitchen, piiFor } from "@/components/admin/ops/scope";
-import { assignAction, completeRouteAction, handInAction, moveAction, resolveFailedAction, riderAction, startRouteAction, unassignAction } from "./actions";
+import { acknowledgeChangeAction, assignAction, autoGroupAction, completeRouteAction, handInAction, moveAction, resolveFailedAction, riderAction, routeCostAction, startRouteAction, unassignAction } from "./actions";
 
 export const metadata = { title: "Dispatch" };
 
@@ -26,21 +27,22 @@ export default async function DispatchPage({ searchParams }: { searchParams: Pro
     manifest(kitchen.id, date, sp.slot || null),
     db.deliverySlot.findMany({ where: { kitchenId: kitchen.id, isActive: true }, orderBy: { sortOrder: "asc" } }),
     db.deliveryZone.findMany({ where: { kitchenId: kitchen.id, isActive: true }, orderBy: { sortOrder: "asc" }, select: { id: true, name: true } }),
-    db.user.findMany({ where: { role: "DELIVERY_AGENT", isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, phoneNumber: true } }),
+    ridersForKitchen(kitchen.id),
     db.deliveryRoute.findMany({
       where: { kitchenId: kitchen.id, date: dateOnly(date) },
-      include: { rider: { select: { name: true, phoneNumber: true } }, slot: { select: { label: true } }, assignments: { orderBy: { sequence: "asc" }, include: { order: { include: { items: { select: { quantity: true } }, payment: { select: { method: true } } } } } } },
+      include: { rider: { select: { name: true, phoneNumber: true } }, slot: { select: { label: true } }, assignments: { orderBy: { sequence: "asc" }, include: { order: { include: { items: { select: { quantity: true } }, payment: { select: { method: true } }, deliveryEvents: { where: { type: "DELIVERED" }, orderBy: { createdAt: "desc" }, take: 1, select: { photoUrl: true, otpOk: true } } } } } } },
       orderBy: { createdAt: "asc" },
     }),
-    db.order.findMany({ where: { kitchenId: kitchen.id, deliveryDate: dateOnly(date), status: "FAILED_DELIVERY" }, include: { deliveryEvents: { orderBy: { createdAt: "desc" }, take: 1 } } }),
+    db.order.findMany({ where: { kitchenId: kitchen.id, deliveryDate: dateOnly(date), status: "FAILED_DELIVERY" }, include: { deliveryEvents: { where: { type: "FAILED" }, orderBy: { createdAt: "desc" }, take: 1 } } }),
   ]);
   const cash = new Map(await Promise.all(routes.map(async (r) => [r.id, await routeCash(r.id)] as const)));
+  const changes = await routeChanges(routes.map((r) => r.id));
   const all = groups.flatMap((g) => g.stops.flatMap((s) => s.orders));
   const unassigned = all.filter((o) => !o.assignment && !["DELIVERED"].includes(o.status));
 
   return (
     <div>
-      <PageHeader title="Dispatch" description="Group orders by hand-off point, build routes, send riders out, and reconcile the cash they bring back. Routes are plain sequences — no optimisation is claimed." />
+      <PageHeader title="Dispatch" description="Group orders by hand-off point, build routes, send riders out, and reconcile the cash they bring back. Routes are plain sequences — no optimisation or live location tracking is claimed." actions={<ConfirmAction action={autoGroupAction.bind(null, kitchen.id, date)} label="Group unrouted by slot × zone" variant="outline" confirm="Put every order not yet on a route onto one route per slot and zone (open routes for the same slot/zone are reused)?" />} />
       <DayPicker path="/admin/dispatch" date={date} kitchenId={kitchen.id} kitchens={kitchens} extra={{ slot: sp.slot }}>
         <label className="text-xs font-semibold text-ink-mute">
           Slot
@@ -50,11 +52,12 @@ export default async function DispatchPage({ searchParams }: { searchParams: Pro
           </select>
         </label>
       </DayPicker>
-      <div className="mb-5 grid gap-3 sm:grid-cols-4">
+      <div className="mb-5 grid gap-3 sm:grid-cols-5">
         <StatCard label="Orders" value={all.length} sub={`${groups.reduce((a, g) => a + g.stops.length, 0)} hand-off points`} />
         <StatCard label="Not on a route" value={unassigned.length} tone={unassigned.length ? "warn" : "good"} />
         <StatCard label="Out now" value={all.filter((o) => o.status === "OUT_FOR_DELIVERY").length} tone="brand" />
         <StatCard label="Failed" value={failed.length} tone={failed.length ? "warn" : "default"} />
+        <StatCard label="Changed after routing" value={changes.size} tone={changes.size ? "warn" : "default"} sub="slot/address edited" />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[1fr_440px]">
@@ -68,7 +71,7 @@ export default async function DispatchPage({ searchParams }: { searchParams: Pro
                 {routes.filter((r) => r.status !== "DONE").map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
               </select>
               <input name="name" placeholder="New route name" className="field w-40" />
-              <select name="riderId" className="field w-36" defaultValue="" aria-label="Rider"><option value="">Rider…</option>{riders.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
+              <select name="riderId" className="field w-36" defaultValue="" aria-label="Rider"><option value="">Rider…</option>{riders.map((r) => <option key={r.id} value={r.id} disabled={!r.available}>{r.name}{r.available ? "" : " (unavailable)"}</option>)}</select>
               <select name="slotId" className="field w-32" defaultValue={sp.slot ?? ""} aria-label="Slot"><option value="">Any slot</option>{slots.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select>
               <select name="zoneId" className="field w-40" defaultValue="" aria-label="Zone"><option value="">Any zone</option>{zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}</select>
               <SubmitButton size="sm" variant="dark">Assign ticked</SubmitButton>
@@ -126,9 +129,9 @@ export default async function DispatchPage({ searchParams }: { searchParams: Pro
                 }
                 actions={<Link href={`/admin/dispatch/manifest?route=${r.id}`} className="text-xs font-semibold text-akash underline">Print</Link>}
               >
-                <p className="mb-2 text-xs text-ink-mute">{r.slot?.label ?? "any slot"} · {r.assignments.length} stops · {r.assignments.reduce((a, x) => a + x.order.items.reduce((b, i) => b + i.quantity, 0), 0)} meals</p>
+                <p className="mb-2 text-xs text-ink-mute">{r.slot?.label ?? "any slot"} · {r.assignments.length} stops · {r.assignments.reduce((a, x) => a + x.order.items.reduce((b, i) => b + i.quantity, 0), 0)} meals{r.cost != null ? ` · cost ${rs(r.cost)}${r.assignments.length ? ` (${rs(Math.round(r.cost / r.assignments.length))}/stop)` : ""}` : ""}</p>
                 <ActionForm action={riderAction.bind(null, r.id)} className="mb-3 flex gap-2" showMessage={false}>
-                  <select name="riderId" defaultValue={r.riderId ?? ""} className="field" aria-label="Rider"><option value="">No rider</option>{riders.map((x) => <option key={x.id} value={x.id}>{x.name}{x.phoneNumber ? ` · ${x.phoneNumber}` : ""}</option>)}</select>
+                  <select name="riderId" defaultValue={r.riderId ?? ""} className="field" aria-label="Rider"><option value="">No rider</option>{riders.map((x) => <option key={x.id} value={x.id} disabled={!x.available && x.id !== r.riderId}>{x.name}{x.vehicle ? ` · ${x.vehicle}` : ""}{x.available ? "" : " (unavailable)"}</option>)}</select>
                   <SubmitButton size="sm" variant="outline">Set</SubmitButton>
                 </ActionForm>
                 <ol className="space-y-1">
@@ -137,6 +140,14 @@ export default async function DispatchPage({ searchParams }: { searchParams: Pro
                       <span className="w-5 text-right text-xs text-ink-mute">{i + 1}</span>
                       <span className="flex-1 truncate">{a.order.placeName ?? a.order.addressLine} · <span className="font-mono text-xs">#{a.order.code}</span></span>
                       <OrderBadge status={a.order.status} />
+                      {a.order.deliveryEvents[0]?.photoUrl && <a href={a.order.deliveryEvents[0].photoUrl} target="_blank" rel="noreferrer" className="text-xs font-semibold text-akash underline">proof</a>}
+                      {a.order.deliveryEvents[0]?.otpOk && <Badge tone="good">code ✓</Badge>}
+                      {changes.has(a.orderId) && (
+                        <span className="flex items-center gap-1" title={changes.get(a.orderId)!.join(" · ")}>
+                          <Badge tone="warn">changed</Badge>
+                          <ConfirmAction action={acknowledgeChangeAction.bind(null, a.orderId)} label="✓" variant="ghost" className="h-7 px-1.5" confirm={`${changes.get(a.orderId)!.join(" · ")}. Checked the stop and the route still works?`} />
+                        </span>
+                      )}
                       {r.status !== "DONE" && (
                         <span className="flex gap-0.5">
                           <ConfirmAction action={moveAction.bind(null, r.id, a.orderId, -1)} label="↑" variant="ghost" className="h-7 px-1.5" />
@@ -147,6 +158,10 @@ export default async function DispatchPage({ searchParams }: { searchParams: Pro
                     </li>
                   ))}
                 </ol>
+                <ActionForm action={routeCostAction.bind(null, r.id)} className="mt-3 flex flex-wrap items-center gap-2" showMessage={false}>
+                  <input name="cost" inputMode="decimal" defaultValue={r.cost != null ? rupeesInput(r.cost) : ""} placeholder="Route cost (Rs) — rider pay + fuel" className="field w-56" aria-label="Route cost" />
+                  <SubmitButton size="sm" variant="outline">Save cost</SubmitButton>
+                </ActionForm>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {r.status === "PLANNED" && <ConfirmAction action={startRouteAction.bind(null, r.id)} label="Send out" variant="primary" confirm="Mark packed orders on this route out for delivery? Customers get their hand-off code." />}
                   {r.status === "OUT" && <ConfirmAction action={completeRouteAction.bind(null, r.id)} label="Complete route" variant="dark" />}
@@ -173,7 +188,7 @@ export default async function DispatchPage({ searchParams }: { searchParams: Pro
                 {failed.map((o) => (
                   <li key={o.id} className="text-sm">
                     <Link href={`/admin/orders/${o.id}`} className="font-semibold hover:text-sindoor">{o.number}</Link> · {o.contactName} · {pii.phone(o.contactPhone)}
-                    <p className="text-xs text-sindoor">{o.deliveryEvents[0]?.note}</p>
+                    <p className="text-xs text-sindoor">Reason: {o.deliveryEvents[0]?.note ?? "not recorded"}</p>
                     <div className="mt-2 grid gap-2 sm:grid-cols-2">
                       <ReasonForm action={resolveFailedAction.bind(null, o.id, "RETRY")} label="Retry" placeholder="What changed?" />
                       <ReasonForm action={resolveFailedAction.bind(null, o.id, "CANCEL")} label="Cancel + credit" variant="danger" placeholder="Reason" confirm="Cancel and credit the customer?" />

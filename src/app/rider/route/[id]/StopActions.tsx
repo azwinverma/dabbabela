@@ -4,8 +4,12 @@ import { useState } from "react";
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
 import { deliverAction, failAction } from "../../actions";
 
+/** Mirrors FAILED_REASONS in src/server/dispatch.ts ("Other" needs a few words). */
+const REASONS = ["Customer not reachable", "Office/shop closed", "Wrong or incomplete address", "Customer refused the order", "Damaged in transit", "Ran out of time in the slot"];
+
 export function StopActions({ orderId, needOtp, needPhoto, cash }: { orderId: string; needOtp: boolean; needPhoto: boolean; cash: number }) {
   const [mode, setMode] = useState<"idle" | "deliver" | "fail">("idle");
+  const [reason, setReason] = useState("");
   if (mode === "idle")
     return (
       <div className="mt-3 grid grid-cols-2 gap-2">
@@ -16,15 +20,12 @@ export function StopActions({ orderId, needOtp, needPhoto, cash }: { orderId: st
   if (mode === "fail")
     return (
       <ActionForm action={failAction.bind(null, orderId)} className="mt-3 space-y-2">
-        <select name="reason" required className="field h-12 text-base" defaultValue="" aria-label="What went wrong">
+        <select name="reason" required className="field h-12 text-base" value={reason} onChange={(e) => setReason(e.target.value)} aria-label="What went wrong">
           <option value="" disabled>What went wrong?</option>
-          <option>Customer not reachable</option>
-          <option>Office/shop closed</option>
-          <option>Wrong or incomplete address</option>
-          <option>Customer refused the order</option>
-          <option>Damaged in transit</option>
-          <option>Other — called dispatch</option>
+          {REASONS.map((r) => <option key={r}>{r}</option>)}
+          <option value="Other">Other</option>
         </select>
+        <input name="detail" required={reason === "Other"} minLength={reason === "Other" ? 3 : undefined} placeholder={reason === "Other" ? "What happened? (required)" : "Details (optional)"} className="field h-12" />
         <div className="grid grid-cols-2 gap-2">
           <button type="button" onClick={() => setMode("idle")} className="h-12 rounded-xl border-2 border-ink-line font-bold">Back</button>
           <SubmitButton variant="danger" className="h-12">Mark failed</SubmitButton>

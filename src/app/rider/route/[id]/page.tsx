@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { db } from "@/lib/db";
 import { requirePermission } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { rs } from "@/lib/money";
+import { formatDay, isoDate, todayKTM } from "@/lib/dates";
+import { riderRoute } from "@/server/dispatch";
 import { whatsappLink, formatNepalPhone } from "@/lib/phone";
 import { ConfirmAction } from "@/components/admin/ConfirmAction";
 import { StopActions } from "./StopActions";
@@ -14,19 +15,19 @@ export const dynamic = "force-dynamic";
 export default async function RiderRoute({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("rider.view");
   const { id } = await params;
-  const r = await db.deliveryRoute.findUnique({
-    where: { id },
-    include: { slot: { select: { label: true } }, assignments: { orderBy: { sequence: "asc" }, include: { order: { include: { items: { select: { name: true, quantity: true } }, payment: { select: { method: true } } } } } } },
-  });
-  if (!r || (user.role === "DELIVERY_AGENT" && r.riderId !== user.id)) notFound();
+  // riders see only their own routes; staff only their kitchens'
+  const r = await riderRoute(user, id);
+  if (!r) notFound();
+  const day = isoDate(r.date);
   const s = await getSettings();
   const open = r.assignments.filter((a) => a.order.status === "OUT_FOR_DELIVERY").length;
   return (
     <div>
-      <Link href="/rider" className="text-sm font-semibold text-ink-mute">← Routes</Link>
+      <Link href={day === todayKTM() ? "/rider" : `/rider?date=${day}`} className="text-sm font-semibold text-ink-mute">← Routes</Link>
       <h1 className="mt-1 font-display text-2xl font-extrabold">{r.name}</h1>
-      <p className="mb-4 text-sm text-ink-mute">{r.slot?.label ?? "Any slot"} · {r.assignments.length} stops · cash collected {rs(r.cashCollected)}</p>
-      {r.status === "PLANNED" && <p className="mb-4 rounded-xl bg-besar-light p-3 text-sm font-semibold">Waiting for dispatch to send this route out.</p>}
+      <p className="mb-4 text-sm text-ink-mute">{formatDay(day)} · {r.slot?.label ?? "Any slot"} · {r.assignments.length} stops · cash collected {rs(r.cashCollected)}</p>
+      {r.readOnly && <p className="mb-4 rounded-xl bg-white p-3 text-sm font-semibold">Past route, read-only. Call dispatch if something needs fixing.</p>}
+      {!r.readOnly && r.status === "PLANNED" && <p className="mb-4 rounded-xl bg-besar-light p-3 text-sm font-semibold">Waiting for dispatch to send this route out.</p>}
       <ol className="space-y-4">
         {r.assignments.map((a, i) => {
           const o = a.order;
@@ -50,7 +51,7 @@ export default async function RiderRoute({ params }: { params: Promise<{ id: str
                 <a href={`tel:${o.contactPhone}`} className="flex h-12 items-center justify-center rounded-xl border-2 border-ink font-bold">Call {phone}</a>
                 <a href={whatsappLink(o.contactPhone, `Namaste, this is your Dabba Bela rider with order #${o.code}.`)} target="_blank" rel="noreferrer" className="flex h-12 items-center justify-center rounded-xl border-2 border-saag font-bold text-saag-dark">WhatsApp</a>
               </div>
-              {o.status === "OUT_FOR_DELIVERY" ? (
+              {o.status === "OUT_FOR_DELIVERY" && !r.readOnly ? (
                 <StopActions orderId={o.id} needOtp={s.flags.deliveryOtp && user.role === "DELIVERY_AGENT"} needPhoto={s.flags.deliveryPhoto && user.role === "DELIVERY_AGENT"} cash={cash} />
               ) : (
                 <p className="mt-3 text-center text-sm font-bold uppercase tracking-wide text-ink-mute">{o.status.replace(/_/g, " ").toLowerCase()}</p>
@@ -59,7 +60,7 @@ export default async function RiderRoute({ params }: { params: Promise<{ id: str
           );
         })}
       </ol>
-      {r.status === "OUT" && (
+      {r.status === "OUT" && !r.readOnly && (
         <div className="mt-6">
           {open ? <p className="text-center text-sm text-ink-mute">{open} stop(s) still open.</p> : <ConfirmAction action={finishRouteAction.bind(null, r.id)} label="Finish route" variant="primary" size="lg" className="w-full" confirm="Finish this route? Hand all cash to dispatch." />}
         </div>
