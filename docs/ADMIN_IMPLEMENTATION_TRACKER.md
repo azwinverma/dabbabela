@@ -275,7 +275,61 @@ Note: Postgres treats NULLs as distinct in unique keys, so `DailySettlement(date
 
 **Depends:** WP-01.
 
-## WP-06: Subscription engine ⬜ (L)
+## WP-06: Subscription engine ✅ (L)
+**Done 2026-11-05.**
+- **Versioned pricing (`subscriptions.ts`):** `planPriceOn(plan, date)` = the `MealPlanPrice` row effective that day (latest
+  `effectiveFrom`, then latest created; falls back to the plan fields). Quotes use today's row; `createSubscription` stores `priceId` +
+  `pricePerMeal`. `changePlanPrice(planId, { pricePerMeal, compareAtPrice, effectiveFrom ≥ today })` closes the open row the day before,
+  replaces unused rows scheduled on/after that date (rows used by a subscription are only end-dated, never edited/deleted), updates the
+  `MealPlan` mirror when effective today, and audits `plan.price_change` (before/after). `syncPlanPriceMirrors()` moves the mirror when a
+  scheduled version becomes current (called by `/plans` and `/admin/plans`; cron hook for WP-16). `planPriceHistory()`.
+- **Policies:** `weeksRange(plan)` (min/max/default weeks; `PlanInput.weeks` validated in the quote), `skipPolicyFor(plan, settings)`
+  (plan `skipPolicy` overrides the global setting in `skipMeal`), `cancelPolicyFor(plan)`: `CREDIT` (default) / `REFUND` (customer cancel
+  raises a `Refund` request) / `STAFF_ONLY` (no online cancel; staff still can). `renewalReminderDays` drives `completeAndRemind`
+  (reminder link → `/account/plans/[id]#renew`, skipped when already renewed). `POLICY_TEXT` shown on the plan page and the customer plan.
+- **Policy for modifying existing subscriptions (documented in code above `planMealPrice`):** price per meal, length, days and start are
+  fixed at purchase — plan edits (price, weeks, min days) only affect new sales. Swaps and extra meals are priced at the subscription's own
+  per-meal price + the dabba's surcharge over that price version's regular price. Skip/cancel policy are read from the plan when the
+  action happens; the admin plan form shows how many live plans an edit touches. Staff changes (skip, unskip, pause, resume, cancel, swap)
+  are audited.
+- **Cut-offs:** per-day `DayOffer.cutoff` (earliest of it and the company override, else global) now applies to plan quotes, skip,
+  unskip, swap and add-meal (`mealCutoff`, `earliestCutoff`); quotes also leave out days the kitchen already locked.
+- **Swap (`swapMeal`, `swapOptions`):** before the day's cut-off, `SCHEDULED` meals of an `ACTIVE` plan, to any dabba on that day's menu
+  (veg-only respected, capacity/sold-out checked under the kitchen-day lock). The order is re-priced (tax delta on the same basis);
+  the difference settles once: paid meal → extra from wallet credit (refused when short) / saving back to wallet credit (+ payment
+  `refundedAmount`); cash-on-delivery meal → the pending payment amount moves. `OrderAdjustment` + `SubscriptionChange SWAP` + status
+  event; `dayChoices` updated (renewals carry it). Idempotent (same dabba → no-op) and version-checked against concurrent swaps.
+- **Add a meal (`quoteAddMeal`, `addMealToPlan`, `extraMeals`):** a normal order (`source SINGLE`, `subscriptionId null` → booked once as
+  its own sale) at the plan's per-meal price; delivery free when the plan includes it or a plan meal already goes that day; its
+  `Payment.subscriptionId` links it to the plan; normal payment flow (`/pay/…`); idempotent on the checkout key.
+- **Renewal (`renewSubscription`, `quoteRenewal`):** new subscription at today's price with `renewedFromId`, same days/address/slot/veg,
+  weekday picks carried over when the dabba is on the new menu (else chef's rotation), dates from the day after the old end (or today),
+  respecting menus, holidays, locks and cut-offs. Payment through the normal flow (PENDING → `/pay/…`, or wallet/cash) — never
+  auto-charged. Idempotent: advisory lock on the old plan + "existing non-cancelled renewal" check → clicking twice (even concurrently)
+  returns the same subscription. `SubscriptionChange RENEW` on the old plan.
+- **Customer:** `src/lib/actions/plans.ts` (`quotePlanLengthAction`, `subscribePlanAction` with weeks, `swapMealAction`,
+  `quoteAddMealAction`, `addMealAction`, `renewPlanAction`; user from session, services scoped by `userId`). `/plans/[slug]`: length
+  picker, today's price version, policy text. `/account/plans`: renewal links + Renew. `/account/plans/[id]`: renew panel (preview),
+  per-meal swap with price difference, extra meals list + add form, renewal chain, history with amounts; cancel button follows the
+  cancel policy.
+- **Admin:** `/admin/plans/[id]` min/max weeks, reminder days, skip/cancel policy, price versions table (current/scheduled, sold per
+  version) + "Save price version" (future date). `/admin/plans` shows weeks range and policies. `/admin/subscriptions/[id]` staff swap
+  (audited `plan.swap`), price version, renewal links, extra meals. **`/admin/production-calendar`** (nav ready): committed meals
+  (`COOK_STATUSES`) per day × dabba for 1–6 weeks, per-kitchen daily totals, plan-meal share, awaiting-payment row (not counted), kitchen
+  scope respected, links into `/admin/kitchen/requirements?kitchen=&date=` (query in `production-calendar/query.ts`).
+- **Revenue:** plans still book once at purchase (meal orders carry the plan total); extra meals book once as single orders; unpaid
+  renewals aren't bookings until paid; swaps move the meal order's total (recognised on delivery) and the difference sits in the wallet.
+- **Tests:** `tests/integration/subscriptions-engine.test.ts` (14): price change after purchase leaves the old subscription/orders
+  untouched + audited; scheduled price / no back-dating / re-schedule replaces unused row; add-meal priced at the old subscription's price,
+  idempotent, booked once; IDOR on add-meal; swap credit/charge exactly once + retry no-op + adjustments net 0; wallet-short refusal + other
+  customer refused; per-day cut-off (07:30) and global cut-off refuse customer swap/skip, staff allowed; renewal concurrent double-click →
+  one linked subscription, today's price, PENDING payment, not booked; min/max weeks; plan skip policy CREDIT; cancel policy STAFF_ONLY /
+  REFUND; production calendar totals = booked orders (overall, per day, per kitchen) + permission/scope; plan booked once. Full suite 183/183.
+- **Limits / deferred:** an up-charge swap on a paid plan needs wallet credit (no "pay the difference" payment yet — see requests); no
+  per-plan volume tiers; `maxPauseDays` still not enforced; production calendar counts dabbas (dish portions stay on the kitchen pages);
+  E2E acceptance 3 (Playwright) not written in this run; the account home / orders pages (WP-18) still use the global cut-off for skip
+  buttons.
+
 **Owns:**
 - `src/server/subscriptions.ts`, `src/server/calendar.ts`
 - `src/app/admin/plans/**`, `src/app/admin/subscriptions/**`, `src/app/admin/production-calendar/**` (new)
@@ -537,13 +591,17 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-17 | (middleware owner / WP-20) | `src/middleware.ts`: stamp `x-request-id` on the request (`NextResponse.next({ request: { headers } })`) and echo it on the response, for all routes (matcher today covers only protected paths). Until then `request-context.ts` falls back to `x-vercel-id` or a generated id per request | open |
 | WP-19 | WP-18 | Admin `loading.tsx` / `error.tsx` can use `LoadingState` / `ErrorState` from `src/components/admin/States.tsx` | open |
 | WP-04 | WP-03 | Enforce per-day cut-off at checkout: in `quoteCart` use `offer.cutoff` (from `getOffersForDates`) — earliest of it and `company.cutoffOverride` — when calling `dateProblem` | open |
-| WP-04 | WP-06 | Same per-day cut-off (`DayOffer.cutoff`) for plan picks/swaps (`changeWindowOpen(…, cutoff)`) in `subscriptions.ts` | open |
+| WP-04 | WP-06 | Same per-day cut-off (`DayOffer.cutoff`) for plan picks/swaps (`changeWindowOpen(…, cutoff)`) in `subscriptions.ts` | done (WP-06: quotes, skip, unskip, swap, add-meal) |
 | WP-04 | WP-16 | Call `publishDueMenus()` (exported from `src/server/menu.ts`) in the housekeeping / frequent cron so scheduled menus get their revision + rotation re-sync | open |
 | WP-04 | WP-09 / WP-03 | Use `LunchBox.packagingCost` (when > 0) in `refreshBoxCosts` (`src/app/admin/_kit/costing.ts`) and snapshot it to `Order.packagingCost` | open |
 | WP-16 | WP-02 | Dashboard "Needs attention" banner reads open `Alert` rows (`src/app/admin/page.tsx`) | done (WP-02: counts open/ack alerts by severity → `/admin/alerts`; the computed rows stay until WP-16 removes them) |
 | WP-02 | WP-10 | `/admin/reports` still labels `salesSummary` "Gross sales"/"Net sales"; relabel to "Booked by delivery date" (formula text already updated in `KPI_FORMULAS`) and reuse `src/server/analytics` for report totals | planned |
 | WP-02 | WP-09 | `/admin/profitability` should build on `analytics/revenue.ts profitability()` (same Estimated/Recorded split) and add period close | planned |
-| WP-06 | WP-11 | Renew / swap / add-meal server actions in `src/lib/actions/shop.ts` (WP-06 may add new exported actions in a new file `src/lib/actions/plans.ts` instead) | planned |
+| WP-06 | WP-11 | Renew / swap / add-meal server actions in `src/lib/actions/shop.ts` (WP-06 may add new exported actions in a new file `src/lib/actions/plans.ts` instead) | done (WP-06 in `src/lib/actions/plans.ts`; `shop.ts quotePlanAction/subscribeAction` ignore `weeks` — `/plans/[slug]` now uses the plans.ts versions, WP-11 may drop the old ones) |
+| WP-06 | WP-16 | Daily cron: call `syncPlanPriceMirrors()` (scheduled plan price becomes the `MealPlan` mirror read by home/CMS pricing tables) next to `completeAndRemind()` | open |
+| WP-06 | WP-09 | "Pay the difference" for a swap up-charge on a paid plan when wallet credit is short: a Payment for the delta whose `markPaymentPaid` applies the pending swap (today WP-06 refuses and asks for credit) | open |
+| WP-06 | WP-18 | Account home / orders `MealActions`: use the per-day cut-off (`earliestCutoff(DayOffer.cutoff, company)`) like `/account/plans/[id]`; link "Renew" for plans ending soon (`/account/plans/[id]#renew`) | open |
+| WP-06 | WP-00 / WP-20 | `tests/integration/access.test.ts` assumes exactly one `MealPlanPrice` per plan; limit it to seeded plans (WP-06's test trims its plans' history in `afterAll` meanwhile) | open |
 
 ## External blockers (⛔)
 | Blocker | Affects |
@@ -566,3 +624,4 @@ _Record here when a package needs a change in a file owned by another package._
 | 2026-11-05 | WP-19 | Admin UI kit, ⌘K global search with permission filtering, saved views; audit page migrated; 17 tests |
 | 2026-11-05 | WP-04 | Menu catalogue and weekly menu builder: categories, dabba fields, kitchen availability, DnD editor, scheduled publish (read-time), safe unpublish, revisions + diff, preview, public menu upgrades; 9 integration tests |
 | 2026-11-05 | WP-02 | Analytics engine, `/admin/analytics` + drill-down + CSV export, dashboard relabel; 20 integration tests |
+| 2026-11-05 | WP-06 | Subscription engine: versioned plan prices, per-plan weeks/skip/cancel/reminder policies, swap with exact-once settlement, add a meal, one-click idempotent renewal, per-day cut-offs, `/admin/production-calendar`; 14 integration tests |

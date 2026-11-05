@@ -14,6 +14,7 @@ import { availableMethods } from "@/server/payments/methods";
 import { walletBalance } from "@/server/ledger";
 import { defaultKitchenId } from "@/server/orders";
 import { toAddressViews } from "../../account/_lib/view";
+import { cancelPolicyFor, planPriceOn, POLICY_TEXT, skipPolicyFor, weeksRange } from "@/server/subscriptions";
 import { SubscribeClient, type DayOptions } from "./SubscribeClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
@@ -23,8 +24,12 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
 export default async function PlanPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const plan = await db.mealPlan.findFirst({ where: { slug, isActive: true } });
-  if (!plan) notFound();
+  const planRow = await db.mealPlan.findFirst({ where: { slug, isActive: true } });
+  if (!planRow) notFound();
+  // Today's price version (a scheduled change shows from its first day).
+  const price = await planPriceOn(planRow);
+  const plan = { ...planRow, pricePerMeal: price.pricePerMeal, compareAtPrice: price.compareAtPrice };
+  const range = weeksRange(plan);
   const [user, settings, locale] = await Promise.all([getCurrentUser(), getSettings(), getLocale()]);
   const t = accountDict(locale).plan;
   const addresses = user ? toAddressViews(user) : [];
@@ -32,7 +37,7 @@ export default async function PlanPage({ params }: { params: Promise<{ slug: str
   const starts = await orderableDates(settings, 21, kitchenId);
   // Offers for every date a plan starting in the window could cover.
   const today = todayKTM();
-  const horizon = Array.from({ length: settings.advanceDays + plan.durationWeeks * 7 + 7 }, (_, i) => addDays(today, i));
+  const horizon = Array.from({ length: settings.advanceDays + range.max * 7 + 7 }, (_, i) => addDays(today, i));
   const offers = await getOffersForDates(horizon, kitchenId);
   const dayOptions: DayOptions = {};
   for (const [date, o] of offers) {
@@ -72,9 +77,12 @@ export default async function PlanPage({ params }: { params: Promise<{ slug: str
         ))}
       </ul>
       {plan.policyNote && <p className="mt-3 max-w-3xl text-sm text-ink-soft">{plan.policyNote}</p>}
+      <p className="mt-2 max-w-3xl text-sm text-ink-soft">
+        {POLICY_TEXT.skip[skipPolicyFor(plan, settings)]} {POLICY_TEXT.cancel[cancelPolicyFor(plan)]} Your price per meal stays the same for the whole plan, even if our prices change.
+      </p>
       <SubscribeClient
         t={t}
-        plan={{ id: plan.id, slug: plan.slug, name: plan.name, durationWeeks: plan.durationWeeks, minDaysPerWeek: plan.minDaysPerWeek, includesDelivery: plan.includesDelivery }}
+        plan={{ id: plan.id, slug: plan.slug, name: plan.name, durationWeeks: plan.durationWeeks, minDaysPerWeek: plan.minDaysPerWeek, includesDelivery: plan.includesDelivery, weeks: range }}
         starts={starts}
         deliveryDays={settings.deliveryDays}
         dayOptions={dayOptions}

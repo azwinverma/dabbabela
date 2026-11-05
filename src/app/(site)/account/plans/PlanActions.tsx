@@ -5,7 +5,20 @@ import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
 import { Select, Textarea } from "@/components/ui/Fields";
 import { cancelPlanAction, changePlanAddressAction, pausePlanAction, resumePlanAction } from "@/lib/actions/account";
 
-export function PlanActions({ id, status, addresses, currentAddressId }: { id: string; status: string; addresses: { id: string; label: string; covered: boolean }[]; currentAddressId: string | null }) {
+export function PlanActions({
+  id,
+  status,
+  addresses,
+  currentAddressId,
+  cancelPolicy = "CREDIT",
+}: {
+  id: string;
+  status: string;
+  addresses: { id: string; label: string; covered: boolean }[];
+  currentAddressId: string | null;
+  cancelPolicy?: "CREDIT" | "REFUND" | "STAFF_ONLY";
+}) {
+  const canCancel = status === "PENDING_PAYMENT" || (cancelPolicy !== "STAFF_ONLY" && ["ACTIVE", "PAUSED"].includes(status));
   const [panel, setPanel] = useState<null | "cancel" | "address">(null);
   return (
     <div className="space-y-3">
@@ -29,7 +42,7 @@ export function PlanActions({ id, status, addresses, currentAddressId }: { id: s
             Change address
           </button>
         )}
-        {["ACTIVE", "PAUSED", "PENDING_PAYMENT"].includes(status) && (
+        {canCancel && (
           <button type="button" onClick={() => setPanel(panel === "cancel" ? null : "cancel")} className="rounded-xl border-2 border-sindoor px-3 py-1.5 text-sm font-semibold text-sindoor">
             Cancel plan
           </button>
@@ -53,7 +66,9 @@ export function PlanActions({ id, status, addresses, currentAddressId }: { id: s
           {(state) => (
             <>
               <input type="hidden" name="id" value={id} />
-              <p className="text-sm">Meals before their cut-off are cancelled and what you paid for them goes back to your Dabba Bela credit. Meals already locked will still be delivered.</p>
+              <p className="text-sm">
+                Meals before their cut-off are cancelled and what you paid for them {cancelPolicy === "REFUND" ? "is refunded to your original payment method" : "goes back to your Dabba Bela credit"}. Meals already locked will still be delivered.
+              </p>
               <Textarea label="Why are you cancelling?" name="reason" rows={2} required error={state.errors?.reason} />
               <SubmitButton size="sm" variant="danger" confirm="Cancel the rest of this plan?">
                 Cancel plan

@@ -11,6 +11,7 @@ import { dateOnly, todayKTM } from "@/lib/dates";
 import { PageHero, EmptyState } from "@/components/site/Section";
 import { LinkButton } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
+import { syncPlanPriceMirrors, weeksRange } from "@/server/subscriptions";
 
 export const metadata: Metadata = {
   title: "Meal plans",
@@ -21,6 +22,7 @@ export const metadata: Metadata = {
 export default async function PlansPage() {
   const { locale, t } = await getI18n();
   const today = dateOnly(todayKTM());
+  await syncPlanPriceMirrors(); // a scheduled price version that became current shows today
   const [intro, plans, s] = await Promise.all([
     getSection("plans.intro", locale),
     db.mealPlan.findMany({
@@ -35,8 +37,9 @@ export default async function PlansPage() {
 
   const Card = ({ p }: { p: (typeof plans)[number] }) => {
     const save = p.compareAtPrice && p.compareAtPrice > p.pricePerMeal ? p.compareAtPrice - p.pricePerMeal : 0;
-    const minMeals = p.durationWeeks * p.minDaysPerWeek;
-    const maxMeals = p.durationWeeks * maxDays;
+    const range = weeksRange(p);
+    const minMeals = range.min * p.minDaysPerWeek;
+    const maxMeals = range.max * maxDays;
     return (
       <article className={cn("card flex flex-col p-6", p.isPopular ? "shadow-sticker-lg" : "shadow-card")}>
         <div className="flex items-start justify-between gap-3">
@@ -60,7 +63,7 @@ export default async function PlansPage() {
           <div>
             <dt className="text-ink-mute">Length</dt>
             <dd className="font-semibold">
-              {p.durationWeeks} {p.durationWeeks === 1 ? t.site.week : t.site.weeks}
+              {range.min === range.max ? range.min : `${range.min}–${range.max}`} {range.max === 1 ? t.site.week : t.site.weeks}
             </dd>
           </div>
           <div>
