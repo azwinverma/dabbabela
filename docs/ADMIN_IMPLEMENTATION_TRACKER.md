@@ -185,7 +185,27 @@ Note: Postgres treats NULLs as distinct in unique keys, so `DailySettlement(date
 
 **Depends:** WP-01.
 
-## WP-05: Builder engine ⬜ (M)
+## WP-05: Builder engine ✅ (M)
+**Done 2026-11-05.**
+- **Engine (`builder.ts`):** `priceCustomBox(picks, settings, { kitchenId?, diet?, checkStock? })` (third argument optional; existing callers unchanged). `CustomPick` gains an optional `portionId`.
+  - **Portions:** `CustomizationPortion`; unit price = (override ?? dish price) + `priceDelta`; cost × `qtyMultiplier`. With no `portionId` the first portion is used and written back to the picks. An unknown portion is refused.
+  - **Diet rules:** `dietRule` takes `VEG_ONLY`/`VEGAN_ONLY`/`NO_MEAT` (options in that step must fit; non-fitting options are hidden and refused) and `VEG_BOX`/`VEGAN_BOX`/`NO_MEAT_BOX` (a pick from that step makes the whole dabba follow the level). The customer can also choose a dabba diet, which the server re-checks.
+  - **Combination rules:** `REQUIRE` (and `REQUIRES`) is enforced, and admin refuses contradicting EXCLUDE/REQUIRE pairs.
+  - **Kitchen availability:** `KitchenAvailability` rows per option or per dish; a missing row means available.
+  - **Stock:** a soft "running low" warning from recipe × portion × `stockOnHand`. It never blocks.
+  - **Results:** returns `problems[]` (all of them), `warnings[]` and `lines[]`; `problem` stays the first problem.
+- **Admin (`/admin/builder`):** diet rule per step, a portions editor (signed ± Rs, size ×), per-kitchen on/off with a note, badges (no recipe / daily limit / breaks diet rule / off at kitchen), and read-only mode without `menu.edit`. Every change is audited (`builder.portion_*`, `builder.availability`, `builder.rule`, `builder.group_*`, `builder.option*`).
+- **Customer (`/build`):** a diet chooser, a portion picker, an instant client preview price that is replaced by the server quote ("Price confirmed by the kitchen"), the full list of validation messages, stock warnings, and options filtered for the default kitchen. Labelled radio groups and `aria-live` make it accessible.
+- **Pricing (`pricing.ts`):**
+  - `CouponSpec` handles `freeDelivery` (fee → 0 on every day) and `boxIds` scope (discount only on lines whose `boxId` is listed, spread over those days).
+  - `stackableCoupons` (no stacking unless all are `stackable`; `priceDays({ coupons })`).
+  - Discounts are clamped so no day or total goes negative.
+  - `couponDiscount(base, c, eligible?)`; `negotiatedUnitPrice(list, boxId, boxPrices)` helper for WP-12.
+  - `quoteCart` already passes the full `Coupon` row and lines with `boxId`, so free delivery and box scope work at checkout with no `orders.ts` change.
+- **Tests:**
+  - `tests/unit/pricing.test.ts`: free delivery, box scope, no stacking, non-negative total, eligible base, negotiated price.
+  - `tests/integration/builder.test.ts`: min/max, EXCLUDE/REQUIRE and contradictions, diet rules, portions, tampered client price ignored in quote and save, kitchen availability, stock warning, permission refusal, box-scoped / free-delivery / huge coupons through `quoteCart`.
+
 **Owns:** `src/server/builder.ts`, `src/server/pricing.ts`, `src/app/admin/builder/**`, `src/app/(site)/build/**`, `src/lib/actions/build.ts`.
 
 **Delivers:**
@@ -427,8 +447,11 @@ _Record here when a package needs a change in a file owned by another package._
 | From | To | Request | Status |
 |---|---|---|---|
 | WP-08 | WP-07 | Move `postBatchStock` from `kitchen.ts` to `inventory.ts` (WP-08 does the move first; WP-07 rebases) | planned |
-| WP-12 | WP-03 / WP-05 | Negotiated per-box company price hook in `quoteCart` (`orders.ts`) → call `corporate.ts priceFor(company, boxId)` | planned |
-| WP-15 | WP-05 | `pricing.ts` must respect `Coupon.freeDelivery` (delivery fee → 0) and `boxIds` scope | planned |
+| WP-12 | WP-03 / WP-05 | Negotiated per-box company price hook in `quoteCart` (`orders.ts`) → call `corporate.ts priceFor(company, boxId)` | WP-05 part done: pure helper `negotiatedUnitPrice(list, boxId, boxPrices)` in `pricing.ts`. The call must go in `quoteCart` box lines (`unitPrice`) → WP-03 |
+| WP-15 | WP-05 | `pricing.ts` must respect `Coupon.freeDelivery` (delivery fee → 0) and `boxIds` scope | done (WP-05) |
+| WP-05 | WP-15 | `checkCoupon` (`coupons.ts`) refuses a coupon whose discount is 0, so a pure free-delivery coupon (value 0) is rejected. Allow `freeDelivery` coupons with 0 discount; for `boxIds` coupons, check `minSubtotal`/discount on the eligible lines (needs the lines passed in) | planned |
+| WP-05 | WP-03 | `quoteCart` / subscriptions: pass `{ kitchenId }` to `priceCustomBox` so per-kitchen option availability is enforced at checkout (today it's enforced in the builder's quote/save only) | planned |
+| WP-05 | WP-11 | `saveCustomBoxAction` (`shop.ts`) drops `portionId` when it re-maps items. Keep `portionId` | planned |
 | WP-11 | WP-03 | Pass `attribution` into `placeCartOrder` | planned |
 | WP-16 | WP-02 | Dashboard "Needs attention" banner reads open `Alert` rows (`src/app/admin/page.tsx`) | planned |
 | WP-06 | WP-11 | Renew / swap / add-meal server actions in `src/lib/actions/shop.ts` (WP-06 may add new exported actions in a new file `src/lib/actions/plans.ts` instead) | planned |
@@ -449,3 +472,4 @@ _Record here when a package needs a change in a file owned by another package._
 | Date | Package | Change |
 |---|---|---|
 | 2026-11-04 | Phase 0 | Audit, architecture and tracker written; no code changed |
+| 2026-11-05 | WP-05 | Builder engine: portions, diet rules, REQUIRE, kitchen availability, stock warning, preview + server price; pricing: free-delivery and box-scoped coupons, no stacking, non-negative totals |

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { companyShareFor, couponDiscount, deliveryFeeFor, priceDays, spreadOverMeals, taxFor } from "@/server/pricing";
+import { companyShareFor, couponDiscount, deliveryFeeFor, negotiatedUnitPrice, priceDays, spreadOverMeals, stackableCoupons, taxFor } from "@/server/pricing";
 
 const zone = { fee: 4000, freeAbove: 100000, minOrder: 0 };
 
@@ -67,5 +67,74 @@ describe("pricing", () => {
     const rows = spreadOverMeals([18000, 18000, 18000], { deliveryFee: 0, discount: 5000, tax: 0, companyShare: 10000 }, true);
     expect(rows.reduce((a, r) => a + r.total, 0)).toBe(54000 - 5000);
     expect(rows.reduce((a, r) => a + r.companyShare, 0)).toBe(10000);
+  });
+
+  const two = [
+    { date: "2026-11-08", unitPrice: 20000, unitCost: 0, qty: 1, boxId: "boxA" },
+    { date: "2026-11-09", unitPrice: 30000, unitCost: 0, qty: 1, boxId: "boxB" },
+  ];
+  const base = { zone, company: null, tax: null, globalFreeAbove: 0 } as const;
+
+  it("free-delivery coupon zeroes the delivery fee on every day", () => {
+    const r = priceDays({ ...base, lines: two, coupon: { type: "FLAT", value: 0, maxDiscount: null, minSubtotal: 0, freeDelivery: true } });
+    expect(r.deliveryFee).toBe(0);
+    expect(r.days.every((d) => d.deliveryFee === 0)).toBe(true);
+    expect(r.couponDiscount).toBe(0);
+    expect(r.total).toBe(50000);
+    const plain = priceDays({ ...base, lines: two });
+    expect(plain.deliveryFee).toBe(8000);
+  });
+
+  it("box-scoped coupon only discounts the listed dabbas", () => {
+    const r = priceDays({ ...base, lines: two, coupon: { type: "PERCENT", value: 10, maxDiscount: null, minSubtotal: 0, boxIds: ["boxA"] } });
+    expect(r.couponDiscount).toBe(2000); // 10% of the Rs 200 box only
+    expect(r.days.map((d) => d.discount)).toEqual([2000, 0]);
+    expect(r.days.reduce((a, d) => a + d.total, 0)).toBe(r.total);
+    const none = priceDays({ ...base, lines: two, coupon: { type: "FLAT", value: 5000, maxDiscount: null, minSubtotal: 0, boxIds: ["other"] } });
+    expect(none.couponDiscount).toBe(0);
+    // A flat box-scoped coupon is capped at the eligible amount.
+    const flat = priceDays({ ...base, lines: two, coupon: { type: "FLAT", value: 99999, maxDiscount: null, minSubtotal: 0, boxIds: ["boxA"] } });
+    expect(flat.couponDiscount).toBe(20000);
+    expect(flat.days[0].discount).toBe(20000);
+    // Custom dabbas (no boxId) never count towards a box-scoped coupon.
+    const custom = priceDays({ ...base, lines: [{ date: "2026-11-08", unitPrice: 20000, unitCost: 0, qty: 1 }], coupon: { type: "PERCENT", value: 50, maxDiscount: null, minSubtotal: 0, boxIds: ["boxA"] } });
+    expect(custom.couponDiscount).toBe(0);
+  });
+
+  it("does not stack coupons unless all are stackable", () => {
+    const a = { type: "FLAT" as const, value: 3000, maxDiscount: null, minSubtotal: 0 };
+    const b = { type: "FLAT" as const, value: 4000, maxDiscount: null, minSubtotal: 0 };
+    expect(priceDays({ ...base, lines: two, coupon: a, coupons: [b] }).couponDiscount).toBe(3000);
+    expect(priceDays({ ...base, lines: two, coupon: { ...a, stackable: true }, coupons: [{ ...b, stackable: true }] }).couponDiscount).toBe(7000);
+    expect(stackableCoupons([a, null, b]).length).toBe(1);
+    expect(stackableCoupons([{ ...a, stackable: true }, { ...b, stackable: false }]).length).toBe(1);
+  });
+
+  it("never lets the total go negative", () => {
+    const r = priceDays({
+      ...base,
+      lines: two,
+      company: { discountPct: 50, freeDelivery: false, billingMode: "EMPLOYEE_PAID", subsidyPct: 0, subsidyCap: null, allowanceRemaining: null },
+      coupon: { type: "FLAT", value: 10_000_000, maxDiscount: null, minSubtotal: 0, stackable: true },
+      coupons: [{ type: "PERCENT", value: 100, maxDiscount: null, minSubtotal: 0, stackable: true }],
+    });
+    expect(r.discount).toBeLessThanOrEqual(r.subtotal);
+    expect(r.total).toBeGreaterThanOrEqual(0);
+    expect(r.days.every((d) => d.total >= 0 && d.discount <= d.subtotal)).toBe(true);
+    expect(r.total).toBe(r.deliveryFee); // everything but delivery discounted away
+  });
+
+  it("works out a coupon on the eligible part only and respects caps", () => {
+    expect(couponDiscount(50000, { type: "PERCENT", value: 10, maxDiscount: null, minSubtotal: 0 }, 20000)).toBe(2000);
+    expect(couponDiscount(50000, { type: "FLAT", value: 30000, maxDiscount: null, minSubtotal: 0 }, 20000)).toBe(20000);
+    expect(couponDiscount(5000, { type: "PERCENT", value: 10, maxDiscount: null, minSubtotal: 10000 }, 5000)).toBe(0);
+  });
+
+  it("uses a negotiated company price per dabba when one is set", () => {
+    expect(negotiatedUnitPrice(25000, "boxA", { boxA: 21000 })).toBe(21000);
+    expect(negotiatedUnitPrice(25000, "boxB", { boxA: 21000 })).toBe(25000);
+    expect(negotiatedUnitPrice(25000, "boxA", { boxA: -5 })).toBe(25000);
+    expect(negotiatedUnitPrice(25000, "boxA", { boxA: "210" })).toBe(25000);
+    expect(negotiatedUnitPrice(25000, "boxA", null)).toBe(25000);
   });
 });

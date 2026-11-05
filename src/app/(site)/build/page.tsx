@@ -6,7 +6,8 @@ import { getI18n } from "@/lib/i18n/server";
 import { pick } from "@/lib/i18n";
 import { getSettings } from "@/lib/settings";
 import { dateOptions } from "@/lib/public";
-import { builderGroups, type CustomPick } from "@/server/builder";
+import { builderGroups, DIET_RULES, isDietRule, type CustomPick } from "@/server/builder";
+import { defaultKitchenId } from "@/server/orders";
 import { PageHero, EmptyState } from "@/components/site/Section";
 import { Builder, type BuilderGroup } from "./Builder";
 
@@ -19,7 +20,8 @@ export const metadata: Metadata = {
 export default async function BuildPage({ searchParams }: { searchParams: Promise<{ edit?: string }> }) {
   const { edit } = await searchParams;
   const { locale, t } = await getI18n();
-  const [intro, groups, user, dates, settings] = await Promise.all([getSection("build.intro", locale), builderGroups(), getCurrentUser(), dateOptions(14), getSettings()]);
+  const kitchenId = await defaultKitchenId();
+  const [intro, groups, user, dates, settings] = await Promise.all([getSection("build.intro", locale), builderGroups({ kitchenId }), getCurrentUser(), dateOptions(14), getSettings()]);
   const existing = edit && user ? await db.customBox.findFirst({ where: { id: edit, userId: user.id } }) : null;
   const data: BuilderGroup[] = groups
     .filter((g) => g.options.length)
@@ -28,8 +30,10 @@ export default async function BuildPage({ searchParams }: { searchParams: Promis
       name: pick(g, "name", locale),
       min: g.minSelect,
       max: g.maxSelect,
+      boxDiet: isDietRule(g.dietRule) && DIET_RULES[g.dietRule].scope === "BOX" ? DIET_RULES[g.dietRule].level : null,
       options: g.options.map((o) => ({
         id: o.menuItem.id,
+        portions: o.portions.map((p) => ({ id: p.id, label: locale === "ne" && p.labelNe ? p.labelNe : p.label, priceDelta: p.priceDelta })),
         name: pick(o.menuItem, "name", locale),
         description: pick(o.menuItem, "description", locale) || null,
         price: o.priceOverride ?? o.menuItem.price,
@@ -53,6 +57,7 @@ export default async function BuildPage({ searchParams }: { searchParams: Promis
             dates={dates}
             loggedIn={Boolean(user)}
             maxQty={settings.builderMaxQty}
+            floor={settings.builderMinPrice}
             initial={existing ? { name: existing.name, picks: existing.items as unknown as CustomPick[] } : null}
             avoid={user?.allergies ?? []}
             labels={{ add: t.site.addToList, day: t.site.pickDay, noDays: t.site.noDays, sharedKitchen: t.site.sharedKitchen }}
