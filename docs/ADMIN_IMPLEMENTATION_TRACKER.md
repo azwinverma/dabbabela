@@ -177,7 +177,55 @@ Note: Postgres treats NULLs as distinct in unique keys, so `DailySettlement(date
 
 **Depends:** WP-00, WP-01. WP-11 (attribution) is only needed for the channel breakdown, which shows "not captured yet" until then.
 
-## WP-03: Order management extensions ⬜ (M)
+## WP-03: Order management extensions ✅ (M)
+**Done 2026-11-05.**
+- **Services (`src/server/orders-admin.ts`):** every function takes the acting staff member and re-checks the permission key and kitchen
+  scope itself (`OrderForbidden`); every change is audited with before/after and a required reason.
+  - `createManualOrder` (`orders.create`): existing customer, or a new one (found by phone/email first — no duplicates; phone-only gets the
+    `@phone.dabbabela.local` placeholder email), saved or new address, any method staff may record (`staffPaymentMethods`: enabled methods,
+    cash/bank even without customer-facing bank details; COMPANY_INVOICE only automatically). Goes through `quoteCart`/`placeCartOrder`
+    (source ADMIN, `placedById`), so prices are the server's. Idempotent: key `staff:<form key>` is checked *before* any customer/address is
+    created. `quoteManualOrder` = price preview. `findCustomers` masks phone/email (and only searches them) with `customers.pii`.
+  - `createCorporateBulkOrder` (`orders.create`): one order per employee for one day (several dabbas each), office-location address,
+    eligibility (`mealEligible`, `eligibleDays`), company split/allowance/negotiated price via the normal quote, employee share cash or
+    wallet. Per-employee idempotency key = form key (company+day on the page) + employee + dabba selection, so a re-submit after reload
+    replays. One `order.bulk_corporate` audit with per-employee results and split totals.
+  - `editOrderLines` / `substituteOrderItem` (`orders.edit`): only PENDING_PAYMENT/SCHEDULED and before the window closes (`staffEditWindow`:
+    setting row `orders.modificationWindow` `{ "cutoff": "HH:MM" }` if present, else menu-day cut-off / company override / global; never
+    after a DayLock). `Order.version` checked (`VersionConflict`). New dabbas are priced by `quoteCart` (kitchen of the order). The
+    difference = same pricing (zone fee, company split with this order's allowance added back, day's tax rule; coupon left as applied) of
+    old vs new contents. **Order money fields and payment records are never rewritten**: customer delta → `OrderAdjustment`; a credit goes
+    to the wallet when paid (else "deduct from amount due"), a charge becomes a new PENDING `Payment` (or a wallet spend); company delta →
+    its own adjustment with reason prefixed `Company share`. Items (contents the kitchen cooks), `costTotal` and `packagingCost` follow the
+    new contents; capacity re-checked under the kitchen-day lock when the order grows. Substitutions: active `BoxSubstitution` of that
+    dabba only, new components snapshot (`substitutedFrom`), SUBSTITUTE customization row, kitchen availability and customer allergens
+    checked.
+  - `reassignKitchen` (`orders.edit`): editable + window open, target kitchen OPEN, every dabba on its menu that day and not sold out,
+    `assertDayCapacity` on the target (meals, box caps, slot), refused while on a delivery route; slot cleared or set to a target slot.
+  - `reassignDelivery`: another slot of the same kitchen (slot capacity) and/or another saved address in a zone of the same kitchen
+    (address snapshot re-copied); delivery fee not re-priced; rider/route stays in dispatch (WP-13).
+  - `searchOrders`/`orderWhere`/`parseOrderFilters`: number, code, customer/receiver name, place, **company name**; phone/email only with
+    `customers.pii`; filters date range, status, payment status, method, kitchen (scoped), zone, slot, source, company.
+    `exportOrdersCsv` (`orders.view`+`orders.export`, 5 000 row cap, PII masked without `customers.pii`, audited `orders.export`).
+    `orderAuditTrail`, `orderEditOptions`.
+- **`orders.ts`:** see the cross-package rows (negotiated price, per-day cut-off, kitchen to `priceCustomBox`, packaging snapshot,
+  attribution). Also `quoteCart({ kitchenId })` (staff override), `earliestCutoff`/`dayCutoff`, `activeContracts`/`contractPricesOn`,
+  `staffPaymentMethods`, `cleanAttribution`, `addressSnapshot` exported, `placeCartOrder({ staffMethods })`.
+- **UI:** `/admin/orders` on the kit (FilterForm, SavedViews `orders`, DataTable sort/paging, ExportButton → `/admin/orders/export`, bulk
+  status kept); `/admin/orders/new` (customer search/new → day → dabbas, Preview price / Place order, one-time submit key);
+  `/admin/orders/bulk`; order page: kit Timeline merging status, delivery, adjustments and the order's/payment's audit entries, Edit
+  dabbas, Substitution, Move to another kitchen, Delivery window & address panels (version-carrying forms), net-after-adjustments,
+  invoice link, `/admin/orders/[id]/receipt` printable staff receipt (original amounts + adjustments).
+- **Tests:** `tests/integration/orders-admin.test.ts` (14): manual order total = customer quote + ADMIN source + packaging snapshot;
+  idempotent create incl. new customer; attribution stored/sanitised; bulk corporate split, ineligible day, replay; negotiated contract
+  price on/off; per-day cut-off and earlier company override (mocked clock); line edit → adjustment + pending charge, totals untouched,
+  stale version conflict; paid reduction → wallet credit, payment untouched; refused after lock (edit and reassign); substitution;
+  kitchen reassignment capacity; delivery slot change; permission/scope/reason refusals; export masking + audit. Full suite 183/183.
+- **Deferred:** E2E "staff creates a phone order" (Playwright not run in this package); no settings UI for `orders.modificationWindow`
+  (request below); custom (Build-a-Dabba) lines can't be added from the order page (box only; the service supports them); new-customer
+  manual orders can't use coupons; staff bank-transfer phone orders start PENDING_PAYMENT and are subject to `expireUnpaidOrders` like
+  customer ones.
+
 **Owns:** `src/server/orders.ts`, `src/server/orders-admin.ts` (new), `src/app/admin/orders/**`.
 
 **Delivers:**
@@ -674,18 +722,18 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-08 | WP-16 | Detectors: call `inventoryAlerts(kitchenIds)` or the single functions (`lowStockAlerts`, `expiringLotAlerts`, `unexpectedConsumptionAlerts`, `stockDiscrepancyAlerts`, `lateDeliveryAlerts`) from `src/server/inventory.ts`; each row has a stable `dedupeKey` | open |
 | WP-08 | WP-10 | Inventory valuation report → `stockValuation(kitchenIds)` | open |
 | WP-08 | WP-19 | `src/components/admin/ops/InvTabs.tsx` is no longer used (inventory pages use `src/app/admin/inventory/_components/InventoryTabs.tsx`); delete when convenient | open |
-| WP-12 | WP-03 / WP-05 | Negotiated per-box company price hook in `quoteCart` (`orders.ts`) → call `corporate.ts priceFor(company, boxId)` | WP-05 part done: pure helper `negotiatedUnitPrice(list, boxId, boxPrices)` in `pricing.ts`. The call must go in `quoteCart` box lines (`unitPrice`) → WP-03 |
+| WP-12 | WP-03 / WP-05 | Negotiated per-box company price hook in `quoteCart` (`orders.ts`) → call `corporate.ts priceFor(company, boxId)` | done (WP-05 helper; WP-03: `quoteCart` box lines use `negotiatedUnitPrice` with the `boxPrices` of the company's ACTIVE contract in force on the line's date, before substitution deltas) |
 | WP-15 | WP-05 | `pricing.ts` must respect `Coupon.freeDelivery` (delivery fee → 0) and `boxIds` scope | done (WP-05) |
 | WP-05 | WP-15 | `checkCoupon` (`coupons.ts`) refuses a coupon whose discount is 0, so a pure free-delivery coupon (value 0) is rejected. Allow `freeDelivery` coupons with 0 discount; for `boxIds` coupons, check `minSubtotal`/discount on the eligible lines (needs the lines passed in) | planned |
-| WP-05 | WP-03 | `quoteCart` / subscriptions: pass `{ kitchenId }` to `priceCustomBox` so per-kitchen option availability is enforced at checkout (today it's enforced in the builder's quote/save only) | planned |
+| WP-05 | WP-03 | `quoteCart` / subscriptions: pass `{ kitchenId }` to `priceCustomBox` so per-kitchen option availability is enforced at checkout (today it's enforced in the builder's quote/save only) | done for `quoteCart` (WP-03: `{ kitchenId }` passed); subscriptions part → WP-06 |
 | WP-05 | WP-11 | `saveCustomBoxAction` (`shop.ts`) drops `portionId` when it re-maps items. Keep `portionId` | planned |
-| WP-11 | WP-03 | Pass `attribution` into `placeCartOrder` | planned |
+| WP-11 | WP-03 | Pass `attribution` into `placeCartOrder` | done (WP-03: optional `attribution: OrderAttribution` — UTM keys sanitised into `Order.attribution`, `campaignId` kept only if the Campaign exists. WP-11 still has to pass it from checkout) |
 | WP-17 | (middleware owner / WP-20) | `src/middleware.ts`: stamp `x-request-id` on the request (`NextResponse.next({ request: { headers } })`) and echo it on the response, for all routes (matcher today covers only protected paths). Until then `request-context.ts` falls back to `x-vercel-id` or a generated id per request | open |
 | WP-19 | WP-18 | Admin `loading.tsx` / `error.tsx` can use `LoadingState` / `ErrorState` from `src/components/admin/States.tsx` | open |
-| WP-04 | WP-03 | Enforce per-day cut-off at checkout: in `quoteCart` use `offer.cutoff` (from `getOffersForDates`) — earliest of it and `company.cutoffOverride` — when calling `dateProblem` | open |
+| WP-04 | WP-03 | Enforce per-day cut-off at checkout: in `quoteCart` use `offer.cutoff` (from `getOffersForDates`) — earliest of it and `company.cutoffOverride` — when calling `dateProblem` | done (WP-03: `dayCutoff(offer.cutoff, company.cutoffOverride)` per line; staff edit window uses the same) |
 | WP-04 | WP-06 | Same per-day cut-off (`DayOffer.cutoff`) for plan picks/swaps (`changeWindowOpen(…, cutoff)`) in `subscriptions.ts` | done (WP-06: quotes, skip, unskip, swap, add-meal) |
 | WP-04 | WP-16 | Call `publishDueMenus()` (exported from `src/server/menu.ts`) in the housekeeping / frequent cron so scheduled menus get their revision + rotation re-sync | open |
-| WP-04 | WP-09 / WP-03 | Use `LunchBox.packagingCost` (when > 0) in `refreshBoxCosts` (`src/app/admin/_kit/costing.ts`) and snapshot it to `Order.packagingCost` | WP-09 part done (`refreshBoxCosts`). Snapshot `box.packagingCost × qty` to `Order.packagingCost` in `orders.ts` → WP-03 (the profitability "Packaging estimated" line reads it) |
+| WP-04 | WP-09 / WP-03 | Use `LunchBox.packagingCost` (when > 0) in `refreshBoxCosts` (`src/app/admin/_kit/costing.ts`) and snapshot it to `Order.packagingCost` | WP-03 part done (`QuotedLine.packagingCost`; `Order.packagingCost` = Σ packaging × qty per day; staff edits keep it in step). `refreshBoxCosts` → WP-09 open |
 | WP-16 | WP-02 | Dashboard "Needs attention" banner reads open `Alert` rows (`src/app/admin/page.tsx`) | done (WP-02: counts open/ack alerts by severity → `/admin/alerts`; the computed rows stay until WP-16 removes them) |
 | WP-02 | WP-10 | `/admin/reports` still labels `salesSummary` "Gross sales"/"Net sales"; relabel to "Booked by delivery date" (formula text already updated in `KPI_FORMULAS`) and reuse `src/server/analytics` for report totals | planned |
 | WP-02 | WP-09 | `/admin/profitability` should build on `analytics/revenue.ts profitability()` (same Estimated/Recorded split) and add period close | done (WP-09: `finance/profitability.ts profitAndLoss()` wraps it) |
@@ -697,6 +745,9 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-06 | WP-09 | "Pay the difference" for a swap up-charge on a paid plan when wallet credit is short: a Payment for the delta whose `markPaymentPaid` applies the pending swap (today WP-06 refuses and asks for credit) | open |
 | WP-06 | WP-18 | Account home / orders `MealActions`: use the per-day cut-off (`earliestCutoff(DayOffer.cutoff, company)`) like `/account/plans/[id]`; link "Renew" for plans ending soon (`/account/plans/[id]#renew`) | open |
 | WP-06 | WP-00 / WP-20 | `tests/integration/access.test.ts` assumes exactly one `MealPlanPrice` per plan; limit it to seeded plans (WP-06's test trims its plans' history in `afterAll` meanwhile) | open |
+| WP-03 | WP-09 / WP-12 | Company invoices and finance/analytics totals read `Order.companyShare`/`customerShare` only. Staff edits never rewrite those; they add `OrderAdjustment` rows (customer part; company part has `reason` starting `Company share`). Include adjustments in invoice lines / receivables / net revenue | open |
+| WP-03 | settings page owner (WP-14 / WP-16) | Settings UI for the staff modification window: `Setting` key `orders.modificationWindow` = `{ "cutoff": "HH:MM" }` (read by `staffEditWindow` in `orders-admin.ts`; absent = order cut-off) | open |
+| WP-03 | WP-13 | `reassignDelivery` may change slot/address of an order already on a route (kitchen moves are refused while routed). Dispatch should flag routed orders whose `slotId`/`addressId` changed (audit `order.reassign_delivery`) | open |
 
 ## External blockers (⛔)
 | Blocker | Affects |
@@ -722,3 +773,4 @@ _Record here when a package needs a change in a file owned by another package._
 | 2026-11-05 | WP-08 | Inventory upgrade: unit conversions, lots + FEFO with recorded shortages, `postBatchStock` moved, locations, kitchen transfers, purchase returns, lot valuation, alert read functions, recipe scaling; 10 integration tests |
 | 2026-11-05 | WP-09 | Finance: expenses (approval, reversals), payables + ageing + 3-way hint, daily settlement + lock, statement import + duplicate detection, fee estimate/actual, period close, cash flow, journal CSV (mappable accounts), `/admin/profitability`; 16 integration tests |
 | 2026-11-05 | WP-06 | Subscription engine: versioned plan prices, per-plan weeks/skip/cancel/reminder policies, swap with exact-once settlement, add a meal, one-click idempotent renewal, per-day cut-offs, `/admin/production-calendar`; 14 integration tests |
+| 2026-11-05 | WP-03 | Staff phone and corporate bulk orders, line edits/substitutions with adjustments, kitchen/delivery reassignment, kit order list + export, order timeline/receipt; orders.ts: negotiated price, per-day cut-off, packaging, attribution; 14 integration tests |
