@@ -402,7 +402,19 @@ Note: Postgres treats NULLs as distinct in unique keys, so `DailySettlement(date
 
 **Depends:** WP-04, WP-08, WP-09, WP-12, WP-14 (detectors read their data, through exported read functions).
 
-## WP-17: Audit infrastructure ⬜ (S)
+## WP-17: Audit infrastructure ✅ (S)
+**Done 2026-11-05.** `src/lib/request-context.ts` (`getRequestContext`, `runWithRequestContext`, `contextFromHeaders`): request id from
+`x-request-id` → `x-vercel-id` → `x-correlation-id` (sanitised) or a generated UUID, memoised per request with React `cache()`; IP from
+`x-forwarded-for`/`x-real-ip`; user agent (300 chars). `audit()` keeps both signatures and adds optional `approvedById`, `requestId`, `ip`,
+`userAgent`; it fills requestId/IP/UA automatically. Redaction (`redactSecrets`, `isSecretKey`) runs on before/after/summary/reason:
+password/token/OTP/PIN/CVV/signature/cookie/authorization/API-key/secret keys, Luhn-valid card numbers, Bearer tokens and JWTs. Its own
+list, not the logger's (that one also hides `code`/`key`, which would blank order codes, coupon codes and setting keys; `panVat` is kept).
+`/admin/audit` on the UI kit: filters for text, person (incl. System), record type, action prefix, record ID, request ID, approvals only
+and date range (Kathmandu days); sortable, URL-paginated; saved views; a details drawer (approver, request ID → all entries of that request,
+IP, device, full diff); deep links to records (`_kit/links.ts recordHref`). Query/permission logic in `src/app/admin/audit/query.ts`
+(`searchAudit` throws without `audit.view`).
+Tests: `tests/integration/audit.test.ts` (13: header context, shared request id + approver, legacy signature, redaction, filters, date
+range, deep links, permission incl. custom-role grant).
 **Owns:** `src/lib/audit.ts`, `src/lib/request-context.ts` (new), `src/app/admin/audit/**`.
 
 **Delivers:** request id, IP and user agent filled automatically; `approvedById`; search by actor, entity, action and date; deep links to records; redaction of secret-looking keys in before/after.
@@ -420,7 +432,18 @@ Note: Postgres treats NULLs as distinct in unique keys, so `DailySettlement(date
 
 **Depends:** none beyond WP-00. It can start in wave A.
 
-## WP-19: Admin UI kit ⬜ (M)
+## WP-19: Admin UI kit ✅ (M)
+**Done 2026-11-05.** Components (`src/components/admin/`): `DataTable` + `TablePager` (URL sort/paging, compact density, aria-sort),
+`Filters.tsx` (`FilterForm`, `Field`, `DateRangeFields`, `StatusSelect`, `TextFilter`), `SavedViews`, `Dialog.tsx` (`Dialog`,
+`DialogTrigger`, `Drawer`, `ConfirmDialog` for bulk/destructive actions; native `<dialog>` + `showModal`), `States.tsx` (`LoadingState`,
+`Skeleton`, `ErrorState`, `StatusBadge`, `StatusDot`, re-exports `EmptyState`), `Timeline`, `ExportButton`, `CommandPalette` +
+`SearchTrigger` (⌘K / Ctrl+K / "/", mounted once in `AdminShell`). Pure helpers `src/app/admin/_kit/params.ts` (list params, date range,
+links, saved-view serialization). Server: `_kit/search.ts` (`globalSearch`: orders by code/number within kitchen scope, customers by name
+— email/phone only with `customers.pii`, masked otherwise —, dabbas, companies; each group gated by its page permission),
+`_kit/saved-views.ts`, `_kit/actions.ts` (server actions), `_kit/links.ts`. Reference adoption: `/admin/audit`.
+`loading.tsx` files are WP-18's, so none were added; `LoadingState` is ready for them.
+Tests: `tests/unit/admin-kit.test.ts` (11), `tests/integration/search.test.ts` (6: masking, no PII probing, kitchen scope, group
+permissions, saved-view privacy/IDOR/cap).
 **Owns:** `src/components/admin/ui.tsx`, `src/components/admin/*` (except `nav.ts` and the chart folders owned by WP-02), `src/app/admin/layout.tsx`, `src/app/admin/_kit/**`.
 
 **Delivers:** global search (⌘K across orders, customers, companies, boxes); `SavedView` saved filters; drawer and modal pattern; bulk-action confirmation component; table density and pagination helpers.
@@ -454,6 +477,8 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-05 | WP-11 | `saveCustomBoxAction` (`shop.ts`) drops `portionId` when it re-maps items. Keep `portionId` | planned |
 | WP-11 | WP-03 | Pass `attribution` into `placeCartOrder` | planned |
 | WP-16 | WP-02 | Dashboard "Needs attention" banner reads open `Alert` rows (`src/app/admin/page.tsx`) | planned |
+| WP-17 | (middleware owner / WP-20) | `src/middleware.ts`: stamp `x-request-id` on the request (`NextResponse.next({ request: { headers } })`) and echo it on the response, for all routes (matcher today covers only protected paths). Until then `request-context.ts` falls back to `x-vercel-id` or a generated id per request | open |
+| WP-19 | WP-18 | Admin `loading.tsx` / `error.tsx` can use `LoadingState` / `ErrorState` from `src/components/admin/States.tsx` | open |
 | WP-06 | WP-11 | Renew / swap / add-meal server actions in `src/lib/actions/shop.ts` (WP-06 may add new exported actions in a new file `src/lib/actions/plans.ts` instead) | planned |
 
 ## External blockers (⛔)
@@ -473,3 +498,5 @@ _Record here when a package needs a change in a file owned by another package._
 |---|---|---|
 | 2026-11-04 | Phase 0 | Audit, architecture and tracker written; no code changed |
 | 2026-11-05 | WP-05 | Builder engine: portions, diet rules, REQUIRE, kitchen availability, stock warning, preview + server price; pricing: free-delivery and box-scoped coupons, no stacking, non-negative totals |
+| 2026-11-05 | WP-17 | Request context, audit requestId/IP/UA/approver, secret redaction, searchable audit UI; 13 tests |
+| 2026-11-05 | WP-19 | Admin UI kit, ⌘K global search with permission filtering, saved views; audit page migrated; 17 tests |

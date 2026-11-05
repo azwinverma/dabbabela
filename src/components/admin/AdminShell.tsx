@@ -7,6 +7,7 @@ import * as Icons from "lucide-react";
 import { LogoMark } from "@/components/brand/Logo";
 import { cn } from "@/lib/utils";
 import type { NavGroup } from "./nav";
+import { CommandPalette, SearchTrigger } from "./CommandPalette";
 
 function Icon({ name, className }: { name: string; className?: string }) {
   const C = (Icons as unknown as Record<string, React.ComponentType<{ className?: string }>>)[name] ?? Icons.Circle;
@@ -22,6 +23,7 @@ export function AdminShell({
   kitchen,
   twoFactor,
   logoutAction,
+  search = true,
 }: {
   nav: NavGroup[];
   user: { name: string; role: string; email: string };
@@ -32,6 +34,8 @@ export function AdminShell({
   kitchen?: string | null;
   twoFactor?: boolean;
   logoutAction?: () => Promise<void>;
+  /** Show global search (⌘K). Off for roles with no searchable module. */
+  search?: boolean;
 }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
@@ -48,6 +52,11 @@ export function AdminShell({
           <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-paper/50">Control room</span>
         </span>
       </Link>
+      {search && (
+        <div className="px-3 pb-4">
+          <SearchTrigger />
+        </div>
+      )}
       <div className="flex-1 space-y-5 overflow-y-auto px-3 pb-6 scrollbar-none">
         {nav.map((g) => (
           <div key={g.title}>
@@ -129,7 +138,13 @@ export function AdminShell({
           <span className="font-display font-extrabold">
             Dabba <span className="text-sindoor">Bela</span>
           </span>
+          {search && (
+            <div className="ml-auto">
+              <SearchTrigger compact />
+            </div>
+          )}
         </header>
+        {search && <CommandPalette />}
         <main id="admin-main" className="mx-auto max-w-[1400px] px-4 py-6 md:px-8 md:py-8">{children}</main>
       </div>
     </div>
