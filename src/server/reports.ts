@@ -9,13 +9,22 @@ import { dayCapacity } from "./capacity";
  * KPI_FORMULAS and shown next to each figure. Nothing is estimated or padded — empty data shows 0.
  */
 
-export type Range = { from: string; to: string; kitchenId?: string | null };
+/** kitchenIds (scope list, WP-01/02) wins over the legacy single kitchenId. null/undefined = all kitchens. */
+export type Range = { from: string; to: string; kitchenId?: string | null; kitchenIds?: string[] | null };
+
+const kids = (r: { kitchenId?: string | null; kitchenIds?: string[] | null }) => r.kitchenIds ?? (r.kitchenId ? [r.kitchenId] : null);
+const kw = (r: { kitchenId?: string | null; kitchenIds?: string[] | null }) => {
+  const ids = kids(r);
+  return ids ? { kitchenId: { in: ids } } : {};
+};
 
 export const KPI_FORMULAS: Record<string, string> = {
-  gross: "Σ (subtotal + delivery fee) of orders delivered or still going out (status Scheduled → Delivered), by delivery date.",
+  // WP-02: these two used to be labelled "gross / net sales". They are BOOKED BY DELIVERY DATE (they include meals not yet
+  // delivered and, with VAT-inclusive prices, VAT) — not revenue. Revenue bases live in src/server/analytics (metrics.ts).
+  gross: "Booked by delivery date: Σ (subtotal + delivery fee) of orders Scheduled → Delivered, by delivery date. Includes meals not yet delivered — not revenue (see Analytics → Recognised revenue).",
   discounts: "Σ discount (company discount + coupons) on those orders.",
   refunds: "Σ refunded amount on those orders (wallet credit or processed refunds).",
-  net: "Gross − discounts − refunds. Includes VAT when prices are VAT-inclusive.",
+  net: "Booked by delivery date − discounts − refunds. Includes VAT and undelivered meals — not revenue.",
   vat: "Σ VAT recorded on those orders (from the active tax rule at order time).",
   collections: "Σ amount of payments marked Paid, by the time they were paid (cash in).",
   unpaid: "Payments still Pending (online not completed, cash not yet collected, bank transfer not verified).",
@@ -25,7 +34,7 @@ export const KPI_FORMULAS: Record<string, string> = {
   churn: "Plans cancelled in the range ÷ plans that were active at the start of the range.",
   expectedCost: "Σ recipe cost snapshot (costTotal) on revenue orders — what the food should have cost.",
   actualCost: "Σ |quantity| × unit cost of stock USAGE + WASTE movements in the range — what the kitchen actually used.",
-  margin: "Net sales − expected food cost (contribution before rent, staff and delivery wages).",
+  margin: "Booked net (by delivery date) − expected food cost (contribution before rent, staff and delivery wages). For the recognised-revenue view see Analytics → Profitability.",
   waste: "Σ waste portions ÷ Σ cooked portions on production batches completed in the range.",
   onTime: "Delivered orders whose delivery time (Kathmandu) was at or before the end of their slot ÷ delivered orders with a slot.",
   failed: "Orders that ended the range in Delivery failed.",
@@ -36,7 +45,7 @@ export const KPI_FORMULAS: Record<string, string> = {
 const revenueWhere = (r: Range): Prisma.OrderWhereInput => ({
   deliveryDate: { gte: dateOnly(r.from), lte: dateOnly(r.to) },
   status: { in: REVENUE_STATUSES },
-  ...(r.kitchenId ? { kitchenId: r.kitchenId } : {}),
+  ...kw(r),
 });
 
 export async function salesSummary(r: Range) {
@@ -83,13 +92,14 @@ export async function collections(r: Range) {
   };
 }
 
-export async function mealsDue(date: string, kitchenId?: string | null) {
-  const kitchens = await db.kitchen.findMany({ where: { isActive: true, ...(kitchenId ? { id: kitchenId } : {}) }, select: { id: true } });
+export async function mealsDue(date: string, kitchenId?: string | null | string[]) {
+  const ids = Array.isArray(kitchenId) ? kitchenId : kitchenId ? [kitchenId] : null;
+  const kitchens = await db.kitchen.findMany({ where: { isActive: true, ...(ids ? { id: { in: ids } } : {}) }, select: { id: true } });
   let capacity = 0;
   for (const k of kitchens) capacity += await dayCapacity(k.id, date);
   const a = await db.orderItem.aggregate({
     _sum: { quantity: true },
-    where: { order: { deliveryDate: dateOnly(date), status: { in: COOK_STATUSES }, ...(kitchenId ? { kitchenId } : {}) } },
+    where: { order: { deliveryDate: dateOnly(date), status: { in: COOK_STATUSES }, ...(ids ? { kitchenId: { in: ids } } : {}) } },
   });
   return { date, meals: a._sum.quantity ?? 0, capacity };
 }
@@ -127,7 +137,7 @@ export async function customerMetrics(r: Range) {
 
 export async function actualFoodCost(r: Range) {
   const rows = await db.stockMovement.findMany({
-    where: { type: { in: ["USAGE", "WASTE"] }, createdAt: { gte: dateOnly(r.from), lt: dateOnly(addDays(r.to, 1)) }, ...(r.kitchenId ? { kitchenId: r.kitchenId } : {}) },
+    where: { type: { in: ["USAGE", "WASTE"] }, createdAt: { gte: dateOnly(r.from), lt: dateOnly(addDays(r.to, 1)) }, ...kw(r) },
     include: { ingredient: { select: { costPerUnit: true } } },
   });
   let usage = 0,
@@ -142,7 +152,7 @@ export async function actualFoodCost(r: Range) {
 
 export async function wasteRate(r: Range) {
   const a = await db.productionBatch.aggregate({
-    where: { status: "DONE", date: { gte: dateOnly(r.from), lte: dateOnly(r.to) }, ...(r.kitchenId ? { kitchenId: r.kitchenId } : {}) },
+    where: { status: "DONE", date: { gte: dateOnly(r.from), lte: dateOnly(r.to) }, ...kw(r) },
     _sum: { actualPortions: true, wastePortions: true },
     _count: true,
   });
@@ -152,7 +162,7 @@ export async function wasteRate(r: Range) {
 
 export async function deliveryMetrics(r: Range) {
   const delivered = await db.order.findMany({
-    where: { status: "DELIVERED", deliveryDate: { gte: dateOnly(r.from), lte: dateOnly(r.to) }, deliveredAt: { not: null }, slotId: { not: null }, ...(r.kitchenId ? { kitchenId: r.kitchenId } : {}) },
+    where: { status: "DELIVERED", deliveryDate: { gte: dateOnly(r.from), lte: dateOnly(r.to) }, deliveredAt: { not: null }, slotId: { not: null }, ...kw(r) },
     select: { deliveryDate: true, deliveredAt: true, slot: { select: { endTime: true } } },
   });
   let onTime = 0;
@@ -161,7 +171,7 @@ export async function deliveryMetrics(r: Range) {
     const day = isoDate(o.deliveryDate);
     if (at.date < day || (at.date === day && at.time <= (o.slot?.endTime ?? "23:59"))) onTime++;
   }
-  const failed = await db.order.count({ where: { status: "FAILED_DELIVERY", deliveryDate: { gte: dateOnly(r.from), lte: dateOnly(r.to) }, ...(r.kitchenId ? { kitchenId: r.kitchenId } : {}) } });
+  const failed = await db.order.count({ where: { status: "FAILED_DELIVERY", deliveryDate: { gte: dateOnly(r.from), lte: dateOnly(r.to) }, ...kw(r) } });
   return { withSlot: delivered.length, onTime, onTimeRate: delivered.length ? onTime / delivered.length : null, failed };
 }
 
@@ -178,7 +188,7 @@ export async function popularDishes(r: Range, take = 10) {
     CROSS JOIN LATERAL jsonb_array_elements(oi.components) c
     WHERE o."deliveryDate" BETWEEN ${dateOnly(r.from)} AND ${dateOnly(r.to)}
       AND o.status::text = ANY(${REVENUE_STATUSES as string[]})
-      ${r.kitchenId ? Prisma.sql`AND o."kitchenId" = ${r.kitchenId}` : Prisma.empty}
+      ${kids(r) ? Prisma.sql`AND o."kitchenId" = ANY(${kids(r)})` : Prisma.empty}
     GROUP BY 1 ORDER BY 2 DESC LIMIT ${take}`;
   return rows.map((x) => ({ name: x.name, portions: Number(x.n) }));
 }
@@ -191,10 +201,10 @@ export async function dailySeries(r: Range) {
   return out;
 }
 
-export async function lowStock(kitchenId?: string | null) {
+export async function lowStock(kitchenId?: string | null | string[]) {
   const [ings, sums] = await Promise.all([
     db.ingredient.findMany({ where: { isActive: true, safetyStock: { gt: 0 } }, select: { id: true, name: true, unit: true, safetyStock: true } }),
-    db.stockMovement.groupBy({ by: ["ingredientId"], where: kitchenId ? { kitchenId } : {}, _sum: { quantity: true } }),
+    db.stockMovement.groupBy({ by: ["ingredientId"], where: Array.isArray(kitchenId) ? { kitchenId: { in: kitchenId } } : kitchenId ? { kitchenId } : {}, _sum: { quantity: true } }),
   ]);
   const onHand = new Map(sums.map((s) => [s.ingredientId, s._sum.quantity ?? 0]));
   // Only flag items that have ever been stocked — a brand-new kitchen with no receipts isn't "low", it's unset.
@@ -234,16 +244,16 @@ export async function cac(ym: string) {
   return { ym, spend, newCustomers, cac: spend != null && newCustomers ? Math.round(spend / newCustomers) : null };
 }
 
-/** Retention by first-order month: share of the cohort ordering again in each following month. */
-export async function cohorts(months = 6) {
+/** Retention by first-DELIVERED-order month: share of the cohort with a delivered order in each following month. */
+export async function cohorts(months = 6, kitchenIds?: string[] | null) {
   const startYm = monthRange(addDays(todayKTM(), -months * 31).slice(0, 7)).start;
   const rows = await db.$queryRaw<{ cohort: string; m: string; n: bigint }[]>`
     WITH firsts AS (
       SELECT "userId", to_char(MIN("deliveryDate"), 'YYYY-MM') AS cohort FROM "Order"
-      WHERE status::text = ANY(${REVENUE_STATUSES as string[]}) GROUP BY "userId"
+      WHERE status = 'DELIVERED' ${kitchenIds ? Prisma.sql`AND "kitchenId" = ANY(${kitchenIds})` : Prisma.empty} GROUP BY "userId"
     ), act AS (
       SELECT DISTINCT "userId", to_char("deliveryDate", 'YYYY-MM') AS m FROM "Order"
-      WHERE status::text = ANY(${REVENUE_STATUSES as string[]})
+      WHERE status = 'DELIVERED' ${kitchenIds ? Prisma.sql`AND "kitchenId" = ANY(${kitchenIds})` : Prisma.empty}
     )
     SELECT f.cohort, a.m, COUNT(DISTINCT a."userId") AS n
     FROM firsts f JOIN act a ON a."userId" = f."userId"

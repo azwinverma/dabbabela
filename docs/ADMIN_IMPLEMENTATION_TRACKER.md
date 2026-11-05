@@ -130,7 +130,32 @@ Note: Postgres treats NULLs as distinct in unique keys, so `DailySettlement(date
 
 **Depends:** WP-00.
 
-## WP-02: Analytics engine and executive dashboard ⬜ (L)
+## WP-02: Analytics engine and executive dashboard ✅ (L)
+**Done 2026-11-05.**
+- **Metrics layer** `src/server/analytics/`: `metrics.ts` (definitions registry shown next to every number), `filters.ts` (one parser +
+  Prisma builder + mirrored SQL builder; kitchen scope = requested ∩ `user.kitchenIds`), `revenue.ts` (four bases, periods with growth,
+  day/week/month trends, breakdowns, receivables, profitability), `orders.ts` (pipeline, delayed, over-capacity, short ingredients),
+  `subscriptions.ts` (status, run-rate incl. contracts, renewals due, expected meals, churn, cancel reasons), `customers.ts` (active/new/
+  returning, frequency, historical LTV, top customers, diet preference mix, ratings, complaints), `transactions.ts` (drill-down lists using
+  the metric's own where-clause), `export.ts` (CSV; `analytics.view`+`analytics.export`, PII masked without `customers.pii`, audited
+  `analytics.export`).
+- **Definitions chosen** (where the architecture doc left room): Bookings exclude PENDING_PAYMENT and CANCELLED single orders; a plan stays
+  booked if later cancelled (unused part shows as refund/credit). Cash excludes WALLET spends and COMPANY_INVOICE placeholders, and
+  WALLET_CREDIT refunds; company invoice receipts aren't dated in the schema, so they're not in cash (outstanding invoices shown under
+  receivables). Deferred = paid (PAID/PARTIALLY_REFUNDED) orders Scheduled→Out for delivery or FAILED_DELIVERY, now; wallet balance only when
+  no non-date filter. Channel = `User.acquisitionSource` ("not captured yet" until WP-11). Category breakdown = Σ delivered line totals.
+  Timestamp ranges use Kathmandu midnight. Profitability shows "No data recorded" (null) per source, never zero-as-fact.
+- **UI:** `/admin/analytics` (tabs Revenue / Orders & plans / Customers / Profitability, global filter bar), `/admin/analytics/transactions`
+  (paginated drill-down for 14 bases), `/admin/analytics/export` (CSV route). Dashboard relabelled: "Gross/Net sales" → "Booked by delivery
+  date"; adds Recognised, Bookings, Net cash, Deferred, run-rate, period growth chips; delayed orders and open `Alert` rows in "Needs
+  attention" (WP-16 request). SVG charts in `src/components/admin/charts` (every bar/row is a link). `Kpi` gained `href`.
+- `reports.ts`: `Range.kitchenIds` (multi-kitchen scope) honoured by every helper; cohorts on DELIVERED; KPI_FORMULAS gross/net/margin
+  reworded. Nav: `/admin/analytics` ready.
+- Tests: `tests/integration/analytics.test.ts` (20) — fixed dataset in two new kitchens, March 2021; every metric asserted against
+  hand-computed values (incl. prepaid plan once in bookings / per meal in recognised, refunds incl. wallet-credit, cancellations, filters,
+  kitchen scope, trends summing to totals, drill totals = metrics, export permission/masking/audit).
+- **Deferred:** historical deferred-revenue snapshot "as at date" (now-only); predictive LTV (by design none); XLSX (WP-10).
+
 **Owns:**
 - `src/server/analytics/**` (new: `metrics.ts`, `filters.ts`, `revenue.ts`, `orders.ts`, `subscriptions.ts`, `customers.ts`)
 - `src/server/reports.ts` (refactor onto analytics)
@@ -509,13 +534,15 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-05 | WP-03 | `quoteCart` / subscriptions: pass `{ kitchenId }` to `priceCustomBox` so per-kitchen option availability is enforced at checkout (today it's enforced in the builder's quote/save only) | planned |
 | WP-05 | WP-11 | `saveCustomBoxAction` (`shop.ts`) drops `portionId` when it re-maps items. Keep `portionId` | planned |
 | WP-11 | WP-03 | Pass `attribution` into `placeCartOrder` | planned |
-| WP-16 | WP-02 | Dashboard "Needs attention" banner reads open `Alert` rows (`src/app/admin/page.tsx`) | planned |
 | WP-17 | (middleware owner / WP-20) | `src/middleware.ts`: stamp `x-request-id` on the request (`NextResponse.next({ request: { headers } })`) and echo it on the response, for all routes (matcher today covers only protected paths). Until then `request-context.ts` falls back to `x-vercel-id` or a generated id per request | open |
 | WP-19 | WP-18 | Admin `loading.tsx` / `error.tsx` can use `LoadingState` / `ErrorState` from `src/components/admin/States.tsx` | open |
 | WP-04 | WP-03 | Enforce per-day cut-off at checkout: in `quoteCart` use `offer.cutoff` (from `getOffersForDates`) — earliest of it and `company.cutoffOverride` — when calling `dateProblem` | open |
 | WP-04 | WP-06 | Same per-day cut-off (`DayOffer.cutoff`) for plan picks/swaps (`changeWindowOpen(…, cutoff)`) in `subscriptions.ts` | open |
 | WP-04 | WP-16 | Call `publishDueMenus()` (exported from `src/server/menu.ts`) in the housekeeping / frequent cron so scheduled menus get their revision + rotation re-sync | open |
 | WP-04 | WP-09 / WP-03 | Use `LunchBox.packagingCost` (when > 0) in `refreshBoxCosts` (`src/app/admin/_kit/costing.ts`) and snapshot it to `Order.packagingCost` | open |
+| WP-16 | WP-02 | Dashboard "Needs attention" banner reads open `Alert` rows (`src/app/admin/page.tsx`) | done (WP-02: counts open/ack alerts by severity → `/admin/alerts`; the computed rows stay until WP-16 removes them) |
+| WP-02 | WP-10 | `/admin/reports` still labels `salesSummary` "Gross sales"/"Net sales"; relabel to "Booked by delivery date" (formula text already updated in `KPI_FORMULAS`) and reuse `src/server/analytics` for report totals | planned |
+| WP-02 | WP-09 | `/admin/profitability` should build on `analytics/revenue.ts profitability()` (same Estimated/Recorded split) and add period close | planned |
 | WP-06 | WP-11 | Renew / swap / add-meal server actions in `src/lib/actions/shop.ts` (WP-06 may add new exported actions in a new file `src/lib/actions/plans.ts` instead) | planned |
 
 ## External blockers (⛔)
@@ -538,3 +565,4 @@ _Record here when a package needs a change in a file owned by another package._
 | 2026-11-05 | WP-17 | Request context, audit requestId/IP/UA/approver, secret redaction, searchable audit UI; 13 tests |
 | 2026-11-05 | WP-19 | Admin UI kit, ⌘K global search with permission filtering, saved views; audit page migrated; 17 tests |
 | 2026-11-05 | WP-04 | Menu catalogue and weekly menu builder: categories, dabba fields, kitchen availability, DnD editor, scheduled publish (read-time), safe unpublish, revisions + diff, preview, public menu upgrades; 9 integration tests |
+| 2026-11-05 | WP-02 | Analytics engine, `/admin/analytics` + drill-down + CSV export, dashboard relabel; 20 integration tests |
