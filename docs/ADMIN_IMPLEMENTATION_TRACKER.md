@@ -551,7 +551,49 @@ Note: Postgres treats NULLs as distinct in unique keys, so `DailySettlement(date
 
 **Depends:** WP-02, WP-09 (profitability reports), WP-08 (valuation).
 
-## WP-11: CRM and attribution ⬜ (M)
+## WP-11: CRM and attribution ✅ (M)
+**Done 2026-11-05.** Service `src/server/crm.ts` (every function takes the actor and checks permissions itself; contact details masked
+without `customers.pii`; no password/session-token/2FA/payment-credential fields ever selected):
+- **Directory** `/admin/customers` on the UI kit: DataTable (sort name/orders/last sign-in/joined), filters (status, company/individual,
+  diet, allergies, active plan, acquisition source incl. "not captured", joined range), saved views (`customers`), CSV export
+  `/admin/customers/export` (current filters, `customers.export`, masked, audited `customer.directory_export`). Email/phone search only
+  with `customers.pii` (no PII probing).
+- **360 profile** `/admin/customers/[id]`: identity + verified badges, 2FA, status, active sessions, preferences, allergies callout,
+  first/last-touch attribution, company link, addresses, orders, plans, payments, refunds, credit ledger, pending credit requests,
+  tickets, feedback, sign-in activity (IP masked / UA hidden without PII), notes & staff-activity timeline (from the audit log).
+- **Edits** (`customers.edit`, audited `customer.update` with changed fields only): name, language, diet, spice, allergies (validated
+  against `Allergen`), onion/garlic, dietary notes; phone needs `customers.pii`, clears its verified flag, masked in the audit. Email is
+  never staff-editable.
+- **Suspend / reactivate** (`customers.edit` + `customers.pii`, reason required): deletes all sessions; sign-in is refused by the
+  existing Better Auth session hook; `placeOrderAction` re-reads the account (`assertCustomerCanOrder`) so an in-flight session can't order.
+- **Credit**: holders of `refunds.approve` issue goodwill credit directly (GOODWILL ledger row, audit `credit.issue` with
+  `approvedById` = them); `refunds.create`-only staff request it (audit row `credit.request` = the pending request); a *different*
+  approver approves/rejects exactly once (advisory lock + decision row `CreditRequest`/`credit.approve|reject`, ledger in the same tx).
+  Cap Rs 25,000 per credit.
+- **Notes**: pinned note (`User.internalNote`) + append-only timeline notes (`customer.note_added`).
+- **Communication preferences**: staff set the topic × channel matrix (same defaults/marketing-opt-in rule as `/account/notifications`),
+  reason required, audited `customer.comm_prefs`.
+- **Privacy**: log a request, process EXPORT/DELETE from the profile through `completeDataRequest` (typed DELETE confirmation).
+- **Export one customer** `/admin/customers/[id]/export` (privacy-export JSON + attribution; masked without PII; audited `customer.export`).
+- **Attribution** (`src/lib/attribution.ts`, edge-safe): nothing is stored until the visitor answers the in-flow notice
+  (`src/components/site/ConsentNotice.tsx`, "Allow" / "No thanks", reopen via `window.dispatchEvent(new Event("dabba:consent-open"))`);
+  `POST /api/consent` records the choice (denied deletes the touches) and the touch of the page they accepted on. Middleware then keeps
+  `dabba_ft` (first touch, once, 90 d) and `dabba_lt` (last marketing touch, 30 d), httpOnly; only UTM values, the referring **host**
+  and the landing **path**. Sign-up (`registerAction`, phone-OTP first sign-in) stores `User.acquisitionSource` + `User.attribution`
+  (first touch flat + `last`) once; checkout passes the last (else first) touch to `placeCartOrder({ attribution })` with `campaignId`
+  from `Campaign.utmCampaign` (case-insensitive).
+- **Middleware** (WP-17 request): runs on all routes except static files; stamps `x-request-id` (keeps a well-formed upstream
+  `x-request-id`/`x-vercel-id`, else a UUID) on the request and the response; auth redirect unchanged for protected paths.
+- **shop.ts**: `saveCustomBoxAction` keeps `portionId`; old `quotePlanAction`/`subscribeAction` removed (superseded by `plans.ts`;
+  `PlanQuoteDTO` type kept).
+- Deviation: one line added to unowned `src/app/(site)/layout.tsx` to mount `<ConsentNotice />` (no owner in this tracker).
+Tests: `tests/integration/crm.test.ts` (16: directory masking/no probing, filters, 360 masking + no secrets, staff-only, audited edits,
+notes/prefs timeline, suspend blocks sign-in + ordering and reactivate restores, direct credit with approver, request/approve exactly once
++ no self-approval, masked audited exports, UTM/referrer parsing, consent-gated middleware cookies, sign-up → user (once) → order +
+campaign, no consent → nothing stored, request-id header, portion kept).
+**Deferred:** subscription attribution (needs `createSubscription` support, see requests); privacy-policy text and a footer
+"Cookie choices" link (WP-14); legal review of the notice (external blocker).
+
 **Owns:**
 - `src/app/admin/customers/**`, `src/server/crm.ts` (new)
 - `src/middleware.ts` (UTM / referrer first-touch cookie)
@@ -756,9 +798,9 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-15 | WP-05 | `pricing.ts` must respect `Coupon.freeDelivery` (delivery fee → 0) and `boxIds` scope | done (WP-05) |
 | WP-05 | WP-15 | `checkCoupon` (`coupons.ts`) refuses a coupon whose discount is 0, so a pure free-delivery coupon (value 0) is rejected. Allow `freeDelivery` coupons with 0 discount; for `boxIds` coupons, check `minSubtotal`/discount on the eligible lines (needs the lines passed in) | planned |
 | WP-05 | WP-03 | `quoteCart` / subscriptions: pass `{ kitchenId }` to `priceCustomBox` so per-kitchen option availability is enforced at checkout (today it's enforced in the builder's quote/save only) | done for `quoteCart` (WP-03: `{ kitchenId }` passed); subscriptions part → WP-06 |
-| WP-05 | WP-11 | `saveCustomBoxAction` (`shop.ts`) drops `portionId` when it re-maps items. Keep `portionId` | planned |
-| WP-11 | WP-03 | Pass `attribution` into `placeCartOrder` | done (WP-03: optional `attribution: OrderAttribution` — UTM keys sanitised into `Order.attribution`, `campaignId` kept only if the Campaign exists. WP-11 still has to pass it from checkout) |
-| WP-17 | (middleware owner / WP-20) | `src/middleware.ts`: stamp `x-request-id` on the request (`NextResponse.next({ request: { headers } })`) and echo it on the response, for all routes (matcher today covers only protected paths). Until then `request-context.ts` falls back to `x-vercel-id` or a generated id per request | open |
+| WP-05 | WP-11 | `saveCustomBoxAction` (`shop.ts`) drops `portionId` when it re-maps items. Keep `portionId` | done (WP-11: `portionId` validated and passed to `priceCustomBox`; saved items keep it) |
+| WP-11 | WP-03 | Pass `attribution` into `placeCartOrder` | done (WP-03: optional `attribution: OrderAttribution` — UTM keys sanitised into `Order.attribution`, `campaignId` kept only if the Campaign exists. WP-11: `placeOrderAction` passes the consented last/first touch + campaign id) |
+| WP-17 | (middleware owner / WP-20) | `src/middleware.ts`: stamp `x-request-id` on the request (`NextResponse.next({ request: { headers } })`) and echo it on the response, for all routes (matcher today covers only protected paths). Until then `request-context.ts` falls back to `x-vercel-id` or a generated id per request | done (WP-11: all routes except static files; upstream id kept when well-formed, else UUID; also on redirects) |
 | WP-19 | WP-18 | Admin `loading.tsx` / `error.tsx` can use `LoadingState` / `ErrorState` from `src/components/admin/States.tsx` | open |
 | WP-04 | WP-03 | Enforce per-day cut-off at checkout: in `quoteCart` use `offer.cutoff` (from `getOffersForDates`) — earliest of it and `company.cutoffOverride` — when calling `dateProblem` | done (WP-03: `dayCutoff(offer.cutoff, company.cutoffOverride)` per line; staff edit window uses the same) |
 | WP-04 | WP-06 | Same per-day cut-off (`DayOffer.cutoff`) for plan picks/swaps (`changeWindowOpen(…, cutoff)`) in `subscriptions.ts` | done (WP-06: quotes, skip, unskip, swap, add-meal) |
@@ -770,7 +812,12 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-09 | WP-16 | Raise `Alert` rows for duplicate payments: call `duplicatePaymentSuspects(since)` and `statementDuplicates()` (`src/server/finance/statements.ts`) from the alerts detector cron; also unmatched statement lines older than 3 days (`unmatchedLines()`) and settlements with a variance left open | open |
 | WP-09 | WP-10 | Reports center can reuse `cashFlow`, `payablesAgeing`, `buildJournal`, `expenseTotals` (`src/server/finance/*`) for finance reports instead of re-querying | open |
 | WP-09 | `invoices.ts` owner | Company-invoice payments are only `Invoice.paidAmount` (no dated rows), so cash flow and the journal can't include them; record each receipt with a date (e.g. reuse `Payment` with method COMPANY_INVOICE, or a receipt table) | open |
-| WP-06 | WP-11 | Renew / swap / add-meal server actions in `src/lib/actions/shop.ts` (WP-06 may add new exported actions in a new file `src/lib/actions/plans.ts` instead) | done (WP-06 in `src/lib/actions/plans.ts`; `shop.ts quotePlanAction/subscribeAction` ignore `weeks` — `/plans/[slug]` now uses the plans.ts versions, WP-11 may drop the old ones) |
+| WP-06 | WP-11 | Renew / swap / add-meal server actions in `src/lib/actions/shop.ts` (WP-06 may add new exported actions in a new file `src/lib/actions/plans.ts` instead) | done (WP-06 in `src/lib/actions/plans.ts`; WP-11 removed the old `shop.ts quotePlanAction/subscribeAction`, `PlanQuoteDTO` type kept) |
+| WP-11 | WP-06 | Subscription attribution: let `createSubscription` accept `attribution`/`campaignId` (→ `Subscription.campaignId`, e.g. via `cleanAttribution` from `orders.ts`) and pass it from `subscribePlanAction`/`renewPlanAction` with `orderTouch(readAttribution(await cookies()))` + `campaignIdFor()` (`src/lib/attribution.ts`, `src/server/crm.ts`) | open |
+| WP-11 | WP-03 / WP-12 | Suspended customers: staff-placed orders (`orders-admin.ts`) and company/team orders (`team.ts`) should refuse a customer whose account is suspended or deleted — call `assertCustomerCanOrder(userId)` (`src/server/crm.ts`) or check `isActive`/`deletedAt` in `placeCartOrder` | open |
+| WP-11 | WP-14 | Privacy policy: add the attribution-cookie paragraph (`dabba_consent` 180 d, `dabba_ft` 90 d, `dabba_lt` 30 d; UTM values, referring host, landing path; stored on account/orders; "No thanks" deletes). Footer "Cookie choices" link: `onClick={() => window.dispatchEvent(new Event("dabba:consent-open"))}` (export `OPEN_EVENT` in `ConsentNotice.tsx`). Note: WP-11 mounted `<ConsentNotice />` in `src/app/(site)/layout.tsx` (one line) | open |
+| WP-11 | WP-15 / WP-10 | Attribution report: first touch = `User.acquisitionSource`/`User.attribution` (flat first touch + `last`), order = `Order.attribution` (last touch) + `Order.campaignId`. The `/api/admin/export/customers` CSV could reuse `exportCustomerDirectory` (adds acquisition source, filters) | open |
+| WP-11 | e2e owners / WP-20 | The site now shows an in-flow consent bar above the header until answered; e2e contexts that assert on top-of-page layout can pre-set cookie `dabba_consent=granted` or `denied` | open |
 | WP-06 | WP-16 | Daily cron: call `syncPlanPriceMirrors()` (scheduled plan price becomes the `MealPlan` mirror read by home/CMS pricing tables) next to `completeAndRemind()` | open |
 | WP-06 | WP-09 | "Pay the difference" for a swap up-charge on a paid plan when wallet credit is short: a Payment for the delta whose `markPaymentPaid` applies the pending swap (today WP-06 refuses and asks for credit) | open |
 | WP-06 | WP-18 | Account home / orders `MealActions`: use the per-day cut-off (`earliestCutoff(DayOffer.cutoff, company)`) like `/account/plans/[id]`; link "Renew" for plans ending soon (`/account/plans/[id]#renew`) | open |
@@ -808,3 +855,4 @@ _Record here when a package needs a change in a file owned by another package._
 | 2026-11-05 | WP-06 | Subscription engine: versioned plan prices, per-plan weeks/skip/cancel/reminder policies, swap with exact-once settlement, add a meal, one-click idempotent renewal, per-day cut-offs, `/admin/production-calendar`; 14 integration tests |
 | 2026-11-05 | WP-03 | Staff phone and corporate bulk orders, line edits/substitutions with adjustments, kitchen/delivery reassignment, kit order list + export, order timeline/receipt; orders.ts: negotiated price, per-day cut-off, packaging, attribution; 14 integration tests |
 | 2026-11-05 | WP-13 | Riders page + profiles, distance fee bands / zone windows (coverage hook), route grouping + cost, changed-after-routing flags, required failed reasons, rider date picker (past read-only), per-rider/zone performance; 10 integration tests |
+| 2026-11-05 | WP-11 | CRM on the kit (directory, saved views, 360, audited edits, suspend, approved credit, notes, comm prefs, privacy, masked exports); consented first/last-touch attribution → user → order; middleware request id; 16 integration tests |
