@@ -3,7 +3,7 @@ import { addDays, isValidISODate, todayKTM } from "@/lib/dates";
 import { rs } from "@/lib/money";
 import { usageVariance } from "@/server/inventory";
 import { PageHeader, Table, Th, Td, EmptyRow, StatCard } from "@/components/admin/ui";
-import { InvTabs } from "@/components/admin/ops/InvTabs";
+import { InventoryTabs } from "../_components/InventoryTabs";
 import { pickKitchen } from "@/components/admin/ops/scope";
 
 export const metadata = { title: "Usage variance" };
@@ -21,7 +21,7 @@ export default async function VariancePage({ searchParams }: { searchParams: Pro
   return (
     <div>
       <PageHeader title="Theoretical vs actual usage" description="Theoretical = finished batches' cooked portions × recipe (with trim waste). Actual = usage + waste movements in the ledger. A large gap means unrecorded waste, over-portioning, or a recipe that needs re-weighing." />
-      <InvTabs current="variance" qs={`kitchen=${kitchen.id}`} />
+      <InventoryTabs current="variance" qs={`kitchen=${kitchen.id}`} />
       <form className="mb-4 flex flex-wrap items-end gap-2">
         <input type="hidden" name="kitchen" value={kitchen.id} />
         <label className="text-xs font-semibold text-ink-mute">From<input type="date" name="from" defaultValue={from} className="field mt-1" /></label>

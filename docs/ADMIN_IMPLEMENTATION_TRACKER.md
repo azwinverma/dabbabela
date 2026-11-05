@@ -310,7 +310,43 @@ Note: Postgres treats NULLs as distinct in unique keys, so `DailySettlement(date
 
 **Depends:** WP-01.
 
-## WP-08: Inventory upgrade ⬜ (L)
+## WP-08: Inventory upgrade ✅ (L)
+**Done 2026-11-05.** All in `src/server/inventory.ts` (no schema change):
+- **Units:** `convertQty` (shortest chain over edges, both directions), `conversionEdges` (ingredient rows → purchase unit/factor →
+  global rows → KG↔G, L↔ML), `toBaseUnits`, `inPurchaseUnits`, `saveConversion`/`deleteConversion` (audited). Stock stays in the base
+  unit; PO lines, receipts, returns, transfers and manual movements accept a `unit` and convert qty + cost (paisa per base unit).
+  Ingredient form: category, purchase unit + factor, reorder point; ingredient page: conversions editor, open lots.
+- **Lots + FEFO:** every receipt (PO or manual) opens a `StockLot` (cost, expiry, location, `poLineId`, optional supplier lot code).
+  `drawStock` takes stock FEFO (expiry asc, nulls last, then receivedAt) under a per-ingredient advisory lock + `SELECT … FOR UPDATE`
+  on lots, guarded decrement (a lot can't go negative), then unlotted stock (on hand − Σ lots), then — batch/manual usage only — a
+  **recorded shortage** (movement note `SHORTAGE: …`, `stock.shortage` audit, returned to the caller); transfers/returns refuse instead.
+  One movement row per lot drawn, with the lot's cost.
+- **`postBatchStock` moved** from `kitchen.ts` (re-exported there; `advanceBatch` unchanged). Uses `scaleRecipe` + FEFO; idempotency key
+  `batch:<id>:<usage|waste>:<ingredientId>` unchanged, lot splits get `:2`, `:3` in the same transaction. Returns `{ shortages }`.
+- **Locations:** `listLocations`, `saveLocation` (unique per kitchen, can't archive with stock), `moveLot` (audited).
+- **Transfers:** `transferStock` — one transaction: TRANSFER_OUT rows (FEFO) in the source kitchen + TRANSFER_IN rows opening lots with
+  the same cost/expiry in the destination; both kitchens must be in the actor's scope; refuses more than on hand; audited before/after.
+  `listTransfers` (either end in scope). One-step (status RECEIVED); no in-transit state.
+- **Returns:** `returnToSupplier` — RETURN rows against a PO line (that line's lots first), capped at received − already returned and
+  at stock; reason required; audit `po.return` with on-hand before/after + credit (Σ qty × lot cost). `purchaseReturns`,
+  `returnedByLine`, `supplierInvoicesForPO` (read-only link to WP-09's `SupplierInvoice`, shown on the PO page).
+- **Valuation:** `stockValuation(kitchenIds)` = Σ lot remaining × lot cost + unlotted (≥ 0) × latest cost; used by the stock page.
+- **Alert data for WP-16** (all take `kitchenIds | null`, return `InventoryAlert { type, severity, kitchenId, entity, entityId,
+  dedupeKey, message, data }`): `lowStockAlerts`, `expiringLotAlerts`, `unexpectedConsumptionAlerts`, `stockDiscrepancyAlerts`
+  (negative on-hand = open shortage; lots > ledger drift), `lateDeliveryAlerts`, and `inventoryAlerts` (all of them).
+- **Recipe scaling:** `scaleRecipe` (net + gross with waste%), `recipeForProduction(menuItemId, portions, kitchenId)`.
+- **Permissions/scope:** new service functions take an actor and check `inventory.*` + kitchen scope themselves; every inventory page
+  resolves the kitchen through `pickKitchen` (scope); the PO page 404s out of scope; adjustments/waste/returns/transfers audited with
+  before/after + reason (`recordMovement` now audits itself).
+- **UI** (`src/app/admin/inventory/**`, own tabs in `_components/`): stock (category filter, purchase-unit display, shortages), stock
+  health, lots & expiry (move lot), transfers, locations, recipe scaling, PO page (receive in purchase units + location + lot code,
+  returns, invoices), movement form (units, location). No nav change needed (sub-routes of `/admin/inventory`).
+- Tests: `tests/integration/inventory-upgrade.test.ts` (10: conversion maths + PO/receipt conversion, FEFO across lots + unlotted +
+  shortage, batch FEFO + shortage + idempotent retry, atomic transfer + refusal + concurrent transfers never negative, scope/permission
+  refusal, purchase return cap + credit + audit, valuation, alert data scoped). `ops.test.ts` unchanged and green.
+- **Deferred:** two-step transfers (SENT → in transit → RECEIVED); valuation CSV export (`inventory.export`); recipe lines in non-base
+  units; E2E acceptance 9 (WP-20 Playwright).
+
 **Owns:** `src/server/inventory.ts` (+ `postBatchStock` moved here from `kitchen.ts`, re-exported), `src/app/admin/inventory/**`.
 
 **Delivers:**
@@ -527,7 +563,12 @@ Packages adopt these opportunistically; no package depends on WP-19.
 _Record here when a package needs a change in a file owned by another package._
 | From | To | Request | Status |
 |---|---|---|---|
-| WP-08 | WP-07 | Move `postBatchStock` from `kitchen.ts` to `inventory.ts` (WP-08 does the move first; WP-07 rebases) | planned |
+| WP-08 | WP-07 | Move `postBatchStock` from `kitchen.ts` to `inventory.ts` (WP-08 does the move first; WP-07 rebases) | done (WP-08: moved, re-exported from `kitchen.ts`; `advanceBatch` unchanged) |
+| WP-08 | WP-07 | Production dashboard: surface `postBatchStock(...).shortages` (today ignored by `advanceBatch`) and use `recipeForProduction` / `scaleRecipe` (inventory.ts) instead of the duplicate `bomNeed` in `requirements()` if wanted | open |
+| WP-08 | WP-09 | Purchase-return credit: create the supplier credit / reduce payable from `purchaseReturns(poId).credit` (audit `po.return` carries lines + credit); invoices are shown read-only on the PO page via `supplierInvoicesForPO`. Food cost can use lot cost from USAGE/WASTE `StockMovement.unitCost` | open |
+| WP-08 | WP-16 | Detectors: call `inventoryAlerts(kitchenIds)` or the single functions (`lowStockAlerts`, `expiringLotAlerts`, `unexpectedConsumptionAlerts`, `stockDiscrepancyAlerts`, `lateDeliveryAlerts`) from `src/server/inventory.ts`; each row has a stable `dedupeKey` | open |
+| WP-08 | WP-10 | Inventory valuation report → `stockValuation(kitchenIds)` | open |
+| WP-08 | WP-19 | `src/components/admin/ops/InvTabs.tsx` is no longer used (inventory pages use `src/app/admin/inventory/_components/InventoryTabs.tsx`); delete when convenient | open |
 | WP-12 | WP-03 / WP-05 | Negotiated per-box company price hook in `quoteCart` (`orders.ts`) → call `corporate.ts priceFor(company, boxId)` | WP-05 part done: pure helper `negotiatedUnitPrice(list, boxId, boxPrices)` in `pricing.ts`. The call must go in `quoteCart` box lines (`unitPrice`) → WP-03 |
 | WP-15 | WP-05 | `pricing.ts` must respect `Coupon.freeDelivery` (delivery fee → 0) and `boxIds` scope | done (WP-05) |
 | WP-05 | WP-15 | `checkCoupon` (`coupons.ts`) refuses a coupon whose discount is 0, so a pure free-delivery coupon (value 0) is rejected. Allow `freeDelivery` coupons with 0 discount; for `boxIds` coupons, check `minSubtotal`/discount on the eligible lines (needs the lines passed in) | planned |
@@ -566,3 +607,4 @@ _Record here when a package needs a change in a file owned by another package._
 | 2026-11-05 | WP-19 | Admin UI kit, ⌘K global search with permission filtering, saved views; audit page migrated; 17 tests |
 | 2026-11-05 | WP-04 | Menu catalogue and weekly menu builder: categories, dabba fields, kitchen availability, DnD editor, scheduled publish (read-time), safe unpublish, revisions + diff, preview, public menu upgrades; 9 integration tests |
 | 2026-11-05 | WP-02 | Analytics engine, `/admin/analytics` + drill-down + CSV export, dashboard relabel; 20 integration tests |
+| 2026-11-05 | WP-08 | Inventory upgrade: unit conversions, lots + FEFO with recorded shortages, `postBatchStock` moved, locations, kitchen transfers, purchase returns, lot valuation, alert read functions, recipe scaling; 10 integration tests |

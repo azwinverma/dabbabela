@@ -5,7 +5,7 @@ import { formatDay, isoDate, todayKTM } from "@/lib/dates";
 import { rs } from "@/lib/money";
 import { PageHeader, Panel, Table, Th, Td, EmptyRow } from "@/components/admin/ui";
 import { Badge } from "@/components/ui/Badge";
-import { InvTabs } from "@/components/admin/ops/InvTabs";
+import { InventoryTabs } from "../_components/InventoryTabs";
 import { pickKitchen } from "@/components/admin/ops/scope";
 import { NewPOForm } from "./NewPOForm";
 
@@ -21,12 +21,12 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
   const [pos, suppliers, ingredients] = await Promise.all([
     db.purchaseOrder.findMany({ where: { kitchenId: kitchen.id, ...(sp.status ? { status: sp.status as never } : {}) }, include: { supplier: { select: { name: true } }, _count: { select: { lines: true } } }, orderBy: { createdAt: "desc" }, take: 100 }),
     db.supplier.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
-    db.ingredient.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, unit: true, costPerUnit: true, supplierId: true } }),
+    db.ingredient.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, unit: true, costPerUnit: true, supplierId: true, purchaseUnit: true, purchaseFactor: true } }),
   ]);
   return (
     <div>
       <PageHeader title="Purchase orders" description="Draft → sent → received. Receiving posts stock and updates ingredient cost." />
-      <InvTabs current="purchases" qs={`kitchen=${kitchen.id}`} />
+      <InventoryTabs current="purchases" qs={`kitchen=${kitchen.id}`} />
       <div className="grid gap-5 xl:grid-cols-[1fr_460px]">
         <Table>
           <thead><tr><Th>PO</Th><Th>Supplier</Th><Th>Expected</Th><Th>Status</Th><Th className="text-right">Total</Th></tr></thead>

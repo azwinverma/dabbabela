@@ -3,7 +3,7 @@ import { requirePermission } from "@/lib/auth";
 import { PageHeader, Panel } from "@/components/admin/ui";
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
 import { Input, Textarea, Checkbox } from "@/components/ui/Fields";
-import { InvTabs } from "@/components/admin/ops/InvTabs";
+import { InventoryTabs } from "../_components/InventoryTabs";
 import { saveSupplierAction } from "../actions";
 
 export const metadata = { title: "Suppliers" };
@@ -14,7 +14,7 @@ export default async function SuppliersPage() {
   return (
     <div>
       <PageHeader title="Suppliers" description="Who you buy from. Open a supplier to edit; inactive suppliers stay on old purchase orders." />
-      <InvTabs current="suppliers" />
+      <InventoryTabs current="suppliers" />
       <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
         <div className="space-y-3">
           {suppliers.map((s) => (

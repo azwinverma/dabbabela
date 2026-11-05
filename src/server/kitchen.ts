@@ -1,11 +1,10 @@
-import type { BatchStatus, Diet, Prisma, StockUnit } from "@prisma/client";
+import type { BatchStatus, Diet, StockUnit } from "@prisma/client";
 import { db } from "@/lib/db";
 import { dateOnly } from "@/lib/dates";
 import { COOK_STATUSES } from "./transitions";
 import { setOrderStatus } from "./orders";
-import { stockOnHand } from "./inventory";
+import { postBatchStock, stockOnHand } from "./inventory";
 
-type Tx = Prisma.TransactionClient;
 
 /** Orders the kitchen plans for (paid/secured + already cooking). PENDING_PAYMENT is shown separately. */
 export const KITCHEN_STATUSES = [...COOK_STATUSES];
@@ -181,31 +180,8 @@ export async function advanceBatch(batchId: string, to: BatchStatus, actorId: st
   });
 }
 
-/** Write ingredient usage for a finished batch. Idempotent per batch via StockMovement.idempotencyKey. */
-export async function postBatchStock(tx: Tx, batchId: string, actorId: string | null) {
-  const b = await tx.productionBatch.findUniqueOrThrow({ where: { id: batchId } });
-  if (b.status !== "DONE" || b.actualPortions == null) return { posted: false };
-  const versionId = b.recipeVersionId ?? (await tx.recipe.findUnique({ where: { menuItemId: b.menuItemId } }))?.currentVersionId;
-  if (!versionId) return { posted: false };
-  const v = await tx.recipeVersion.findUniqueOrThrow({ where: { id: versionId }, include: { ingredients: { include: { ingredient: true } } } });
-  const used = bomNeed(v.ingredients, v.yieldPortions, b.actualPortions - (b.wastePortions ?? 0));
-  const wasted = bomNeed(v.ingredients, v.yieldPortions, b.wastePortions ?? 0);
-  let posted = 0;
-  for (const [i, l] of v.ingredients.entries()) {
-    for (const [type, qty] of [["USAGE", used[i]], ["WASTE", wasted[i]]] as const) {
-      if (qty <= 0) continue;
-      const key = `batch:${b.id}:${type.toLowerCase()}:${l.ingredientId}`;
-      const exists = await tx.stockMovement.findUnique({ where: { idempotencyKey: key } });
-      if (exists) continue;
-      await tx.stockMovement.create({
-        data: { ingredientId: l.ingredientId, kitchenId: b.kitchenId, type, quantity: -round3(qty), unitCost: l.ingredient.costPerUnit, reference: `batch:${b.id}`, idempotencyKey: key, note: type === "WASTE" ? `Batch waste (${b.wastePortions} portions)` : `Batch of ${b.actualPortions} portions`, actorId },
-      });
-      posted++;
-    }
-  }
-  await tx.productionBatch.update({ where: { id: b.id }, data: { stockPosted: true } });
-  return { posted: posted > 0, rows: posted };
-}
+/** Moved to inventory.ts in WP-08 (FEFO lot consumption); re-exported so existing imports keep working. */
+export { postBatchStock };
 
 // ───────────── tickets, labels, packing ─────────────
 
