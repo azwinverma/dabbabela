@@ -23,6 +23,7 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
       events: { orderBy: { createdAt: "asc" } },
       refunds: { orderBy: { createdAt: "desc" } },
       subscription: { select: { id: true, reference: true } },
+      statementLines: { orderBy: { settledAt: "asc" } },
     },
   });
   if (!p) notFound();
@@ -40,6 +41,9 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
               ["Amount", rs(p.amount)],
               ["Refunded", rs(p.refundedAmount)],
               ["Paid at", p.paidAt ? formatStamp(p.paidAt) : "—"],
+              ["Gateway fee (estimate)", p.paidAt ? rs(p.gatewayFee) : "—"],
+              ["Gateway fee (statement)", p.feeActual != null ? rs(p.feeActual) : p.method === "ESEWA" || p.method === "KHALTI" ? "Not on an imported statement yet" : "—"],
+              ["Statement lines", p.statementLines.length ? p.statementLines.map((l) => `${l.provider} ${l.providerRef} ${rs(l.amount)}`).join(" · ") + (p.statementLines.length > 1 ? " ⚠ settled more than once" : "") : "—"],
               ["Verified by", p.verifiedById ? "Staff (see audit log)" : p.paidAt ? "Gateway server check" : "—"],
               ["Plan", p.subscription?.reference ?? "—"],
               ["Note", p.note],

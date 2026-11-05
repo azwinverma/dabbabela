@@ -11,7 +11,7 @@ export function recipeCost(lines: { quantity: number; wastePct: number; costPerU
   return Math.round(total / Math.max(1, yieldPortions));
 }
 
-/** Packaging cost added to every box (the disposable dabba ingredient, if stocked). */
+/** Fallback packaging cost (the disposable dabba ingredient, if stocked) for boxes without their own `packagingCost`. */
 async function packagingCost(client: Tx) {
   const box = await client.ingredient.findFirst({ where: { name: { contains: "dabba", mode: "insensitive" }, unit: "PC", isActive: true }, select: { costPerUnit: true } });
   return box?.costPerUnit ?? 0;
@@ -24,6 +24,7 @@ export async function refreshBoxCosts(opts: { menuItemId?: string; boxId?: strin
     include: boxInclude,
   });
   const pack = await packagingCost(client);
-  for (const b of boxes) await client.lunchBox.update({ where: { id: b.id }, data: { costPrice: boxFacts(b).cost + pack } });
+  // A box's own packagingCost (WP-04 field) wins when set; otherwise the stocked dabba ingredient's cost.
+  for (const b of boxes) await client.lunchBox.update({ where: { id: b.id }, data: { costPrice: boxFacts(b).cost + (b.packagingCost > 0 ? b.packagingCost : pack) } });
   return boxes.length;
 }

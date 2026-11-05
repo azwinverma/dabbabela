@@ -8,6 +8,7 @@ import { addDays, dateOnly, formatDay, formatStamp, isoDate, ktmNow } from "@/li
 import { METHOD_LABEL, PAYMENT_STATUS } from "@/lib/labels";
 import { PageHeader, Table, Th, Td, EmptyRow, PaymentBadge, Tabs, Pagination, Panel } from "@/components/admin/ui";
 import { readRange, RangeForm, Empty } from "@/components/admin/finance/kit";
+import { duplicatePaymentSuspects, statementDuplicates } from "@/server/finance/statements";
 import { VerifyForms } from "./VerifyForms";
 
 export const metadata = { title: "Payments" };
@@ -162,6 +163,7 @@ async function VerifyQueue({ canVerify }: { canVerify: boolean }) {
 async function Reconcile({ sp }: { sp: Record<string, string | undefined> }) {
   const { from, to } = readRange(sp, 7);
   const stamp = { gte: dateOnly(from), lt: dateOnly(addDays(to, 1)) };
+  const [dupes, statementDupes, unmatched] = await Promise.all([duplicatePaymentSuspects(dateOnly(from), dateOnly(addDays(to, 1))), statementDuplicates(), db.gatewayStatementLine.count({ where: { matchedPaymentId: null } })]);
   const [payments, attempts, mismatches, stale] = await Promise.all([
     db.payment.findMany({ where: { createdAt: stamp }, select: { method: true, status: true, amount: true, createdAt: true } }),
     db.paymentAttempt.findMany({ where: { createdAt: stamp, method: { in: ["ESEWA", "KHALTI"] } }, select: { method: true, status: true, amount: true } }),
@@ -233,6 +235,42 @@ async function Reconcile({ sp }: { sp: Record<string, string | undefined> }) {
           {!days.size && <EmptyRow colSpan={6}>No payments in this range.</EmptyRow>}
         </tbody>
       </Table>
+      <Panel
+        title={`Possible duplicate payments (${dupes.length + statementDupes.length})`}
+        actions={
+          <Link href="/admin/settlements?tab=statements" className="text-sm font-semibold text-sindoor underline">
+            Gateway statements{unmatched ? ` · ${unmatched} unmatched line(s)` : ""}
+          </Link>
+        }
+      >
+        {dupes.length || statementDupes.length ? (
+          <ul className="divide-y divide-ink-line/50 text-sm">
+            {dupes.map((d) => (
+              <li key={`${d.a}-${d.b}`} className="py-2">
+                Same customer paid {rs(d.amount)} twice within {Math.round(d.gap_s / 60)} min:{" "}
+                <Link href={`/admin/payments/${d.a}`} className="font-mono text-xs text-sindoor underline">
+                  {d.aref}
+                </Link>{" "}
+                ({d.method_a}) and{" "}
+                <Link href={`/admin/payments/${d.b}`} className="font-mono text-xs text-sindoor underline">
+                  {d.bref}
+                </Link>{" "}
+                ({d.method_b})
+              </li>
+            ))}
+            {statementDupes.map((d) => (
+              <li key={d.payment.id} className="py-2">
+                <Link href={`/admin/payments/${d.payment.id}`} className="font-mono text-xs text-sindoor underline">
+                  {d.payment.reference}
+                </Link>{" "}
+                settled {d.lines}× on gateway statements ({rs(d.settled)} for a {rs(d.payment.amount)} payment)
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-ink-mute">None — no customer paid the same amount twice within 10 minutes in this range, and no payment appears twice on imported statements.</p>
+        )}
+      </Panel>
       <Panel title={`Mismatched callbacks (${mismatches.length})`}>
         {mismatches.length ? (
           <ul className="divide-y divide-ink-line/50 text-sm">

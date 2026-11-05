@@ -9,6 +9,7 @@ import { audit } from "@/lib/audit";
 import { addCredit, spendCredit, walletBalance } from "../ledger";
 import { notify } from "../notify";
 import { bumpPaymentRefund } from "../orders";
+import { estimateGatewayFee } from "../finance/common";
 import { availableMethods } from "./methods";
 import { decodeEsewa, esewaFormFields, esewaSignatureValid, esewaStatus, toPaisa } from "./esewa";
 import { khaltiInitiate, khaltiLookup } from "./khalti";
@@ -45,9 +46,11 @@ export async function markPaymentPaid(paymentId: string, opts: { amount?: number
     const p = await tx.payment.findUnique({ where: { id: paymentId }, include: { orders: true } });
     if (!p) throw new PaymentError("Payment not found");
     if (p.status === "PAID" || p.status === "PARTIALLY_REFUNDED" || p.status === "REFUNDED") return { already: true, payment: p, credited: 0 };
+    // WP-09: estimated gateway fee from the configured rate for the method; the statement import fills feeActual.
+    const gatewayFee = await estimateGatewayFee(p.method, opts.amount ?? p.amount, tx);
     const flipped = await tx.payment.updateMany({
       where: { id: p.id, status: p.status, version: p.version },
-      data: { status: "PAID", paidAt: new Date(), verifiedById: opts.actorId ?? null, note: opts.note ?? p.note, version: { increment: 1 } },
+      data: { status: "PAID", paidAt: new Date(), verifiedById: opts.actorId ?? null, note: opts.note ?? p.note, gatewayFee, version: { increment: 1 } },
     });
     if (!flipped.count) return { already: true, payment: p, credited: 0 };
     if (opts.attemptId) await tx.paymentAttempt.update({ where: { id: opts.attemptId }, data: { status: "SUCCESS" } });
@@ -308,7 +311,7 @@ export async function recordCashCollected(orderId: string, actorId: string, amou
     await tx.deliveryEvent.create({ data: { orderId: o.id, type: "CASH_COLLECTED", amount, actorId } });
     if (routeId) await tx.deliveryRoute.update({ where: { id: routeId }, data: { cashCollected: { increment: amount } } });
     const open = await tx.order.count({ where: { paymentId: o.paymentId, paymentStatus: { in: ["UNPAID", "PENDING"] }, status: { notIn: ["CANCELLED", "SKIPPED"] } } });
-    if (!open) await tx.payment.updateMany({ where: { id: o.payment.id, status: "PENDING" }, data: { status: "PAID", paidAt: new Date(), verifiedById: actorId } });
+    if (!open) await tx.payment.updateMany({ where: { id: o.payment.id, status: "PENDING" }, data: { status: "PAID", paidAt: new Date(), verifiedById: actorId, gatewayFee: await estimateGatewayFee("CASH", o.payment.amount, tx) } });
     return { already: false };
   });
 }
