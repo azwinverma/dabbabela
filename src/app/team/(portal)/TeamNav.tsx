@@ -8,6 +8,8 @@ const ITEMS = [
   ["/team/roster", "People"],
   ["/team/invites", "Invite & import"],
   ["/team/order", "Order for the team"],
+  ["/team/deliveries", "Deliveries"],
+  ["/team/budgets", "Budgets"],
   ["/team/reports", "Reports"],
   ["/team/invoices", "Invoices"],
   ["/team/calendar", "Calendar"],

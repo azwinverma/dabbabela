@@ -4,7 +4,9 @@ import { requireCompanyAdmin } from "@/lib/auth";
 import { siteUrl } from "@/lib/site-url";
 import { isValidISODate } from "@/lib/dates";
 import { fail, done, type ActionResult } from "@/lib/action";
-import { commitImport, createInvite, parseRosterCsv, placeTeamOrder, revokeInvite, updateMember, type ImportRow } from "@/server/team";
+import { parseRupees } from "@/lib/money";
+import { cleanWeekdays } from "@/server/corporate";
+import { commitImport, createInvite, parseRosterCsv, placeTeamOrder, revokeInvite, setTeamBudget, setTeamDeliveryInstructions, updateMember, type ImportRow, type TeamOrderResult } from "@/server/team";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong");
 const s = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
@@ -13,6 +15,8 @@ export async function updateMemberAction(_: ActionResult, fd: FormData): Promise
   const { user, company } = await requireCompanyAdmin();
   try {
     const status = s(fd, "status");
+    const allowance = s(fd, "allowanceOverride");
+    if (allowance && parseRupees(allowance) == null) return fail("Allowance must be rupees, e.g. 3000");
     await updateMember(company.id, s(fd, "memberId"), user.id, {
       ...(status === "ACTIVE" || status === "REMOVED" ? { status } : {}),
       role: (s(fd, "role") === "ADMIN" ? "ADMIN" : "MEMBER") as MemberRole,
@@ -20,6 +24,9 @@ export async function updateMemberAction(_: ActionResult, fd: FormData): Promise
       costCenter: s(fd, "costCenter") || null,
       employeeCode: s(fd, "employeeCode") || null,
       officeLocationId: s(fd, "officeLocationId") || null,
+      ...(fd.has("eligibilityForm")
+        ? { mealEligible: fd.get("mealEligible") === "on", eligibleDays: cleanWeekdays(fd.getAll("eligibleDays").map(String)), allowanceOverride: allowance ? parseRupees(allowance) : null }
+        : {}),
     });
     return done(status === "REMOVED" ? "Removed from the team" : status === "ACTIVE" ? "Approved" : "Saved");
   } catch (e) {
@@ -69,7 +76,7 @@ export async function importAction(_: ImportState, fd: FormData): Promise<Import
   return { ok: true, results, message: `${results.filter((r) => r.ok).length} of ${rows.length} invited` };
 }
 
-export type TeamOrderState = ActionResult & { results?: { name: string; ok: boolean; message: string }[] };
+export type TeamOrderState = ActionResult & { results?: TeamOrderResult[] };
 
 export async function teamOrderAction(_: TeamOrderState, fd: FormData): Promise<TeamOrderState> {
   const { user, company } = await requireCompanyAdmin();
@@ -77,10 +84,33 @@ export async function teamOrderAction(_: TeamOrderState, fd: FormData): Promise<
   if (!isValidISODate(date)) return { ok: false, message: "Pick a date" };
   const memberIds = fd.getAll("memberId").map(String).filter(Boolean);
   try {
-    const results = await placeTeamOrder(company.id, { id: user.id }, { memberIds, date, boxId: s(fd, "boxId"), slotId: s(fd, "slotId") || null });
+    const results = await placeTeamOrder(company.id, { id: user.id }, { memberIds, date, boxId: s(fd, "boxId"), slotId: s(fd, "slotId") || null, overBudget: fd.get("employeePays") === "on" ? "employee-pays" : "refuse" });
     const ok = results.filter((r) => r.ok).length;
     return { ok: ok > 0, results, message: `${ok} of ${results.length} dabbas ordered` };
   } catch (e) {
     return { ok: false, message: msg(e) };
+  }
+}
+
+export async function saveBudgetAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
+  const { user, company } = await requireCompanyAdmin();
+  try {
+    const raw = s(fd, "amount");
+    const amount = raw ? parseRupees(raw) : null;
+    if (raw && amount == null) return fail("Budget must be rupees, e.g. 25000");
+    await setTeamBudget(company.id, user.id, { department: s(fd, "department"), month: s(fd, "month"), amount });
+    return done(amount == null ? "Budget removed" : "Budget saved");
+  } catch (e) {
+    return fail(msg(e));
+  }
+}
+
+export async function saveDeliveryInstructionsAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
+  const { user, company } = await requireCompanyAdmin();
+  try {
+    await setTeamDeliveryInstructions(company.id, user.id, s(fd, "deliveryInstructions") || null);
+    return done("Delivery instructions saved — they go on every delivery to your offices");
+  } catch (e) {
+    return fail(msg(e));
   }
 }

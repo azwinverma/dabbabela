@@ -5,21 +5,52 @@ import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { parseRupees } from "@/lib/money";
 import { normalizeNepalPhone } from "@/lib/phone";
-import { isValidISODate, dateOnly } from "@/lib/dates";
 import { randomCode, slugify } from "@/lib/utils";
 import { fail, done, type ActionResult } from "@/lib/action";
 import { findZone } from "@/server/coverage";
+import {
+  activateContract,
+  assertCompanyAccess,
+  cleanWeekdays,
+  createContract,
+  CorporateError,
+  endContract,
+  generateCompanyInvoice,
+  issueCompanyInvoice,
+  newContractVersion,
+  setCompanyMenu,
+  setDeliveryInstructions,
+  updateContract,
+  upsertDepartmentBudget,
+  type ContractInput,
+} from "@/server/corporate";
 
 const s = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const int = (fd: FormData, k: string, min = 0, max = 100000) => {
   const n = parseInt(s(fd, k) || "0", 10);
   return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : min;
 };
+const intOrNull = (fd: FormData, k: string, max = 100000) => (s(fd, k) ? int(fd, k, 0, max) : null);
 const moneyOrNull = (fd: FormData, k: string) => (s(fd, k) ? parseRupees(s(fd, k)) : null);
+const msg = (e: unknown) => (e instanceof CorporateError ? e.message : e instanceof Error ? e.message : "Something went wrong");
+
+/** Staff member with corporate permission and the company in their scope. */
+async function staffFor(companyId: string, perm: "corporate.view" | "corporate.edit" | "invoices.edit" = "corporate.edit") {
+  const user = await requirePermission(perm);
+  assertCompanyAccess(user, companyId, perm);
+  return user;
+}
 
 export async function saveCompanyAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   const user = await requirePermission("corporate.edit");
   const id = s(fd, "id");
+  if (id) {
+    try {
+      assertCompanyAccess(user, id, "corporate.edit");
+    } catch (e) {
+      return fail(msg(e));
+    }
+  }
   const name = s(fd, "name");
   if (!name) return fail("Company name is required", { name: "Required" });
   const billingMode = (["EMPLOYEE_PAID", "COMPANY_PAID", "SPLIT"].includes(s(fd, "billingMode")) ? s(fd, "billingMode") : "EMPLOYEE_PAID") as BillingMode;
@@ -65,17 +96,26 @@ export async function saveCompanyAction(_: ActionResult, fd: FormData): Promise<
 }
 
 export async function regenerateCodeAction(id: string) {
-  const user = await requirePermission("corporate.edit");
-  const code = randomCode(6);
-  await db.company.update({ where: { id }, data: { joinCode: code } });
-  await audit({ actorId: user.id, action: "company.join_code", entity: "Company", entityId: id, summary: "Join code regenerated" });
-  return { ok: true };
+  try {
+    const user = await staffFor(id);
+    const code = randomCode(6);
+    await db.company.update({ where: { id }, data: { joinCode: code } });
+    await audit({ actorId: user.id, action: "company.join_code", entity: "Company", entityId: id, summary: "Join code regenerated" });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: msg(e) };
+  }
 }
 
 export async function updateMemberAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("corporate.edit");
   const m = await db.companyMember.findUnique({ where: { id: s(fd, "memberId") } });
   if (!m) return fail("Member not found");
+  let user;
+  try {
+    user = await staffFor(m.companyId);
+  } catch (e) {
+    return fail(msg(e));
+  }
   const status = s(fd, "status") as "PENDING" | "ACTIVE" | "REMOVED";
   const role = s(fd, "role") as MemberRole;
   const locId = s(fd, "officeLocationId") || null;
@@ -90,6 +130,7 @@ export async function updateMemberAction(_: ActionResult, fd: FormData): Promise
     employeeCode: s(fd, "employeeCode") || null,
     officeLocationId: locId,
     allowanceOverride: allowance ? parseRupees(allowance) : null,
+    ...(fd.has("eligibilityForm") ? { mealEligible: fd.get("mealEligible") === "on", eligibleDays: cleanWeekdays(fd.getAll("eligibleDays").map(String)) } : {}),
   };
   await db.companyMember.update({ where: { id: m.id }, data });
   await audit({ actorId: user.id, action: "company.member", entity: "CompanyMember", entityId: m.id, before: m, after: data });
@@ -97,8 +138,13 @@ export async function updateMemberAction(_: ActionResult, fd: FormData): Promise
 }
 
 export async function addLocationAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("corporate.edit");
   const companyId = s(fd, "companyId");
+  let user;
+  try {
+    user = await staffFor(companyId);
+  } catch (e) {
+    return fail(msg(e));
+  }
   const name = s(fd, "name");
   const area = s(fd, "area");
   const line1 = s(fd, "line1");
@@ -114,31 +160,141 @@ export async function addLocationAction(_: ActionResult, fd: FormData): Promise<
 }
 
 export async function toggleLocationAction(id: string, active: boolean) {
-  const user = await requirePermission("corporate.edit");
-  await db.officeLocation.update({ where: { id }, data: { isActive: active } });
-  await audit({ actorId: user.id, action: "company.location.toggle", entity: "OfficeLocation", entityId: id, after: { isActive: active } });
-  return { ok: true };
+  const loc = await db.officeLocation.findUnique({ where: { id } });
+  if (!loc) return { ok: false, message: "Not found" };
+  try {
+    const user = await staffFor(loc.companyId);
+    await db.officeLocation.update({ where: { id }, data: { isActive: active } });
+    await audit({ actorId: user.id, action: "company.location.toggle", entity: "OfficeLocation", entityId: id, after: { isActive: active } });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: msg(e) };
+  }
 }
 
-export async function saveContractAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
-  const user = await requirePermission("corporate.edit");
-  const title = s(fd, "title");
-  const startsOn = s(fd, "startsOn");
-  if (!title || !isValidISODate(startsOn)) return fail("Title and start date are required");
-  const endsOn = s(fd, "endsOn");
-  const data = {
-    companyId: s(fd, "companyId"),
-    title,
-    startsOn: dateOnly(startsOn),
-    endsOn: isValidISODate(endsOn) ? dateOnly(endsOn) : null,
-    pricePerMeal: moneyOrNull(fd, "pricePerMeal"),
-    minMealsPerDay: s(fd, "minMealsPerDay") ? int(fd, "minMealsPerDay", 0, 10000) : null,
+// ───────────── contracts ─────────────
+
+function contractInput(fd: FormData): ContractInput {
+  const boxPrices: Record<string, number> = {};
+  for (const [k, v] of fd.entries()) {
+    if (!k.startsWith("price_") || !String(v).trim()) continue;
+    const p = parseRupees(String(v));
+    if (p == null) throw new CorporateError("Negotiated prices must be rupee amounts");
+    boxPrices[k.slice(6)] = p;
+  }
+  const pricePerMeal = s(fd, "pricePerMeal");
+  if (pricePerMeal && parseRupees(pricePerMeal) == null) throw new CorporateError("Agreed price per meal must be rupees");
+  return {
+    title: s(fd, "title"),
+    startsOn: s(fd, "startsOn"),
+    endsOn: s(fd, "endsOn") || null,
+    pricePerMeal: pricePerMeal ? parseRupees(pricePerMeal) : null,
+    minMealsPerDay: intOrNull(fd, "minMealsPerDay"),
+    minMealsPerMonth: intOrNull(fd, "minMealsPerMonth", 1_000_000),
+    creditTermsDays: intOrNull(fd, "creditTermsDays", 1000),
+    boxPrices,
     terms: s(fd, "terms") || null,
     documentUrl: s(fd, "documentUrl") || null,
-    status: ["DRAFT", "ACTIVE", "ENDED"].includes(s(fd, "status")) ? s(fd, "status") : "DRAFT",
   };
-  const id = s(fd, "contractId");
-  const c = id ? await db.corporateContract.update({ where: { id }, data }) : await db.corporateContract.create({ data });
-  await audit({ actorId: user.id, action: id ? "contract.update" : "contract.create", entity: "CorporateContract", entityId: c.id, after: data });
-  return done("Contract saved");
+}
+
+/** Create a contract (v1 draft), edit a draft, or (mode=version) draft the next version of an active one. */
+export async function saveContractAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
+  const user = await requirePermission("corporate.edit");
+  try {
+    const input = contractInput(fd);
+    const id = s(fd, "contractId");
+    if (s(fd, "mode") === "version") {
+      await newContractVersion(user, id, input);
+      return done("New version drafted — activate it to take effect");
+    }
+    if (id) {
+      await updateContract(user, id, input);
+      return done("Contract saved");
+    }
+    await createContract(user, s(fd, "companyId"), input);
+    return done("Contract drafted — activate it to take effect");
+  } catch (e) {
+    return fail(msg(e));
+  }
+}
+
+export async function activateContractAction(id: string) {
+  const user = await requirePermission("corporate.edit");
+  try {
+    await activateContract(user, id);
+    return { ok: true, message: "Activated" };
+  } catch (e) {
+    return { ok: false, message: msg(e) };
+  }
+}
+
+export async function endContractAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
+  const user = await requirePermission("corporate.edit");
+  try {
+    await endContract(user, s(fd, "contractId"), s(fd, "endsOn"), s(fd, "reason"));
+    return done("Contract end date set");
+  } catch (e) {
+    return fail(msg(e));
+  }
+}
+
+// ───────────── budgets, menu, delivery ─────────────
+
+export async function saveBudgetAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
+  const companyId = s(fd, "companyId");
+  try {
+    const user = await staffFor(companyId);
+    const raw = s(fd, "amount");
+    const amount = raw ? parseRupees(raw) : null;
+    if (raw && amount == null) return fail("Budget must be rupees");
+    await upsertDepartmentBudget(companyId, user.id, { department: s(fd, "department"), month: s(fd, "month"), amount });
+    return done(amount == null ? "Budget removed" : "Budget saved");
+  } catch (e) {
+    return fail(msg(e));
+  }
+}
+
+export async function saveCompanyMenuAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
+  const user = await requirePermission("corporate.edit");
+  try {
+    const ids = fd.getAll("boxId").map(String);
+    await setCompanyMenu(user, s(fd, "companyId"), ids);
+    return done(ids.length ? `Company menu limited to ${ids.length} dabbas` : "Company sees the full menu");
+  } catch (e) {
+    return fail(msg(e));
+  }
+}
+
+export async function saveDeliveryInstructionsAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
+  const companyId = s(fd, "companyId");
+  try {
+    const user = await staffFor(companyId);
+    await setDeliveryInstructions(companyId, user.id, s(fd, "deliveryInstructions") || null);
+    return done("Delivery instructions saved");
+  } catch (e) {
+    return fail(msg(e));
+  }
+}
+
+// ───────────── invoices ─────────────
+
+export async function generateInvoiceAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
+  const user = await requirePermission("invoices.edit");
+  try {
+    const inv = await generateCompanyInvoice(user, { companyId: s(fd, "companyId"), periodStart: s(fd, "periodStart"), periodEnd: s(fd, "periodEnd"), grouping: s(fd, "grouping") === "DAY" ? "DAY" : "ORDER" });
+    return done(`Draft ${inv.number} created`);
+  } catch (e) {
+    return fail(msg(e));
+  }
+}
+
+export async function issueInvoiceAction(id: string) {
+  const user = await requirePermission("invoices.edit");
+  try {
+    const inv = await issueCompanyInvoice(user, id);
+    return { ok: true, message: `${inv.number} issued` };
+  } catch (e) {
+    return { ok: false, message: msg(e) };
+  }
 }

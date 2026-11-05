@@ -4,7 +4,9 @@ import { getSettings } from "@/lib/settings";
 import { rs } from "@/lib/money";
 import { formatDay } from "@/lib/dates";
 import { orderableDates } from "@/server/calendar";
-import { getOffersForDates, boxFacts } from "@/server/menu";
+import { boxFacts } from "@/server/menu";
+import { eligibilityProblem } from "@/server/corporate";
+import { teamMenu, teamBudgets } from "@/server/team";
 import { DIET_LABEL } from "@/lib/labels";
 import { Panel } from "@/components/admin/ui";
 import { Empty } from "@/components/admin/finance/kit";
@@ -18,18 +20,20 @@ export default async function TeamOrder({ searchParams }: { searchParams: Promis
   const dates = await orderableDates({ ...settings, orderCutoff: company.cutoffOverride || settings.orderCutoff }, 12);
   const sp = await searchParams;
   const date = sp.date && dates.includes(sp.date) ? sp.date : dates[0];
-  const [offers, members, slots] = await Promise.all([
-    date ? getOffersForDates([date]) : Promise.resolve(new Map()),
+  const [menu, members, slots, budgets] = await Promise.all([
+    date ? teamMenu(company.id, date) : Promise.resolve(null),
     db.companyMember.findMany({ where: { companyId: company.id, status: "ACTIVE" }, include: { user: { select: { name: true } }, officeLocation: { select: { name: true } } }, orderBy: { user: { name: "asc" } } }),
     db.deliverySlot.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" }, select: { id: true, label: true } }),
+    date ? teamBudgets(company.id, date.slice(0, 7)) : Promise.resolve([]),
   ]);
-  const offer = date ? offers.get(date) : undefined;
-  const boxes = (offer?.items ?? [])
-    .filter((i: { soldOut: boolean }) => !i.soldOut)
-    .map((i: { box: Parameters<typeof boxFacts>[0]; price: number }) => {
-      const f = boxFacts(i.box);
-      return { id: i.box.id, name: i.box.name, label: `${rs(i.price)} · ${DIET_LABEL[f.diet].label}${i.box.tagline ? ` · ${i.box.tagline}` : ""}` };
+  const boxes = (menu?.items ?? [])
+    .filter((i) => !i.soldOut)
+    .map((i) => {
+      const f = boxFacts(i.box as Parameters<typeof boxFacts>[0]);
+      const price = i.price !== i.listPrice ? `${rs(i.price)} (your price; menu ${rs(i.listPrice)})` : rs(i.price);
+      return { id: i.box.id, name: i.box.name, label: `${price} · ${DIET_LABEL[f.diet].label}${i.box.tagline ? ` · ${i.box.tagline}` : ""}` };
     });
+  const budgeted = budgets.filter((b) => b.budget != null);
   return (
     <div className="space-y-4">
       <div>
@@ -51,13 +55,24 @@ export default async function TeamOrder({ searchParams }: { searchParams: Promis
           </form>
           <Panel title={`Lunch for ${formatDay(date!, "full")}`}>
             {!boxes.length ? (
-              <Empty>{offer?.closed ? "The kitchen is closed that day." : "Nothing left on the menu that day."}</Empty>
+              <Empty>{menu?.closed ? "The kitchen is closed that day." : menu?.limited ? "Nothing from your company menu is on that day." : "Nothing left on the menu that day."}</Empty>
             ) : !members.length ? (
               <Empty>Approve or invite people first.</Empty>
             ) : (
-              <TeamOrderForm key={date} date={date!} boxes={boxes} slots={slots} members={members.map((m) => ({ id: m.id, name: m.user.name, department: m.department, office: m.officeLocation?.name ?? null }))} />
+              <TeamOrderForm key={date} date={date!} boxes={boxes} slots={slots} members={members.map((m) => ({ id: m.id, name: m.user.name, department: m.department, office: m.officeLocation?.name ?? null, ineligible: eligibilityProblem(m, date!) }))} />
             )}
           </Panel>
+          {budgeted.length > 0 && (
+            <Panel title={`Department budgets · ${date!.slice(0, 7)}`}>
+              <ul className="grid gap-1 text-sm sm:grid-cols-2">
+                {budgeted.map((b) => (
+                  <li key={b.department} className={b.over || (b.remaining ?? 0) <= 0 ? "font-semibold text-sindoor" : ""}>
+                    {b.department}: {rs(Math.max(0, b.remaining ?? 0))} left of {rs(b.budget)}
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          )}
         </>
       )}
     </div>

@@ -5,21 +5,21 @@ import { rs } from "@/lib/money";
 import { PageHeader, Table, Th, Td, EmptyRow } from "@/components/admin/ui";
 import { LinkButton } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { companyOutstanding } from "@/server/corporate";
+import { companyOutstanding, companyScopeWhere } from "@/server/corporate";
 
 export const metadata = { title: "Companies" };
 
 const MODE = { EMPLOYEE_PAID: "Employees pay", COMPANY_PAID: "Company pays", SPLIT: "Split" } as const;
 
 export default async function Companies({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
-  await requirePermission("corporate.view");
+  const user = await requirePermission("corporate.view");
   const { q } = await searchParams;
   const companies = await db.company.findMany({
-    where: q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { joinCode: { equals: q.toUpperCase() } }] } : {},
+    where: { AND: [companyScopeWhere(user), q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { joinCode: { equals: q.toUpperCase() } }] } : {}] },
     include: { _count: { select: { members: { where: { status: "ACTIVE" } } } }, zone: { select: { name: true } } },
     orderBy: [{ isActive: "desc" }, { name: "asc" }],
   });
-  const pending = await db.companyMember.groupBy({ by: ["companyId"], where: { status: "PENDING" }, _count: true });
+  const pending = await db.companyMember.groupBy({ by: ["companyId"], where: { status: "PENDING", companyId: { in: companies.map((c) => c.id) } }, _count: true });
   const outstanding = await Promise.all(companies.map((c) => companyOutstanding(c.id)));
   return (
     <div>

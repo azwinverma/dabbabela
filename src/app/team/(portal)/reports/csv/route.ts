@@ -13,8 +13,8 @@ export async function GET(req: Request) {
   const from = isValidISODate(url.searchParams.get("from") ?? "") ? url.searchParams.get("from")! : addDays(to, -29);
   const rows = await teamReport(company.id, from, to);
   const body = csv([
-    ["Date", "Order", "Name", "Email", "Department", "Cost centre", "Lunch", "Meals", "Status", "Company share (Rs)", "Staff share (Rs)"],
-    ...rows.map((r) => [r.date, r.number, r.name, r.email, r.department, r.costCenter, r.items, r.meals, r.status, money(r.companyShare), money(r.employeeShare)]),
+    ["Date", "Order", "Name", "Email", "Department", "Cost centre", "Employee #", "Lunch", "Meals", "Status", "Discount (Rs)", "Company share (Rs)", "Company adjustments (Rs)", "Staff share (Rs)", "Invoiced"],
+    ...rows.map((r) => [r.date, r.number, r.name, r.email, r.department, r.costCenter, r.employeeCode, r.items, r.meals, r.status, money(r.discount), money(r.companyShare), money(r.companyAdjustments), money(r.employeeShare), r.invoiced ? "yes" : "no"]),
   ]);
   return new NextResponse(body, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="team-lunches-${from}-to-${to}.csv"`, "Cache-Control": "no-store" } });
 }

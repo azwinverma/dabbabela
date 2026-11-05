@@ -1,21 +1,29 @@
 import Link from "next/link";
 import { requireCompanyAdmin } from "@/lib/auth";
 import { rs } from "@/lib/money";
-import { formatDay, isoDate } from "@/lib/dates";
+import { formatDay, isoDate, todayKTM } from "@/lib/dates";
 import { INVOICE_STATUS } from "@/lib/labels";
-import { Table, Th, Td, EmptyRow } from "@/components/admin/ui";
+import { Table, Th, Td, EmptyRow, Panel, Callout } from "@/components/admin/ui";
 import { Badge } from "@/components/ui/Badge";
-import { teamInvoices } from "@/server/team";
+import { teamInvoices, teamPayments } from "@/server/team";
+import { creditTermsOn } from "@/server/corporate";
 
 export const metadata = { title: "Invoices" };
 
 export default async function TeamInvoices() {
   const { company } = await requireCompanyAdmin();
-  const invoices = await teamInvoices(company.id);
+  const [invoices, { unpaid, history }, terms] = await Promise.all([teamInvoices(company.id), teamPayments(company.id), creditTermsOn(company.id, todayKTM())]);
+  const owed = unpaid.reduce((a, u) => a + u.outstanding, 0);
+  const overdue = unpaid.filter((u) => u.overdueDays > 0);
   return (
     <div>
       <h1 className="mb-1 font-display text-2xl font-bold">Invoices</h1>
-      <p className="mb-4 text-sm text-ink-mute">Monthly invoices for the company-paid share of lunches. Terms: {company.invoiceTermsDays} days.</p>
+      <p className="mb-4 text-sm text-ink-mute">Monthly invoices for the company-paid share of lunches. Credit terms: {terms} days from issue.</p>
+      {unpaid.length > 0 && (
+        <Callout tone={overdue.length ? "bad" : "info"} title={`${rs(owed)} unpaid on ${unpaid.length} invoice${unpaid.length === 1 ? "" : "s"}`} className="mb-4">
+          {overdue.length ? overdue.map((u) => `${u.number} is ${u.overdueDays} days overdue (${rs(u.outstanding)})`).join(" · ") : "Nothing overdue."}
+        </Callout>
+      )}
       <Table>
         <thead>
           <tr>
@@ -53,6 +61,30 @@ export default async function TeamInvoices() {
           )}
         </tbody>
       </Table>
+      <Panel title="Payments we've recorded" className="mt-4" bodyClass="p-0">
+        <Table className="rounded-none border-0 shadow-none">
+          <thead>
+            <tr>
+              <Th>Recorded on</Th>
+              <Th>Invoice</Th>
+              <Th>Amount · reference</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {history.length ? (
+              history.map((p, i) => (
+                <tr key={i}>
+                  <Td className="text-xs">{formatDay(p.at.toISOString().slice(0, 10))}</Td>
+                  <Td className="font-mono text-xs">{p.number}</Td>
+                  <Td className="text-xs">{p.summary}</Td>
+                </tr>
+              ))
+            ) : (
+              <EmptyRow colSpan={3}>No payments recorded yet.</EmptyRow>
+            )}
+          </tbody>
+        </Table>
+      </Panel>
     </div>
   );
 }
