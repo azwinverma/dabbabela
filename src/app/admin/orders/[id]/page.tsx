@@ -8,15 +8,41 @@ import { rs } from "@/lib/money";
 import { DIET_LABEL, METHOD_LABEL, ORDER_PAYMENT_STATUS, ORDER_STATUS, PAYMENT_STATUS, REFUND_STATUS, ADDRESS_TYPE_LABEL } from "@/lib/labels";
 import { TRANSITIONS } from "@/server/transitions";
 import { Badge } from "@/components/ui/Badge";
+import { buttonClass } from "@/components/ui/Button";
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
 import { PageHeader, Panel, KV, OrderBadge } from "@/components/admin/ui";
-import { piiFor, inScope } from "@/components/admin/ops/scope";
+import { Timeline, type TimelineItem } from "@/components/admin/Timeline";
+import { piiFor, inScope, kitchensFor } from "@/components/admin/ops/scope";
 import { ReasonForm } from "@/components/admin/ops/ReasonForm";
-import { adjustAction, cancelAction, changeStatusAction, refundAction } from "../actions";
+import { orderAuditTrail, orderEditOptions } from "@/server/orders-admin";
+import { adjustAction, cancelAction, changeStatusAction, editLinesAction, reassignDeliveryAction, reassignKitchenAction, refundAction, substituteAction } from "../actions";
 
 export const metadata = { title: "Order" };
 
 type Comp = { menuItemId: string; name: string; qty: number; diet?: string; allergens?: string[]; station?: string | null; substitutedFrom?: string };
+
+const CHARGE_METHODS = [
+  ["CASH", "Collect cash at hand-off"],
+  ["BANK_TRANSFER", "Bank transfer"],
+  ["WALLET", "Customer wallet credit"],
+] as const;
+const DELIVERY_EDITABLE = ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED", "PREPARING", "PACKED", "FAILED_DELIVERY"];
+
+function ChargeMethod() {
+  return (
+    <select name="chargeMethod" className="field" defaultValue="CASH" aria-label="How an extra charge is collected">
+      {CHARGE_METHODS.map(([v, l]) => (
+        <option key={v} value={v}>
+          Extra charge: {l}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function Reason() {
+  return <input name="reason" required minLength={3} placeholder="Reason (goes in the audit log)" className="field" aria-label="Reason" />;
+}
 
 export default async function OrderPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("orders.view");
@@ -30,6 +56,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
       zone: { select: { name: true } },
       company: { select: { id: true, name: true } },
       subscription: { select: { id: true, reference: true } },
+      invoice: { select: { id: true, number: true } },
       items: { include: { customizations: true } },
       events: { include: { actor: { select: { name: true } } }, orderBy: { createdAt: "asc" } },
       deliveryEvents: { include: { actor: { select: { name: true } } }, orderBy: { createdAt: "asc" } },
@@ -49,6 +76,64 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
   const canCancel = TRANSITIONS[o.status].includes("CANCELLED");
   const refundable = o.paymentStatus === "PAID" || o.paymentStatus === "PARTIALLY_REFUNDED" ? o.customerShare - o.refundedAmount : 0;
 
+  const [trail, opts, kitchens, slots, adjActors] = await Promise.all([
+    orderAuditTrail(o),
+    manage ? orderEditOptions(o) : Promise.resolve(null),
+    manage ? kitchensFor(user) : Promise.resolve([]),
+    manage ? db.deliverySlot.findMany({ where: { kitchenId: o.kitchenId, isActive: true }, orderBy: { sortOrder: "asc" }, select: { id: true, label: true } }) : Promise.resolve([]),
+    db.user.findMany({ where: { id: { in: o.adjustments.map((a) => a.actorId).filter((x): x is string => Boolean(x)) } }, select: { id: true, name: true } }),
+  ]);
+  const isCompanyAdj = (reason: string) => reason.startsWith("Company share");
+  const adjNet = o.adjustments.filter((a) => !isCompanyAdj(a.reason)).reduce((a, x) => a + x.amount, 0);
+  const coAdjNet = o.adjustments.filter((a) => isCompanyAdj(a.reason)).reduce((a, x) => a + x.amount, 0);
+  const canEdit = Boolean(manage && opts?.window.open);
+  const auditHref = can(user, "audit.view") ? `/admin/audit?entityId=${o.id}` : undefined;
+
+  const timeline: TimelineItem[] = [
+    ...o.events.map((e) => ({
+      id: `s-${e.id}`,
+      at: e.createdAt,
+      title: `${e.fromStatus ? `${ORDER_STATUS[e.fromStatus].label} → ` : ""}${ORDER_STATUS[e.toStatus].label}`,
+      actor: e.actor?.name,
+      body: e.note,
+      tone: ORDER_STATUS[e.toStatus].tone,
+    })),
+    ...o.deliveryEvents.map((e) => ({
+      id: `d-${e.id}`,
+      at: e.createdAt,
+      title: `Delivery: ${e.type.replace(/_/g, " ").toLowerCase()}${e.amount ? ` ${rs(e.amount)}` : ""}${e.otpOk === false ? " (wrong code)" : e.otpOk ? " (code ok)" : ""}`,
+      actor: e.actor?.name,
+      body: (
+        <>
+          {e.note}
+          {e.photoUrl && (
+            <a href={e.photoUrl} target="_blank" rel="noreferrer" className="ml-1 text-xs font-semibold text-akash underline">
+              Proof photo
+            </a>
+          )}
+        </>
+      ),
+      tone: "info" as const,
+    })),
+    ...o.adjustments.map((a) => ({
+      id: `a-${a.id}`,
+      at: a.createdAt,
+      title: `Adjustment ${rs(a.amount)}`,
+      actor: adjActors.find((x) => x.id === a.actorId)?.name,
+      body: a.reason,
+      tone: a.amount < 0 ? ("good" as const) : ("warn" as const),
+    })),
+    ...trail.map((l) => ({
+      id: `l-${l.id}`,
+      at: l.createdAt,
+      title: <span className="font-mono text-xs">{l.action}</span>,
+      actor: l.actor?.name ?? "System",
+      body: [l.summary, l.reason ? `Reason: ${l.reason}` : null].filter(Boolean).join(" — "),
+      tone: "neutral" as const,
+      href: auditHref,
+    })),
+  ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+
   return (
     <div>
       <PageHeader
@@ -64,11 +149,21 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
           </span>
         }
         actions={
-          can(user, "kitchen.view") && (
-            <Link href={`/admin/kitchen/labels?order=${o.id}`} className="rounded-lg border border-ink-line bg-white px-3 py-2 text-sm font-semibold hover:border-ink">
-              Print label
+          <div className="flex flex-wrap gap-2">
+            {can(user, "kitchen.view") && (
+              <Link href={`/admin/kitchen/labels?order=${o.id}`} className={buttonClass("outline", "sm")}>
+                Print label
+              </Link>
+            )}
+            <Link href={`/admin/orders/${o.id}/receipt`} className={buttonClass("outline", "sm")}>
+              Staff receipt
             </Link>
-          )
+            {o.invoice && can(user, "invoices.view") && (
+              <Link href={`/admin/invoices/${o.invoice.id}`} className={buttonClass("outline", "sm")}>
+                Invoice {o.invoice.number}
+              </Link>
+            )}
+          </div>
         }
       />
       <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
@@ -105,35 +200,16 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
               ))}
             </ul>
             {o.allergenNote && <p className="mt-3 rounded-lg border border-sindoor/30 bg-sindoor-light px-3 py-2 text-sm font-semibold text-sindoor-dark">⚠ Customer allergy note: {o.allergenNote}</p>}
-            {o.notes && <p className="mt-2 text-sm"><b>Customer note:</b> {o.notes}</p>}
-            <p className="mt-2 text-xs text-ink-mute">Contents are a snapshot from when the order was placed; later recipe changes don't alter it.</p>
+            {o.notes && (
+              <p className="mt-2 text-sm">
+                <b>Customer note:</b> {o.notes}
+              </p>
+            )}
+            <p className="mt-2 text-xs text-ink-mute">Contents are a snapshot from when the order was placed (or last edited by staff — see the timeline); later recipe changes don&apos;t alter it.</p>
           </Panel>
 
-          <Panel title="Timeline">
-            <ol className="space-y-3 border-l-2 border-ink-line pl-4">
-              {[
-                ...o.events.map((e) => ({ photo: null as string | null, at: e.createdAt, title: `${e.fromStatus ? `${ORDER_STATUS[e.fromStatus].label} → ` : ""}${ORDER_STATUS[e.toStatus].label}`, note: e.note, who: e.actor?.name })),
-                ...o.deliveryEvents.map((e) => ({ at: e.createdAt, title: `Delivery: ${e.type.replace(/_/g, " ").toLowerCase()}${e.amount ? ` ${rs(e.amount)}` : ""}${e.otpOk === false ? " (wrong code)" : e.otpOk ? " (code ok)" : ""}`, note: e.note, who: e.actor?.name, photo: e.photoUrl })),
-                ...o.adjustments.map((a) => ({ photo: null as string | null, at: a.createdAt, title: `Adjustment ${rs(a.amount)}`, note: a.reason, who: undefined })),
-              ]
-                .sort((a, b) => a.at.getTime() - b.at.getTime())
-                .map((e, i) => (
-                  <li key={i} className="relative">
-                    <span className="absolute -left-[1.42rem] top-1.5 h-2.5 w-2.5 rounded-full bg-sindoor" />
-                    <p className="text-sm font-semibold">{e.title}</p>
-                    <p className="text-xs text-ink-mute">
-                      {formatStamp(e.at)}
-                      {e.who ? ` · ${e.who}` : ""}
-                      {e.note ? ` — ${e.note}` : ""}
-                    </p>
-                    {e.photo && (
-                      <a href={e.photo} target="_blank" rel="noreferrer" className="text-xs font-semibold text-akash underline">
-                        Proof photo
-                      </a>
-                    )}
-                  </li>
-                ))}
-            </ol>
+          <Panel title="Timeline & audit">
+            <Timeline items={timeline} />
           </Panel>
 
           {o.payment && (
@@ -154,7 +230,9 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                     {o.payment.attempts.map((a) => (
                       <li key={a.id} className="flex justify-between gap-2 rounded bg-paper px-2 py-1">
                         <span className="font-mono">{a.providerRef}</span>
-                        <span>{a.method} · {a.status} · {rs(a.amount)} · {formatStamp(a.createdAt)}</span>
+                        <span>
+                          {a.method} · {a.status} · {rs(a.amount)} · {formatStamp(a.createdAt)}
+                        </span>
                       </li>
                     ))}
                   </ul>
@@ -166,7 +244,9 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                   <ul className="space-y-1 text-xs">
                     {o.refunds.map((r) => (
                       <li key={r.id} className="flex justify-between gap-2 rounded bg-paper px-2 py-1">
-                        <span>{rs(r.amount)} · {r.method.replace("_", " ").toLowerCase()} — {r.reason}</span>
+                        <span>
+                          {rs(r.amount)} · {r.method.replace("_", " ").toLowerCase()} — {r.reason}
+                        </span>
                         <Badge tone={REFUND_STATUS[r.status].tone}>{REFUND_STATUS[r.status].label}</Badge>
                       </li>
                     ))}
@@ -211,18 +291,145 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                 ["Customer pays", rs(o.customerShare)],
                 ["Refunded", o.refundedAmount ? rs(o.refundedAmount) : "—"],
                 ["Food cost", can(user, "analytics.view") ? rs(o.costTotal) : "—"],
+                ["Packaging", can(user, "analytics.view") ? rs(o.packagingCost) : "—"],
               ]}
             />
             {!!o.adjustments.length && (
-              <ul className="mt-3 space-y-1 text-xs">
-                {o.adjustments.map((a) => (
-                  <li key={a.id} className="rounded bg-paper px-2 py-1">
-                    {rs(a.amount)} — {a.reason}
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul className="mt-3 space-y-1 text-xs">
+                  {o.adjustments.map((a) => (
+                    <li key={a.id} className="rounded bg-paper px-2 py-1">
+                      {rs(a.amount)} — {a.reason}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-xs text-ink-mute">
+                  Net after adjustments: customer {rs(o.customerShare + adjNet)}
+                  {o.companyShare || coAdjNet ? ` · company ${rs(o.companyShare + coAdjNet)}` : ""}. The amounts above stay as originally placed.
+                </p>
+              </>
             )}
           </Panel>
+
+          {manage && opts && (
+            <Panel title="Edit dabbas">
+              {canEdit ? (
+                <ActionForm action={editLinesAction.bind(null, o.id)} className="space-y-2">
+                  <input type="hidden" name="version" value={o.version} />
+                  {o.items.map((it) => (
+                    <div key={it.id} className="flex items-center justify-between gap-2 text-sm">
+                      <label htmlFor={`q-${it.id}`}>{it.name}</label>
+                      <input id={`q-${it.id}`} type="number" name={`qty:${it.id}`} min={0} max={25} defaultValue={it.quantity} className="field w-20" />
+                    </div>
+                  ))}
+                  {opts.menu.length > 0 && (
+                    <div className="flex gap-2">
+                      <select name="addBox" className="field" defaultValue="" aria-label="Add a dabba">
+                        <option value="">Add a dabba…</option>
+                        {opts.menu.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name} ({rs(m.price)})
+                          </option>
+                        ))}
+                      </select>
+                      <input type="number" name="addQty" min={1} max={25} defaultValue={1} className="field w-20" aria-label="Quantity to add" />
+                    </div>
+                  )}
+                  <ChargeMethod />
+                  <Reason />
+                  <SubmitButton size="sm" variant="dark" confirm="Re-price and save these dabbas?">
+                    Save &amp; re-price
+                  </SubmitButton>
+                  <p className="text-xs text-ink-mute">
+                    Quantity 0 removes a dabba. Changes close at {opts.window.cutoff}. The price difference is recorded as an adjustment: a credit goes to the wallet when already paid, a charge becomes a new payment.
+                  </p>
+                </ActionForm>
+              ) : (
+                <p className="text-sm text-ink-mute">{opts.window.reason}</p>
+              )}
+            </Panel>
+          )}
+
+          {canEdit && opts && opts.substitutions.length > 0 && (
+            <Panel title="Substitution">
+              <ActionForm action={substituteAction.bind(null, o.id)} className="space-y-2">
+                <input type="hidden" name="version" value={o.version} />
+                <select name="pick" className="field" defaultValue="" aria-label="Approved substitution" required>
+                  <option value="">Pick an approved swap…</option>
+                  {o.items.flatMap((it) =>
+                    opts.substitutions
+                      .filter((s) => s.boxId === it.boxId)
+                      .map((s) => (
+                        <option key={`${it.id}|${s.id}`} value={`${it.id}|${s.id}`}>
+                          {it.name}: {s.label}
+                          {s.priceDelta ? ` (${s.priceDelta > 0 ? "+" : ""}${rs(s.priceDelta)})` : ""}
+                        </option>
+                      )),
+                  )}
+                </select>
+                <ChargeMethod />
+                <Reason />
+                <SubmitButton size="sm" variant="outline">
+                  Apply substitution
+                </SubmitButton>
+              </ActionForm>
+            </Panel>
+          )}
+
+          {canEdit && kitchens.length > 1 && (
+            <Panel title="Move to another kitchen">
+              <ActionForm action={reassignKitchenAction.bind(null, o.id)} className="space-y-2">
+                <input type="hidden" name="version" value={o.version} />
+                <select name="kitchenId" className="field" defaultValue="" aria-label="New kitchen" required>
+                  <option value="">Pick a kitchen…</option>
+                  {kitchens
+                    .filter((k) => k.id !== o.kitchenId)
+                    .map((k) => (
+                      <option key={k.id} value={k.id}>
+                        {k.name}
+                      </option>
+                    ))}
+                </select>
+                <Reason />
+                <SubmitButton size="sm" variant="outline" confirm="Move this order to the other kitchen?">
+                  Move order
+                </SubmitButton>
+                <p className="text-xs text-ink-mute">Checked against that kitchen&apos;s capacity and menu. The delivery window is cleared — pick one of the new kitchen&apos;s below.</p>
+              </ActionForm>
+            </Panel>
+          )}
+
+          {manage && DELIVERY_EDITABLE.includes(o.status) && (
+            <Panel title="Delivery window & address">
+              <ActionForm action={reassignDeliveryAction.bind(null, o.id)} className="space-y-2">
+                <input type="hidden" name="version" value={o.version} />
+                <select name="slotId" className="field" defaultValue="keep" aria-label="Delivery window">
+                  <option value="keep">Window: keep {o.slotLabel ?? "any"}</option>
+                  <option value="">Any window</option>
+                  {slots.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+                <select name="addressId" className="field" defaultValue="" aria-label="Delivery address">
+                  <option value="">Address: keep current</option>
+                  {(opts?.addresses ?? [])
+                    .filter((a) => a.sameKitchen)
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.label}
+                      </option>
+                    ))}
+                </select>
+                <Reason />
+                <SubmitButton size="sm" variant="outline">
+                  Update delivery
+                </SubmitButton>
+                <p className="text-xs text-ink-mute">Rider and route changes are made in Dispatch. The delivery fee isn&apos;t re-priced.</p>
+              </ActionForm>
+            </Panel>
+          )}
 
           {manage && (
             <Panel title="Change status">
@@ -235,8 +442,10 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                       </option>
                     ))}
                   </select>
-                  <input name="note" placeholder="Note (required for failed delivery)" className="field" />
-                  <SubmitButton size="sm" variant="dark">Update</SubmitButton>
+                  <input name="note" placeholder="Note (required for failed delivery)" className="field" aria-label="Note" />
+                  <SubmitButton size="sm" variant="dark">
+                    Update
+                  </SubmitButton>
                 </ActionForm>
               ) : (
                 <p className="text-sm text-ink-mute">This order is final.</p>

@@ -8,12 +8,12 @@ import { log } from "@/lib/logger";
 import { activeCompany, type CurrentUser } from "@/lib/auth";
 import { changeWindowOpen, dateProblem, getClosures, getLockedDates } from "./calendar";
 import { boxComponents, boxFacts, combineDiet, getOffersForDates, type BoxFull } from "./menu";
-import { priceDays, type CompanySpec, type TaxSpec } from "./pricing";
+import { negotiatedUnitPrice, priceDays, type CompanySpec, type TaxSpec } from "./pricing";
 import { checkCoupon, redeemCoupon } from "./coupons";
 import { assertDayCapacity, CapacityError, lockKitchenDay } from "./capacity";
 import { addCredit, spendCredit, walletBalance } from "./ledger";
 import { assertTransition, canTransition, EDITABLE_STATUSES, LIVE_STATUSES } from "./transitions";
-import { availableMethods, isGatewayMethod } from "./payments/methods";
+import { availableMethods } from "./payments/methods";
 import { companySpecFor, companyOutstanding } from "./corporate";
 import { notify } from "./notify";
 import { priceCustomBox, type CustomPick } from "./builder";
@@ -55,11 +55,43 @@ export async function defaultKitchenId() {
 
 export type CartLine = { kind: "box" | "custom"; id: string; date: string; qty: number; subs?: string[] };
 
+/** Earliest of the given "HH:MM" cut-offs (nulls ignored); null when none is set. */
+export function earliestCutoff(...cutoffs: (string | null | undefined)[]) {
+  const set = cutoffs.filter((c): c is string => typeof c === "string" && /^\d{2}:\d{2}$/.test(c));
+  return set.length ? set.sort()[0] : null;
+}
+
+/**
+ * Effective order cut-off for a day: the menu day's own cut-off (WP-04 `DayOffer.cutoff`) and the company's
+ * `cutoffOverride`, whichever is earlier. null = the global `orderCutoff` setting applies.
+ */
+export function dayCutoff(offerCutoff: string | null | undefined, companyCutoff: string | null | undefined) {
+  return earliestCutoff(offerCutoff, companyCutoff);
+}
+
+type ContractPrices = { startsOn: Date; endsOn: Date | null; boxPrices: Prisma.JsonValue | null };
+
+/** Active contracts of a company overlapping [from, to], newest first (negotiated per-dabba prices). */
+export async function activeContracts(companyId: string, from: string, to: string): Promise<ContractPrices[]> {
+  return db.corporateContract.findMany({
+    where: { companyId, status: "ACTIVE", startsOn: { lte: dateOnly(to) }, OR: [{ endsOn: null }, { endsOn: { gte: dateOnly(from) } }] },
+    orderBy: [{ startsOn: "desc" }, { version: "desc" }],
+    select: { startsOn: true, endsOn: true, boxPrices: true },
+  });
+}
+
+/** `boxPrices` of the contract in force on `date` (null when none). */
+export function contractPricesOn(contracts: ContractPrices[], date: string) {
+  return contracts.find((c) => isoDate(c.startsOn) <= date && (!c.endsOn || isoDate(c.endsOn) >= date))?.boxPrices ?? null;
+}
+
 export type QuotedLine = CartLine & {
   name: string;
   details: string | null;
   unitPrice: number;
   unitCost: number;
+  /** Packaging cost per dabba (paisa, `LunchBox.packagingCost` snapshot; 0 for Build-a-Dabba). */
+  packagingCost: number;
   diet: Diet;
   allergens: string[];
   components: Prisma.InputJsonValue;
@@ -90,7 +122,14 @@ function sanitizeLines(lines: unknown): CartLine[] {
 
 export async function quoteCart(
   user: CurrentUser | null,
-  input: { lines: unknown; addressId?: string | null; zoneId?: string | null; couponCode?: string | null },
+  input: {
+    lines: unknown;
+    addressId?: string | null;
+    zoneId?: string | null;
+    couponCode?: string | null;
+    /** Staff only (order edits / kitchen reassignment): price and check availability at this kitchen. */
+    kitchenId?: string | null;
+  },
 ) {
   const settings = await getSettings();
   const lines = sanitizeLines(input.lines);
@@ -98,7 +137,7 @@ export async function quoteCart(
   let zone: (DeliveryZone & { kitchen?: unknown }) | null = null;
   if (address?.zoneId) zone = await db.deliveryZone.findFirst({ where: { id: address.zoneId, isActive: true } });
   else if (!address && input.zoneId) zone = await db.deliveryZone.findFirst({ where: { id: input.zoneId, isActive: true } });
-  const kitchenId = zone?.kitchenId ?? (await defaultKitchenId());
+  const kitchenId = input.kitchenId ?? zone?.kitchenId ?? (await defaultKitchenId());
   const company = activeCompany(user);
 
   const base = {
@@ -139,13 +178,14 @@ export async function quoteCart(
   const customs = user && customIds.length ? await db.customBox.findMany({ where: { id: { in: customIds }, userId: user.id } }) : [];
   const customMap = new Map(customs.map((c) => [c.id, c]));
   const avoid = new Set(user?.allergies ?? []);
-  const cutoff = company?.cutoffOverride ?? null;
+  const contracts = company ? await activeContracts(company.id, dates[0], dates[dates.length - 1]) : [];
 
   const out: QuotedLine[] = [];
   for (const l of lines) {
+    const offer = offers.get(l.date);
+    const cutoff = dayCutoff(offer?.cutoff, company?.cutoffOverride);
     const problem = dateProblem(l.date, settings, closures, { cutoff }) ?? (locked.has(l.date) ? "Orders for this day are closed — the kitchen has locked it" : null);
     if (l.kind === "box") {
-      const offer = offers.get(l.date);
       const item = offer?.items.find((i) => i.box.id === l.id);
       if (!offer || offer.closed || !item) {
         const any = await db.lunchBox.findUnique({ where: { id: l.id }, select: { name: true } });
@@ -164,8 +204,9 @@ export async function quoteCart(
         subs: subs.map((s) => s.id),
         name: box.name,
         details: box.tagline,
-        unitPrice: item.price + subs.reduce((a, s) => a + s.priceDelta, 0),
+        unitPrice: negotiatedUnitPrice(item.price, box.id, contractPricesOn(contracts, l.date)) + subs.reduce((a, s) => a + s.priceDelta, 0),
         unitCost: facts.cost,
+        packagingCost: Math.max(0, box.packagingCost ?? 0),
         diet: subDiet,
         allergens,
         components: boxComponents(box, subs) as unknown as Prisma.InputJsonValue,
@@ -179,7 +220,7 @@ export async function quoteCart(
     } else {
       const c = customMap.get(l.id);
       if (!c) continue;
-      const priced = await priceCustomBox(c.items as unknown as CustomPick[], settings);
+      const priced = await priceCustomBox(c.items as unknown as CustomPick[], settings, { kitchenId });
       const hit = priced.allergens.filter((a) => avoid.has(a));
       out.push({
         ...l,
@@ -187,6 +228,7 @@ export async function quoteCart(
         details: priced.details,
         unitPrice: priced.price,
         unitCost: priced.cost,
+        packagingCost: 0,
         diet: priced.diet,
         allergens: priced.allergens,
         components: priced.components as unknown as Prisma.InputJsonValue,
@@ -255,14 +297,14 @@ export async function quoteCart(
 }
 
 function emptyLine(l: CartLine, name: string, problem: string): QuotedLine {
-  return { ...l, name, details: null, unitPrice: 0, unitCost: 0, diet: "VEG", allergens: [], components: [], customizations: [], capacity: null, dishes: [], problem, warning: null };
+  return { ...l, name, details: null, unitPrice: 0, unitCost: 0, packagingCost: 0, diet: "VEG", allergens: [], components: [], customizations: [], capacity: null, dishes: [], problem, warning: null };
 }
 
 // ───────────── placing orders ─────────────
 
 export class OrderError extends Error {}
 
-function addressSnapshot(a: CurrentUser["addresses"][number]) {
+export function addressSnapshot(a: CurrentUser["addresses"][number]) {
   return {
     addressId: a.id,
     contactName: a.recipientName,
@@ -288,6 +330,49 @@ export function initialState(method: PaymentMethod, customerShare: number, compa
   return { status: "PENDING_PAYMENT" as OrderStatus, payment: "PENDING" as const, orderPayment: "PENDING" as const };
 }
 
+/** UTM / campaign snapshot captured at checkout (WP-11 passes it). Unknown keys and non-string values are dropped. */
+export type OrderAttribution = {
+  source?: string | null;
+  medium?: string | null;
+  campaign?: string | null;
+  term?: string | null;
+  content?: string | null;
+  referrer?: string | null;
+  landing?: string | null;
+  at?: string | null;
+  campaignId?: string | null;
+};
+
+const ATTRIBUTION_KEYS = ["source", "medium", "campaign", "term", "content", "referrer", "landing", "at"] as const;
+
+/** Sanitise an attribution snapshot; the campaign id is kept only if that Campaign exists. */
+export async function cleanAttribution(a: OrderAttribution | null | undefined): Promise<{ attribution: Prisma.InputJsonValue | undefined; campaignId: string | null }> {
+  if (!a || typeof a !== "object") return { attribution: undefined, campaignId: null };
+  const out: Record<string, string> = {};
+  for (const k of ATTRIBUTION_KEYS) {
+    const v = a[k];
+    if (typeof v === "string" && v.trim()) out[k] = v.trim().slice(0, 300);
+  }
+  let campaignId: string | null = null;
+  if (typeof a.campaignId === "string" && a.campaignId) {
+    const c = await db.campaign.findUnique({ where: { id: a.campaignId.slice(0, 64) }, select: { id: true } });
+    campaignId = c?.id ?? null;
+  }
+  return { attribution: Object.keys(out).length ? out : undefined, campaignId };
+}
+
+/**
+ * Methods staff may record on an order they place by phone/walk-in: every method switched on in settings
+ * (cash and bank transfer even when no bank details are configured for customers), gateways only when configured.
+ */
+export async function staffPaymentMethods(settings: SiteSettings): Promise<PaymentMethod[]> {
+  const customer = await availableMethods(settings, { hasCompany: false, customerShare: 1 });
+  const out = new Set<PaymentMethod>(customer);
+  if (settings.paymentMethods.CASH) out.add("CASH");
+  if (settings.paymentMethods.BANK_TRANSFER) out.add("BANK_TRANSFER");
+  return [...out];
+}
+
 export async function placeCartOrder(
   user: CurrentUser,
   input: {
@@ -300,6 +385,10 @@ export async function placeCartOrder(
     idempotencyKey?: string | null;
     source?: OrderSource;
     placedById?: string | null;
+    /** Marketing attribution snapshot (WP-11). */
+    attribution?: OrderAttribution | null;
+    /** Staff-placed order: allow every method staff may record (see staffPaymentMethods). */
+    staffMethods?: boolean;
   },
 ) {
   if (input.idempotencyKey) {
@@ -324,7 +413,7 @@ export async function placeCartOrder(
   if (input.slotId && !slot) throw new OrderError("That delivery window isn't available for your area");
 
   const company = activeCompany(user);
-  const methods = await availableMethods(settings, { hasCompany: Boolean(company), customerShare: q.customerShare });
+  const methods = input.staffMethods ? await staffPaymentMethods(settings) : await availableMethods(settings, { hasCompany: Boolean(company), customerShare: q.customerShare });
   const method: PaymentMethod = q.customerShare <= 0 ? "COMPANY_INVOICE" : input.method;
   if (q.customerShare > 0 && !methods.includes(method)) throw new OrderError("That payment method isn't available right now");
   if (method === "WALLET" && (await walletBalance(user.id)) < q.customerShare) throw new OrderError("Not enough credit — choose another payment method");
@@ -335,6 +424,7 @@ export async function placeCartOrder(
 
   const state = initialState(method, q.customerShare, q.companyShare);
   const source: OrderSource = input.source ?? (company ? "CORPORATE" : "SINGLE");
+  const { attribution, campaignId } = await cleanAttribution(input.attribution);
 
   try {
     const result = await db.$transaction(
@@ -393,6 +483,9 @@ export async function placeCartOrder(
               companyShare: day.companyShare,
               customerShare: day.customerShare,
               costTotal: day.cost,
+              packagingCost: ls.reduce((a, l) => a + l.packagingCost * l.qty, 0),
+              attribution,
+              campaignId,
               couponCode: q.couponCode,
               allergenNote: user.allergies.length ? `Avoid: ${user.allergies.join(", ")}` : null,
               notes: input.notes?.slice(0, 500) || null,
