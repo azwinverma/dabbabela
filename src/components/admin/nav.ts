@@ -15,7 +15,7 @@ export const ADMIN_NAV_ALL: NavGroup[] = [
     title: "Overview",
     items: [
       { href: "/admin", label: "Dashboard", icon: "LayoutDashboard", perm: "dashboard.view" },
-      { href: "/admin/analytics", label: "Analytics", icon: "ChartNoAxesCombined", perm: "analytics.view", ready: false, owner: "WP-02" },
+      { href: "/admin/analytics", label: "Analytics", icon: "ChartNoAxesCombined", perm: "analytics.view", owner: "WP-02" },
       { href: "/admin/alerts", label: "Alerts", icon: "Siren", perm: "alerts.view", ready: false, owner: "WP-16" },
       { href: "/admin/reports", label: "Reports & exports", icon: "LineChart", perm: "reports.view" },
     ],
