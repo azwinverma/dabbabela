@@ -608,7 +608,63 @@ campaign, no consent → nothing stored, request-id header, portion kept).
 
 **Depends:** WP-01.
 
-## WP-12: Corporate ⬜ (M)
+## WP-12: Corporate ✅ (M)
+**Done 2026-11-05.**
+- **Server (`src/server/corporate.ts`):** staff entry points take the acting staff member and re-check the permission key **and company
+  scope** (`assertCompanyAccess` → `CorporateForbidden`; StaffScope company rows limit a staff member to those companies, none = all,
+  SUPER_ADMIN always all). Contract, budget, menu and delivery-instruction changes are audited.
+  - **Contracts:** `createContract` (v1 DRAFT), `updateContract` (drafts only), `newContractVersion` (copies into v+1 DRAFT,
+    `supersedesId`, must start after the old one, one open successor), `activateContract` (advisory lock per company; refuses an overlap
+    with another active contract that it doesn't supersede; the superseded version gets `endsOn` = new start − 1 and stays ACTIVE until
+    then so its negotiated prices keep applying, ENDED when already over; when in force today its `creditTermsDays` become
+    `Company.invoiceTermsDays`), `endContract` (reason). `contractOn`, `creditTermsOn` (contract in force, else company terms),
+    `minCommitment` (meals on live company orders in the month vs `minMealsPerMonth` → shortfall). Negotiated `boxPrices` are applied at
+    checkout by WP-03's `quoteCart` hook (verified end to end in the test).
+  - **Checkout hook `companySpecFor`:** a member not eligible on any of the cart's dates (`mealEligible` off / weekday outside
+    `eligibleDays`) gets no company share for that cart (can still order and pay); otherwise the company share is capped by what is
+    left of the member's **department budget** for the month (`ignoreBudget` option gives the uncapped share). Applies to self-orders,
+    subscriptions and staff edits (all call it).
+  - **Budgets:** `upsertDepartmentBudget` (set/remove, audited `company.budget.set/remove`), `departmentSpend`,
+    `departmentBudgetRemaining`, `budgetStatus` (spent vs budget per department incl. "no department").
+  - **Company menu:** `companyMenuBoxIds`, `filterCompanyMenu`, `setCompanyMenu` (staff, audited). Empty list = full menu.
+  - **Delivery:** `setDeliveryInstructions`; `upcomingDeliveries` groups live company orders by day → office location (`Order.officeLocationId`,
+    else address) → slot with dabba counts, receiver, people.
+  - **Invoices (contract-aware, no `invoices.ts` edit):** `generateCompanyInvoice` = due, unbilled company share (negotiated price already
+    in the order) **plus company-share `OrderAdjustment` rows** (WP-03 request) on those orders or on orders billed earlier, each its own
+    line tagged `[adj:<id>]` so it is billed exactly once (no schema link); same `INV-YYYY-NNNN` sequence/lock as `invoices.ts`; draft due
+    date preview from credit terms. `issueCompanyInvoice` sets due = issue date + `creditTermsOn(today)`. `companyOutstanding` now includes
+    unbilled company adjustments. `unpaidInvoices` (overdue days), `invoicePaymentHistory` (dated receipts read from the
+    `invoice.payment` audit rows — the only dated record without a schema change).
+  - **Reports:** `companyOrderReport` (adds employee #, discount, company adjustments, invoiced flag), `departmentSummary`.
+- **`team.ts` (company admin, always scoped to their own companyId):** `updateMember` also sets `mealEligible`, `eligibleDays`,
+  `allowanceOverride` (audited before/after). `teamMenu` (day's menu ∩ company menu at negotiated prices). `placeTeamOrder`: company
+  menu, eligibility (refused per member), department budget — refused by default, or `overBudget: "employee-pays"` orders with the
+  company share capped and a warning; the office address carries receiver + company delivery instructions; audit has per-member
+  results. `teamBudgets`/`setTeamBudget`, `setTeamDeliveryInstructions`, `teamDeliveries`, `teamCommitment`, `teamPayments`.
+- **Admin UI `/admin/companies/[id]`:** tabs Overview (commitment shortfall, unpaid/overdue, corporate discount given, over-budget
+  callout), Members (eligibility days), Offices & delivery (instructions, upcoming deliveries by office), Contracts (version chain,
+  draft/activate/new version/end, credit terms, min meals/month, per-dabba negotiated prices), Budgets (per month), Company menu,
+  Invoices (generate draft with contract terms, issue, overdue, payments received), Orders, Reports (department summary +
+  `/admin/companies/[id]/report` CSV: corporate.view + scope, emails masked without customers.pii, audited `company.report_export`),
+  Billing & settings. List and detail pages respect company scope; every action re-checks scope. Edit controls hidden without
+  `corporate.edit` / `invoices.edit`.
+- **Portal `/team`:** People (eligibility days, company-pays toggle, per-person allowance), Order for the team (company menu, your
+  price vs menu price, ineligible people greyed, budget left per department, "let the employee pay the difference" option, warnings),
+  new **Deliveries** (by office/window + delivery instructions form) and **Budgets** (spending vs budget, set caps), Invoices (credit
+  terms from the contract, unpaid/overdue callout, payments recorded), Overview (contract minimum, budget KPI), reports CSV with the new
+  columns.
+- **Tests:** `tests/integration/corporate-erp.test.ts` (9): versioning + supersede end date + overlap refusal + negotiated price in
+  quote and placed order + credit-terms sync + audit; min-commitment shortfall; contract permission; budget refuse / employee-pays cap /
+  self-order cap / other department unaffected; eligibility (team order refused, self-order not company-billed, admin edit audited);
+  company menu filter + negotiated price shown; invoice with company adjustments exactly once (customer adjustments excluded), due date
+  from credit terms on draft and issue, outstanding unchanged by billing, later adjustment on next invoice; isolation A↔B (member,
+  update, team order, invoice, invite, report, deliveries, budgets, payments) and scoped staff. Full suite 231/231.
+- **Deferred:** company-menu enforcement on self-ordering (`quoteCart`, public menu — requests below); per-day company spec for
+  mixed-eligibility carts (today: one ineligible day → no company share for the whole cart); min-commitment shortfall is shown, not
+  billed; dated receipts / adjustment↔invoice link need schema (request below); `/admin/invoices` still uses `invoices.ts`
+  `generateInvoice`/`issueInvoice` (no adjustments; due date from `Company.invoiceTermsDays`) until its owner switches (request below);
+  no E2E.
+
 **Owns:** `src/server/corporate.ts`, `src/server/team.ts`, `src/app/admin/companies/**`, `src/app/team/**`.
 
 **Delivers:**
@@ -822,12 +878,19 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-06 | WP-09 | "Pay the difference" for a swap up-charge on a paid plan when wallet credit is short: a Payment for the delta whose `markPaymentPaid` applies the pending swap (today WP-06 refuses and asks for credit) | open |
 | WP-06 | WP-18 | Account home / orders `MealActions`: use the per-day cut-off (`earliestCutoff(DayOffer.cutoff, company)`) like `/account/plans/[id]`; link "Renew" for plans ending soon (`/account/plans/[id]#renew`) | open |
 | WP-06 | WP-00 / WP-20 | `tests/integration/access.test.ts` assumes exactly one `MealPlanPrice` per plan; limit it to seeded plans (WP-06's test trims its plans' history in `afterAll` meanwhile) | open |
-| WP-03 | WP-09 / WP-12 | Company invoices and finance/analytics totals read `Order.companyShare`/`customerShare` only. Staff edits never rewrite those; they add `OrderAdjustment` rows (customer part; company part has `reason` starting `Company share`). Include adjustments in invoice lines / receivables / net revenue | open |
+| WP-03 | WP-09 / WP-12 | Company invoices and finance/analytics totals read `Order.companyShare`/`customerShare` only. Staff edits never rewrite those; they add `OrderAdjustment` rows (customer part; company part has `reason` starting `Company share`). Include adjustments in invoice lines / receivables / net revenue | WP-12 part done (`corporate.ts generateCompanyInvoice` bills company-share adjustments once, tagged `[adj:<id>]`; `companyOutstanding` includes unbilled ones). Receivables / net revenue → WP-09 open |
 | WP-03 | settings page owner (WP-14 / WP-16) | Settings UI for the staff modification window: `Setting` key `orders.modificationWindow` = `{ "cutoff": "HH:MM" }` (read by `staffEditWindow` in `orders-admin.ts`; absent = order cut-off) | open |
 | WP-03 | WP-13 | `reassignDelivery` may change slot/address of an order already on a route (kitchen moves are refused while routed). Dispatch should flag routed orders whose `slotId`/`addressId` changed (audit `order.reassign_delivery`) | done (WP-13: `routeChanges()` in `dispatch.ts`, "changed" badge + checked action on `/admin/dispatch`) |
 | WP-13 | WP-03 / WP-06 | Distance fee bands at checkout: build `ZoneSpec.fee` from `zoneFee(zone, { lat, lng })` (`coverage.ts`) instead of `zone.fee` in `quoteCart` (`orders.ts`), plan quotes (`subscriptions.ts`) and staff re-pricing (`orders-admin.ts`); refuse when `.beyond` is true. Also limit the slot picker / validation to `zoneSlots(zone, slots)` (zone time windows). Flat fee is unchanged when a zone has no bands or the address has no pin | open |
 | WP-13 | WP-18 / address form owner | Capture an optional map pin (lat/lng) on customer addresses so distance bands can apply; `/delivery-areas` could show a zone's bands (`parseZoneRules`) next to the flat fee | open |
 | WP-13 | WP-00 (optional) | `RiderProfile` has no `kitchenId`/`notes`; WP-13 uses `User.kitchenId` and `User.internalNote`. Add dedicated columns only if those user fields need to mean something else for riders | open |
+| WP-12 | `invoices.ts` owner / WP-09 | `/admin/invoices` generate/issue should call `generateCompanyInvoice` / `issueCompanyInvoice` (`src/server/corporate.ts`: company-share adjustments + due date from the contract's credit terms), or `invoices.ts` should delegate to them. Until then that page bills without adjustments (they're picked up by the next `generateCompanyInvoice`) and dues from `Company.invoiceTermsDays` (synced on contract activation) | open |
+| WP-12 | WP-03 | `quoteCart`: refuse box lines not in `companyMenuBoxIds(company.id)` for company members (helper `filterCompanyMenu`); per-day company spec (`companySpecFor` per date) so a mixed-eligibility cart bills the company only for eligible days; `createCorporateBulkOrder`: apply the company menu and `departmentBudgetRemaining` like `placeTeamOrder` | open |
+| WP-12 | WP-04 / WP-18 | Public menu / account ordering for company members: show only `filterCompanyMenu(items, await companyMenuBoxIds(companyId))` | open |
+| WP-12 | WP-13 | Dispatch manifests: show `Company.deliveryInstructions` and group company drops by `Order.officeLocationId` (see `upcomingDeliveries` in `corporate.ts`) | open |
+| WP-12 | WP-16 | Detectors: `unpaidInvoices(companyId)` (overdue days), contracts expiring (`CorporateContract.endsOn` within 30 days, ACTIVE), `minCommitment(companyId, ym).shortfall`, `budgetStatus(companyId, ym)` rows with `over` | open |
+| WP-12 | WP-10 | Corporate order report → `companyOrderReport` / `departmentSummary` (`corporate.ts`) | open |
+| WP-12 | WP-00 (next schema change) | Dated company-invoice receipts (a receipt table, or nullable `Payment.userId`) — today the dated record is the `invoice.payment` audit row (`invoicePaymentHistory`); `OrderAdjustment.invoiceLineId` to replace the `[adj:<id>]` line tag | open |
 
 ## External blockers (⛔)
 | Blocker | Affects |
@@ -856,3 +919,4 @@ _Record here when a package needs a change in a file owned by another package._
 | 2026-11-05 | WP-03 | Staff phone and corporate bulk orders, line edits/substitutions with adjustments, kitchen/delivery reassignment, kit order list + export, order timeline/receipt; orders.ts: negotiated price, per-day cut-off, packaging, attribution; 14 integration tests |
 | 2026-11-05 | WP-13 | Riders page + profiles, distance fee bands / zone windows (coverage hook), route grouping + cost, changed-after-routing flags, required failed reasons, rider date picker (past read-only), per-rider/zone performance; 10 integration tests |
 | 2026-11-05 | WP-11 | CRM on the kit (directory, saved views, 360, audited edits, suspend, approved credit, notes, comm prefs, privacy, masked exports); consented first/last-touch attribution → user → order; middleware request id; 16 integration tests |
+| 2026-11-05 | WP-12 | Corporate: contract versions + supersede + credit terms + min-commitment shortfall, department budgets (refuse / employee pays), eligibility in team and self orders, company menus, delivery instructions + grouped deliveries, contract-aware invoices with company adjustments, payments/overdue, company scope for staff, `/team` budgets + deliveries; 9 integration tests |

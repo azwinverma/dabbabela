@@ -4,7 +4,7 @@ import { rs } from "@/lib/money";
 import { todayKTM } from "@/lib/dates";
 import { Panel } from "@/components/admin/ui";
 import { Kpi, Empty } from "@/components/admin/finance/kit";
-import { teamOverview, teamFeedback, roster } from "@/server/team";
+import { teamOverview, teamFeedback, roster, teamBudgets, teamCommitment } from "@/server/team";
 import { companyOutstanding } from "@/server/corporate";
 
 export const metadata = { title: "Overview" };
@@ -13,7 +13,15 @@ export default async function TeamHome({ searchParams }: { searchParams: Promise
   const { company } = await requireCompanyAdmin();
   const { ym: q } = await searchParams;
   const ym = q && /^\d{4}-\d{2}$/.test(q) ? q : todayKTM().slice(0, 7);
-  const [o, fb, pending, owed] = await Promise.all([teamOverview(company.id, ym), teamFeedback(company.id), roster(company.id, { status: "PENDING" }), companyOutstanding(company.id)]);
+  const [o, fb, pending, owed, budgets, commitment] = await Promise.all([
+    teamOverview(company.id, ym),
+    teamFeedback(company.id),
+    roster(company.id, { status: "PENDING" }),
+    companyOutstanding(company.id),
+    teamBudgets(company.id, ym),
+    teamCommitment(company.id, ym),
+  ]);
+  const budgeted = budgets.filter((b) => b.budget != null);
   const mode = company.billingMode === "SPLIT" ? `Company pays ${company.subsidyPct}%${company.subsidyCap ? ` (up to ${rs(company.subsidyCap)} a meal)` : ""}` : company.billingMode === "COMPANY_PAID" ? "Company pays for every lunch" : "Staff pay for their own lunch";
   return (
     <div className="space-y-5">
@@ -38,6 +46,18 @@ export default async function TeamHome({ searchParams }: { searchParams: Promise
         <Kpi label="Allowance used" value={o.allowancePool != null ? `${Math.round((o.allowanceUsed / Math.max(1, o.allowancePool)) * 100)}%` : "No cap"} sub={o.allowancePool != null ? `${rs(o.allowanceUsed)} of ${rs(o.allowancePool)}` : undefined} />
         <Kpi label="Active people" value={o.members} tone={o.pending ? "warn" : "default"} sub={o.pending ? `${o.pending} waiting for you` : undefined} />
         <Kpi label="Owed to Dabba Bela" value={rs(owed)} sub={company.creditLimit != null ? `Credit limit ${rs(company.creditLimit)}` : undefined} />
+        {commitment.minMealsPerMonth != null && (
+          <Kpi label="Contract minimum" value={`${commitment.meals} / ${commitment.minMealsPerMonth} meals`} sub={commitment.shortfall ? `${commitment.shortfall} short this month` : "Met this month"} tone={commitment.shortfall ? "warn" : "good"} />
+        )}
+        {budgeted.length > 0 && (
+          <Kpi
+            label="Department budgets"
+            value={`${rs(budgeted.reduce((a, b) => a + b.spent, 0))} of ${rs(budgeted.reduce((a, b) => a + (b.budget ?? 0), 0))}`}
+            sub={budgeted.some((b) => b.over) ? `Over: ${budgeted.filter((b) => b.over).map((b) => b.department).join(", ")}` : "All within budget"}
+            tone={budgeted.some((b) => b.over) ? "bad" : "default"}
+            href={`/team/budgets?ym=${ym}`}
+          />
+        )}
         <Kpi label="Average rating" value={fb.avg != null ? `${fb.avg.toFixed(1)} / 5` : "—"} sub={`${fb.count} ratings from your team`} />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
