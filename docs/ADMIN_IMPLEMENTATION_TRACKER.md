@@ -836,7 +836,42 @@ range, deep links, permission incl. custom-role grant).
 
 **Depends:** WP-00.
 
-## WP-18: Customer dashboard and frontend states ⬜ (M)
+## WP-18: Customer dashboard and frontend states ✅ (M)
+**Done 2026-11-19.** Service `src/server/customer-dashboard.ts` (every read takes the session `userId`; status comes from the order
+record — no GPS / rider-location claims): `mealWindows` (per-day cut-off = `earliestCutoff(DayOffer.cutoff, order company override)`
+else global, day locks closed; pure `windowOpen`), `hasCustomerAction`, `todayLunches` (+ status events), `upcomingLunches` (single
+orders + plan meals, next N days, cancelled left out), `awaitingFeedback`, `dashboardPlans` (`renewDue` inside
+`MealPlan.renewalReminderDays` / just ended, not renewed, plan on sale, paid), `calendarGrid` / `mealCalendar`, `paymentHistory`
+(payments, refunds, wallet movements; totals over all rows: paid, refunded, pending, credit in/out, balance), `parsePin` /
+`saveAddressPin` (both-or-neither, Nepal range 26–31 / 80–89, 6 dp, own non-archived address only). Action
+`src/lib/actions/dashboard.ts saveAddressPinAction`. Strings: new `src/lib/i18n/dashboard.ts` (EN + NE, **NE needs native review**),
+`nav.payments` added to `account.ts`.
+- **Account home:** today's lunch card with a status step line (Booked → Confirmed → In the kitchen → Packed → On the way → Delivered,
+  times from `OrderStatusEvent`), hand-off code, failed-delivery help, note that status is updated by kitchen/rider (no location);
+  refreshes every 60 s (`AutoRefresh`, visible tab only) while a lunch is moving. Upcoming 14 days with skip/bring back/cancel shown only
+  inside the per-day window ("Change until 07:30"), links to calendar / all orders. Aside: credit + payment history link, plans with
+  progress and a **Renew** link (`/account/plans/[id]#renew`), "How was your lunch?" for unrated deliveries (→ `#feedback`),
+  notifications, add-address prompt. Empty states throughout, no placeholder data.
+- **Orders:** per-day window on the list and on `/account/orders/[id]` (cut-off shown); `/account/orders/calendar` month grid
+  (table, sm+) / agenda list (phones), prev/next month. **`/account/payments`** (new, in account nav): totals tiles, payments with
+  receipt / finish-payment links, refunds, credit movements. Wallet page links to it.
+- **Addresses:** per-address "Map pin" disclosure (`addresses/PinForm.tsx`): "Use my location" (geolocation only on click; browser
+  consent) fills the fields, manual latitude/longitude fallback, Remove pin; works as a plain form, no map library.
+- **States:** `loading.tsx` for `(site)/account` (+ orders, payments, wallet, notifications, support, profile), `(site)/menu`,
+  `(site)/plans`; `(site)/account/error.tsx` (bilingual `SiteError`); `admin/loading.tsx` + `admin/error.tsx` (`LoadingState` /
+  `ErrorState`) and `loading.tsx` for heavy admin routes (analytics, reports, orders, dispatch, kitchen, inventory, profitability,
+  production-calendar, customers, payments). Components: `src/components/site/PageStates.tsx`, `SiteError.tsx`.
+- Dietary preferences, notification preferences, feedback and support already existed (`/account/profile`, `/notifications`,
+  `/orders/[id]`, `/support`) and were kept.
+- **Tests:** `tests/integration/customer-dashboard.test.ts` (10): upcoming lunches = the user's booked orders (not another user's,
+  cancelled excluded); calendar = same set; month grid; payment history totals = payment / ledger records, other customer's refund not
+  shown; pin range/shape validation, own-address only, clear, archived refused; per-day cut-off (07:30) closes the window exactly when
+  `skipMeal` refuses, global cut-off otherwise; plans/lunches isolation between two customers; Renew offered only for a paid plan in its
+  window. Full suite 275/275.
+- **Deferred:** E2E acceptance 12 (Playwright: status through to delivered) not written/run here → WP-20; account ordering for company
+  members (WP-12 request) — the account pages don't list dabbas to order (`/menu` is WP-04, saved boxes unowned), so it stays open;
+  existing English strings on older account pages not yet moved into dictionaries.
+
 **Owns:** `src/app/(site)/account/page.tsx`, `src/app/(site)/account/{orders,wallet,notifications,support,profile}/**`, `src/app/(site)/account/payments/**` (new), and `loading.tsx` files under `src/app/(site)/**` and `src/app/admin/**`.
 
 **Delivers:** an account home with today's lunch (live status), upcoming lunches, a calendar view, active plans, credits and a payment history page; loading, empty and error states.
@@ -895,7 +930,7 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-05 | WP-11 | `saveCustomBoxAction` (`shop.ts`) drops `portionId` when it re-maps items. Keep `portionId` | done (WP-11: `portionId` validated and passed to `priceCustomBox`; saved items keep it) |
 | WP-11 | WP-03 | Pass `attribution` into `placeCartOrder` | done (WP-03: optional `attribution: OrderAttribution` — UTM keys sanitised into `Order.attribution`, `campaignId` kept only if the Campaign exists. WP-11: `placeOrderAction` passes the consented last/first touch + campaign id) |
 | WP-17 | (middleware owner / WP-20) | `src/middleware.ts`: stamp `x-request-id` on the request (`NextResponse.next({ request: { headers } })`) and echo it on the response, for all routes (matcher today covers only protected paths). Until then `request-context.ts` falls back to `x-vercel-id` or a generated id per request | done (WP-11: all routes except static files; upstream id kept when well-formed, else UUID; also on redirects) |
-| WP-19 | WP-18 | Admin `loading.tsx` / `error.tsx` can use `LoadingState` / `ErrorState` from `src/components/admin/States.tsx` | open |
+| WP-19 | WP-18 | Admin `loading.tsx` / `error.tsx` can use `LoadingState` / `ErrorState` from `src/components/admin/States.tsx` | done (WP-18: `admin/loading.tsx`, `admin/error.tsx` + loading for heavy admin routes) |
 | WP-04 | WP-03 | Enforce per-day cut-off at checkout: in `quoteCart` use `offer.cutoff` (from `getOffersForDates`) — earliest of it and `company.cutoffOverride` — when calling `dateProblem` | done (WP-03: `dayCutoff(offer.cutoff, company.cutoffOverride)` per line; staff edit window uses the same) |
 | WP-04 | WP-06 | Same per-day cut-off (`DayOffer.cutoff`) for plan picks/swaps (`changeWindowOpen(…, cutoff)`) in `subscriptions.ts` | done (WP-06: quotes, skip, unskip, swap, add-meal) |
 | WP-04 | WP-16 | Call `publishDueMenus()` (exported from `src/server/menu.ts`) in the housekeeping / frequent cron so scheduled menus get their revision + rotation re-sync | open |
@@ -914,13 +949,13 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-11 | e2e owners / WP-20 | The site now shows an in-flow consent bar above the header until answered; e2e contexts that assert on top-of-page layout can pre-set cookie `dabba_consent=granted` or `denied` | open |
 | WP-06 | WP-16 | Daily cron: call `syncPlanPriceMirrors()` (scheduled plan price becomes the `MealPlan` mirror read by home/CMS pricing tables) next to `completeAndRemind()` | open |
 | WP-06 | WP-09 | "Pay the difference" for a swap up-charge on a paid plan when wallet credit is short: a Payment for the delta whose `markPaymentPaid` applies the pending swap (today WP-06 refuses and asks for credit) | open |
-| WP-06 | WP-18 | Account home / orders `MealActions`: use the per-day cut-off (`earliestCutoff(DayOffer.cutoff, company)`) like `/account/plans/[id]`; link "Renew" for plans ending soon (`/account/plans/[id]#renew`) | open |
+| WP-06 | WP-18 | Account home / orders `MealActions`: use the per-day cut-off (`earliestCutoff(DayOffer.cutoff, company)`) like `/account/plans/[id]`; link "Renew" for plans ending soon (`/account/plans/[id]#renew`) | done (WP-18: `mealWindows` on home, orders list and order detail; Renew link via `dashboardPlans().renewDue`) |
 | WP-06 | WP-00 / WP-20 | `tests/integration/access.test.ts` assumes exactly one `MealPlanPrice` per plan; limit it to seeded plans (WP-06's test trims its plans' history in `afterAll` meanwhile) | open |
 | WP-03 | WP-09 / WP-12 | Company invoices and finance/analytics totals read `Order.companyShare`/`customerShare` only. Staff edits never rewrite those; they add `OrderAdjustment` rows (customer part; company part has `reason` starting `Company share`). Include adjustments in invoice lines / receivables / net revenue | WP-12 part done (`corporate.ts generateCompanyInvoice` bills company-share adjustments once, tagged `[adj:<id>]`; `companyOutstanding` includes unbilled ones). Receivables / net revenue → WP-09 open |
 | WP-03 | settings page owner (WP-14 / WP-16) | Settings UI for the staff modification window: `Setting` key `orders.modificationWindow` = `{ "cutoff": "HH:MM" }` (read by `staffEditWindow` in `orders-admin.ts`; absent = order cut-off) | open |
 | WP-03 | WP-13 | `reassignDelivery` may change slot/address of an order already on a route (kitchen moves are refused while routed). Dispatch should flag routed orders whose `slotId`/`addressId` changed (audit `order.reassign_delivery`) | done (WP-13: `routeChanges()` in `dispatch.ts`, "changed" badge + checked action on `/admin/dispatch`) |
 | WP-13 | WP-03 / WP-06 | Distance fee bands at checkout: build `ZoneSpec.fee` from `zoneFee(zone, { lat, lng })` (`coverage.ts`) instead of `zone.fee` in `quoteCart` (`orders.ts`), plan quotes (`subscriptions.ts`) and staff re-pricing (`orders-admin.ts`); refuse when `.beyond` is true. Also limit the slot picker / validation to `zoneSlots(zone, slots)` (zone time windows). Flat fee is unchanged when a zone has no bands or the address has no pin | open |
-| WP-13 | WP-18 / address form owner | Capture an optional map pin (lat/lng) on customer addresses so distance bands can apply; `/delivery-areas` could show a zone's bands (`parseZoneRules`) next to the flat fee | open |
+| WP-13 | WP-18 / address form owner | Capture an optional map pin (lat/lng) on customer addresses so distance bands can apply; `/delivery-areas` could show a zone's bands (`parseZoneRules`) next to the flat fee | pin part done (WP-18: `/account/addresses` PinForm — geolocation on consent + manual lat/lng, validated by `parsePin`); `/delivery-areas` bands open |
 | WP-13 | WP-00 (optional) | `RiderProfile` has no `kitchenId`/`notes`; WP-13 uses `User.kitchenId` and `User.internalNote`. Add dedicated columns only if those user fields need to mean something else for riders | open |
 | WP-12 | `invoices.ts` owner / WP-09 | `/admin/invoices` generate/issue should call `generateCompanyInvoice` / `issueCompanyInvoice` (`src/server/corporate.ts`: company-share adjustments + due date from the contract's credit terms), or `invoices.ts` should delegate to them. Until then that page bills without adjustments (they're picked up by the next `generateCompanyInvoice`) and dues from `Company.invoiceTermsDays` (synced on contract activation) | open |
 | WP-12 | WP-03 | `quoteCart`: refuse box lines not in `companyMenuBoxIds(company.id)` for company members (helper `filterCompanyMenu`); per-day company spec (`companySpecFor` per date) so a mixed-eligibility cart bills the company only for eligible days; `createCorporateBulkOrder`: apply the company menu and `departmentBudgetRemaining` like `placeTeamOrder` | open |
@@ -934,6 +969,9 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-07 | WP-16 | Detectors: `productionDashboard(kitchenId, date).issues` (severity + message), `batchShortages(kitchenId, date)` and over-capacity (`capacity.booked > limit`) from `src/server/kitchen.ts`; kitchen status changes are audited as `kitchen.pause|shutdown|reopen` | open |
 | WP-07 | WP-10 | Kitchen performance report → `kitchenPerformance(kitchenId, from, to)` (`src/server/kitchen.ts`) | open |
 | WP-07 | WP-00 / WP-20 | `tests/integration/ops.test.ts` uses `db.kitchen.findFirstOrThrow()` without a filter; any update to the seeded kitchen reorders rows and breaks it. Use `{ where: { code: "KTM-1" } }` | open |
+| WP-18 | WP-03 | Customer `cancelOrder` (`orders.ts`) checks only the global cut-off; use `dayCutoff(offer.cutoff, company.cutoffOverride)` like `skipMeal`. The account pages already hide Cancel after the per-day cut-off (stricter), so only direct action calls are affected | open |
+| WP-18 | `actions/account.ts` / `DeliveryFields.tsx` owner | `saveAddressAction` accepts half a pin (lat without lng); validate with `parsePin` (`src/server/customer-dashboard.ts`). The checkout `AddressForm` could add the manual lat/lng fallback like `addresses/PinForm.tsx` | open |
+| WP-18 | WP-20 | E2E acceptance 12: customer sees status updates through to delivered on `/account` (today card step line; page refreshes every 60 s while moving) | open |
 
 ## External blockers (⛔)
 | Blocker | Affects |
@@ -964,3 +1002,4 @@ _Record here when a package needs a change in a file owned by another package._
 | 2026-11-05 | WP-11 | CRM on the kit (directory, saved views, 360, audited edits, suspend, approved credit, notes, comm prefs, privacy, masked exports); consented first/last-touch attribution → user → order; middleware request id; 16 integration tests |
 | 2026-11-05 | WP-12 | Corporate: contract versions + supersede + credit terms + min-commitment shortfall, department budgets (refuse / employee pays), eligibility in team and self orders, company menus, delivery instructions + grouped deliveries, contract-aware invoices with company adjustments, payments/overdue, company scope for staff, `/team` budgets + deliveries; 9 integration tests |
 | 2026-11-05 | WP-07 | Kitchen management: open/pause/shut down (blocks new orders in `assertDayCapacity`, audited), manager, hours/working days, staff assignment, audited capacity services, production dashboard (slots, recipes, progress, packing, dispatch-ready, shortages incl. recorded batch shortages, issues, cut-off), requirements via `scaleRecipe` + horizon, per-kitchen performance + operating costs; 8 integration tests |
+| 2026-11-19 | WP-18 | Customer dashboard: today's lunch status line (DB status, no GPS), upcoming 14 days with per-day cut-off, Renew links, meal calendar, `/account/payments` (payments, refunds, credit, totals), address map pin (geolocation on consent + manual), loading/error states for account, menu, plans and admin; EN/NE strings (NE needs review); 10 integration tests |

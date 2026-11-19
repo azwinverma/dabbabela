@@ -43,6 +43,7 @@ const en = {
     boxes: "Saved dabbas",
     addresses: "Addresses",
     wallet: "Credit",
+    payments: "Payments",
     notifications: "Notifications",
     support: "Help",
     profile: "Profile",
@@ -173,6 +174,7 @@ const ne: AccountDict = {
     boxes: "सेभ गरिएका डब्बा",
     addresses: "ठेगानाहरू",
     wallet: "क्रेडिट",
+    payments: "भुक्तानी", // NE: needs native review
     notifications: "सूचनाहरू",
     support: "सहायता",
     profile: "प्रोफाइल",

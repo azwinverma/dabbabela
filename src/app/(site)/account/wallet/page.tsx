@@ -4,6 +4,8 @@ import { db } from "@/lib/db";
 import { formatStamp } from "@/lib/dates";
 import { rs } from "@/lib/money";
 import { walletBalance } from "@/server/ledger";
+import { getLocale } from "@/lib/i18n/server";
+import { dashboardDict } from "@/lib/i18n/dashboard";
 
 const REASON: Record<string, string> = {
   SKIP_CREDIT: "Skipped plan meal",
@@ -18,6 +20,7 @@ const REASON: Record<string, string> = {
 
 export default async function WalletPage() {
   const user = await requireUser("/account/wallet");
+  const payments = dashboardDict(await getLocale()).home.payments;
   const [balance, rows] = await Promise.all([walletBalance(user.id), db.creditLedger.findMany({ where: { userId: user.id }, orderBy: { createdAt: "desc" }, take: 100 })]);
   return (
     <div className="max-w-3xl">
@@ -26,7 +29,10 @@ export default async function WalletPage() {
         <p className="mt-1 text-4xl font-extrabold tabular-nums">{rs(balance)}</p>
         <p className="mt-2 text-sm text-ink-soft">Credit comes from cancellations, skips and refunds. Pick "Dabba Bela credit" at checkout to spend it. It doesn't expire. Prefer the money back? <Link href="/account/support" className="font-semibold underline">Ask support</Link>.</p>
       </div>
-      <h2 className="mt-8 text-xl font-extrabold">History</h2>
+      <div className="mt-8 flex flex-wrap items-end justify-between gap-3">
+        <h2 className="text-xl font-extrabold">History</h2>
+        <Link href="/account/payments" className="text-sm font-semibold text-sindoor underline underline-offset-2">{payments}</Link>
+      </div>
       {rows.length === 0 ? (
         <p className="mt-3 text-sm text-ink-mute">No credit movements yet.</p>
       ) : (

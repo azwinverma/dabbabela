@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
+import { getLocale } from "@/lib/i18n/server";
+import { dashboardDict } from "@/lib/i18n/dashboard";
 import { toAddressViews } from "../_lib/view";
 import { AddressBook } from "./AddressBook";
 
 export default async function AddressesPage() {
   const user = await requireUser("/account/addresses");
+  const pin = dashboardDict(await getLocale()).pin;
   return (
     <div className="max-w-3xl">
       <h2 className="text-2xl font-extrabold">Addresses</h2>
@@ -13,7 +16,7 @@ export default async function AddressesPage() {
         <Link href="/delivery-areas" className="font-semibold text-sindoor underline">See where we deliver</Link>
       </p>
       <div className="mt-5">
-        <AddressBook addresses={toAddressViews(user)} defaults={{ recipientName: user.name, phone: user.phoneNumber ?? "" }} />
+        <AddressBook addresses={toAddressViews(user)} defaults={{ recipientName: user.name, phone: user.phoneNumber ?? "" }} pinLabels={pin} />
       </div>
     </div>
   );

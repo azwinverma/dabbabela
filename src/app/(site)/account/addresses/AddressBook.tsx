@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import { AddressCard, AddressForm, type AddressView } from "@/components/site/DeliveryFields";
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
 import { deleteAddressAction, setDefaultAddressAction } from "@/lib/actions/account";
+import type { DashboardDict } from "@/lib/i18n/dashboard";
+import { PinForm } from "./PinForm";
 
-export function AddressBook({ addresses, defaults }: { addresses: AddressView[]; defaults: { recipientName: string; phone: string } }) {
+export function AddressBook({ addresses, defaults, pinLabels }: { addresses: AddressView[]; defaults: { recipientName: string; phone: string }; pinLabels: DashboardDict["pin"] }) {
   const router = useRouter();
   const [editing, setEditing] = useState<string | "new" | null>(addresses.length ? null : "new");
   return (
@@ -35,6 +37,7 @@ export function AddressBook({ addresses, defaults }: { addresses: AddressView[];
               </ActionForm>
               {!a.zoneName && <span className="text-xs text-sindoor">We'll tell you when we start delivering to {a.area}.</span>}
             </div>
+            <PinForm addressId={a.id} lat={a.lat} lng={a.lng} labels={pinLabels} />
           </div>
         ),
       )}

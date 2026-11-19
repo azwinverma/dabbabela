@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/Badge";
 import { LinkButton } from "@/components/ui/Button";
 import { SummaryRow } from "@/components/site/DeliveryFields";
 import { MealActions } from "../../MealActions";
-import { changeable } from "../../_lib/meals";
+import { mealWindows } from "@/server/customer-dashboard";
 import { FeedbackForm, ProblemForm } from "./OrderForms";
 
 type Component = { name: string; qty: number; allergens?: string[]; substitutedFrom?: string };
@@ -34,7 +34,8 @@ export default async function OrderDetail({ params }: { params: Promise<{ id: st
   if (!order) notFound();
   const [settings, locale] = await Promise.all([getSettings(), getLocale()]);
   const t = accountDict(locale).account;
-  const open = (await changeable([order], settings)).get(order.id) ?? false;
+  const win = (await mealWindows([order], settings)).get(order.id);
+  const open = win?.open ?? false;
   const st = ORDER_STATUS[order.status];
   const pay = ORDER_PAYMENT_STATUS[order.paymentStatus];
 
@@ -108,7 +109,7 @@ export default async function OrderDetail({ params }: { params: Promise<{ id: st
         </section>
 
         {order.status === "DELIVERED" && (
-          <section className="rounded-2xl border-2 border-ink bg-paper-card p-5">
+          <section id="feedback" className="scroll-mt-24 rounded-2xl border-2 border-ink bg-paper-card p-5">
             <h3 className="text-lg font-extrabold">{t.feedback}</h3>
             <div className="mt-3">
               <FeedbackForm orderId={order.id} existing={order.feedback} />
@@ -148,7 +149,7 @@ export default async function OrderDetail({ params }: { params: Promise<{ id: st
         {open && (
           <div className="rounded-2xl border-2 border-ink-line bg-white p-5">
             <MealActions orderId={order.id} kind={order.source === "SUBSCRIPTION" ? "plan" : "single"} status={order.status} open credited={order.paymentStatus === "REFUNDED"} labels={t} />
-            <p className="mt-2 text-xs text-ink-mute">Changes close at {settings.orderCutoff} on the day.</p>
+            <p className="mt-2 text-xs text-ink-mute">Changes close at {win?.cutoff ?? settings.orderCutoff} on the day.</p>
           </div>
         )}
         {order.refunds.length > 0 && (
