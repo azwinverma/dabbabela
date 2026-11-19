@@ -21,13 +21,19 @@ export default async function CoveragePage({ searchParams }: { searchParams: Pro
   const { locale, t } = await getI18n();
   const [intro, zones, s, slots, results] = await Promise.all([
     getSection("coverage.intro", locale),
-    db.deliveryZone.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" }, include: { kitchen: { select: { name: true, isActive: true } } } }),
+    db.deliveryZone.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" }, include: { kitchen: { select: { name: true, isActive: true, status: true, statusNote: true } } } }),
     getSettings(),
-    db.deliverySlot.findMany({ where: { isActive: true, kitchen: { isActive: true } }, orderBy: { sortOrder: "asc" }, select: { label: true } }),
+    db.deliverySlot.findMany({ where: { isActive: true, kitchen: { isActive: true, status: "OPEN" } }, orderBy: { sortOrder: "asc" }, select: { label: true } }),
     query.length >= 2 ? searchCoverage(query) : Promise.resolve(null),
   ]);
   const windows = [...new Set(slots.map((x) => x.label))];
   const freeAbove = (z: (typeof zones)[number]) => z.freeAbove ?? (s.freeDeliveryAbove || null);
+  // Kitchens that aren't taking orders (WP-07 status): say so next to the areas they serve.
+  const pausedNote = new Map(
+    zones
+      .filter((z) => !z.kitchen.isActive || z.kitchen.status !== "OPEN")
+      .map((z) => [z.id, `Not taking orders right now${z.kitchen.statusNote ? ` — ${z.kitchen.statusNote}` : ""}. Please check back soon.`]),
+  );
 
   return (
     <>
@@ -60,6 +66,7 @@ export default async function CoveragePage({ searchParams }: { searchParams: Pro
                         {zone.fee && (zone.freeAbove ?? s.freeDeliveryAbove) ? ` · ${t.site.freeAbove} ${rs(zone.freeAbove ?? s.freeDeliveryAbove)}` : ""}
                         {zone.etaNote ? ` · ${t.site.lunchWindow}: ${zone.etaNote}` : ""}
                       </span>
+                      {pausedNote.get(zone.id) && <span className="mt-1 block text-sm font-semibold text-sindoor-dark">{pausedNote.get(zone.id)}</span>}
                     </li>
                   ))}
                 </ul>
@@ -91,6 +98,11 @@ export default async function CoveragePage({ searchParams }: { searchParams: Pro
                 <MapPin className="h-4 w-4 text-sindoor" aria-hidden /> {z.name}
               </h3>
               <p className="mt-2 text-sm leading-relaxed text-ink-soft">{z.areas.join(" · ")}</p>
+              {pausedNote.get(z.id) && (
+                <p role="status" className="mt-3 rounded-lg border border-sindoor/30 bg-sindoor-light px-3 py-2 text-sm text-sindoor-dark">
+                  {pausedNote.get(z.id)}
+                </p>
+              )}
               <dl className="mt-4 grid grid-cols-2 gap-2 border-t border-ink/10 pt-3 text-sm">
                 <div>
                   <dt className="text-xs text-ink-mute">{t.site.fee}</dt>

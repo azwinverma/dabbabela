@@ -35,7 +35,9 @@ describe("foundation backfill", () => {
     expect(Object.values(again).every((n) => n === 0)).toBe(true);
     expect(await db.staffRole.count({ where: { key: { in: ["kitchen-manager", "delivery-manager"] } } })).toBe(2);
     expect(await db.expenseCategory.count()).toBe(10);
-    const plans = await db.mealPlan.findMany({ include: { prices: true } });
+    // Only the seeded plans: other suites add plans with scheduled price history of their own.
+    const plans = await db.mealPlan.findMany({ where: { slug: { in: ["hapta", "do-hapta", "pura-mahina", "team-plan"] } }, include: { prices: true } });
+    expect(plans.length).toBeGreaterThan(0);
     for (const p of plans) {
       expect(p.prices).toHaveLength(1);
       expect(p.prices[0]!.pricePerMeal).toBe(p.pricePerMeal);

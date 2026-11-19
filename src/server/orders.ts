@@ -1,4 +1,4 @@
-import type { DeliveryZone, Diet, OrderSource, OrderStatus, PaymentMethod, Prisma } from "@prisma/client";
+import type { Company, DeliveryZone, Diet, OrderSource, OrderStatus, PaymentMethod, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getSettings, type SiteSettings } from "@/lib/settings";
 import { addDays, dateOnly, isoDate, ktmNow, todayKTM, weekdayOf } from "@/lib/dates";
@@ -6,15 +6,16 @@ import { randomCode } from "@/lib/utils";
 import { rs } from "@/lib/money";
 import { log } from "@/lib/logger";
 import { activeCompany, type CurrentUser } from "@/lib/auth";
-import { changeWindowOpen, dateProblem, getClosures, getLockedDates } from "./calendar";
+import { changeWindowOpen, dateProblem, getClosures, getLockedDates, kitchenGateProblems } from "./calendar";
 import { boxComponents, boxFacts, combineDiet, getOffersForDates, type BoxFull } from "./menu";
-import { negotiatedUnitPrice, priceDays, type CompanySpec, type TaxSpec } from "./pricing";
+import { companyShareFor, negotiatedUnitPrice, priceDays, type CompanySpec, type TaxSpec, type ZoneSpec } from "./pricing";
 import { checkCoupon, redeemCoupon } from "./coupons";
 import { assertDayCapacity, CapacityError, lockKitchenDay } from "./capacity";
 import { addCredit, spendCredit, walletBalance } from "./ledger";
 import { assertTransition, canTransition, EDITABLE_STATUSES, LIVE_STATUSES } from "./transitions";
 import { availableMethods } from "./payments/methods";
-import { companySpecFor, companyOutstanding } from "./corporate";
+import { companyMenuBoxIds, companyOutstanding, companySpecFor, isEligibleOn } from "./corporate";
+import { zoneFee, zoneSlots, type LatLng, type ZoneFeeQuote } from "./coverage";
 import { notify } from "./notify";
 import { priceCustomBox, type CustomPick } from "./builder";
 
@@ -49,6 +50,62 @@ export async function taxRuleFor(date: string, client: Tx | typeof db = db): Pro
 export async function defaultKitchenId() {
   const k = await db.kitchen.findFirst({ where: { isActive: true }, orderBy: { createdAt: "asc" }, select: { id: true } });
   return k?.id ?? null;
+}
+
+// ───────────── delivery zone fee + windows (WP-13) ─────────────
+
+type ZoneRow = Pick<DeliveryZone, "fee" | "freeAbove" | "minOrder" | "kitchenId"> & { distanceRules?: unknown; name?: string };
+
+/**
+ * Pricing spec for a zone and an optional address pin: distance band fee when the zone has bands and the address has
+ * a pin, else the flat `zone.fee`. `beyond` = the pin is past the zone's last band (outside the delivery radius).
+ */
+export function zoneSpecFor(zone: ZoneRow | null | undefined, pin?: LatLng): { spec: ZoneSpec; quote: ZoneFeeQuote | null; problem: string | null } {
+  if (!zone) return { spec: null, quote: null, problem: null };
+  const quote = zoneFee(zone, pin);
+  const problem = quote.beyond ? `That address is about ${quote.distanceKm} km away — beyond ${zone.name ? `the ${zone.name} zone's` : "our"} delivery radius` : null;
+  return { spec: { fee: quote.fee, freeAbove: zone.freeAbove, minOrder: zone.minOrder }, quote, problem };
+}
+
+/** An active delivery window of `kitchenId` that serves `zone` (its `slotIds` time windows), or null. */
+export async function zoneSlot(zone: ZoneRow | null | undefined, slotId: string, kitchenId: string) {
+  const slot = await db.deliverySlot.findFirst({ where: { id: slotId, kitchenId, isActive: true } });
+  if (!slot) return null;
+  if (zone && zone.kitchenId === kitchenId && !zoneSlots(zone, [slot]).length) return null;
+  return slot;
+}
+
+// ───────────── company split per day (WP-12) ─────────────
+
+/**
+ * Company spec for a member's cart plus the days the company pays for. The allowance/budget is worked out over the
+ * eligible days only, so one ineligible day (mealEligible / eligibleDays) doesn't zero the share for the others.
+ * `eligible` null = no per-day restriction (not a paying member).
+ */
+export async function companySplitFor(userId: string, company: Company, dates: string[]): Promise<{ spec: CompanySpec; eligible: Set<string> | null }> {
+  const member = company.billingMode !== "EMPLOYEE_PAID" ? await db.companyMember.findUnique({ where: { userId } }) : null;
+  if (!member || member.companyId !== company.id) return { spec: await companySpecFor(userId, company, dates), eligible: null };
+  const eligible = dates.filter((d) => isEligibleOn(member, d));
+  return { spec: await companySpecFor(userId, company, eligible.length ? eligible : dates), eligible: new Set(eligible) };
+}
+
+/** Re-split priced days: ineligible days are the eater's; eligible days share the allowance in date order. */
+export function applyDayCompanyShares<T extends ReturnType<typeof priceDays>>(priced: T, spec: CompanySpec, eligible: Set<string> | null): T {
+  if (!spec || !eligible) return priced;
+  let allowance = spec.allowanceRemaining;
+  const days = priced.days.map((d) => {
+    const companyShare = eligible.has(d.date) ? companyShareFor(d.total, d.meals, { ...spec, allowanceRemaining: allowance }) : 0;
+    if (allowance != null) allowance -= companyShare;
+    return { ...d, companyShare, customerShare: d.total - companyShare };
+  });
+  const companyShare = days.reduce((a, d) => a + d.companyShare, 0);
+  return { ...priced, days, companyShare, customerShare: priced.total - companyShare };
+}
+
+/** Suspended or deleted accounts can't place orders, whoever places them (customer, staff, team admin). */
+export async function assertAccountCanOrder(userId: string) {
+  const u = await db.user.findUnique({ where: { id: userId }, select: { isActive: true, deletedAt: true } });
+  if (!u || !u.isActive || u.deletedAt) throw new OrderError("This account is suspended — contact us to sort it out");
 }
 
 // ───────────── cart quote ─────────────
@@ -167,12 +224,16 @@ export async function quoteCart(
   if (!lines.length) return { ...base, error: "Your dabba list is empty" };
   if (!kitchenId) return { ...base, error: "No kitchen is open yet" };
   if (address && !address.zoneId) base.addressProblem = `We don't deliver to ${address.area} yet. Pick another address, or ask us to add your area.`;
+  const zoneQuote = zoneSpecFor(zone, address ? { lat: address.lat, lng: address.lng } : null);
+  if (zoneQuote.problem) base.addressProblem = `${zoneQuote.problem}. Pick another address, or ask us to add your area.`;
 
   const dates = [...new Set(lines.map((l) => l.date))].sort();
-  const [offers, closures, locked] = await Promise.all([
+  const allowedBoxes = company && company.billingMode !== "EMPLOYEE_PAID" ? await companyMenuBoxIds(company.id) : null;
+  const [offers, closures, locked, gated] = await Promise.all([
     getOffersForDates(dates, kitchenId),
     getClosures(dates[0], dates[dates.length - 1], kitchenId),
     getLockedDates(dates[0], dates[dates.length - 1], kitchenId),
+    kitchenGateProblems(dates[0], dates[dates.length - 1], kitchenId),
   ]);
   const customIds = lines.filter((l) => l.kind === "custom").map((l) => l.id);
   const customs = user && customIds.length ? await db.customBox.findMany({ where: { id: { in: customIds }, userId: user.id } }) : [];
@@ -184,7 +245,7 @@ export async function quoteCart(
   for (const l of lines) {
     const offer = offers.get(l.date);
     const cutoff = dayCutoff(offer?.cutoff, company?.cutoffOverride);
-    const problem = dateProblem(l.date, settings, closures, { cutoff }) ?? (locked.has(l.date) ? "Orders for this day are closed — the kitchen has locked it" : null);
+    const problem = dateProblem(l.date, settings, closures, { cutoff }) ?? gated.get(l.date) ?? (locked.has(l.date) ? "Orders for this day are closed — the kitchen has locked it" : null);
     if (l.kind === "box") {
       const item = offer?.items.find((i) => i.box.id === l.id);
       if (!offer || offer.closed || !item) {
@@ -194,6 +255,7 @@ export async function quoteCart(
         continue;
       }
       const box = item.box as BoxFull;
+      const offMenu = allowedBoxes && !allowedBoxes.has(box.id) ? `${box.name} isn't on ${company!.name}'s lunch menu` : null;
       const subs = box.substitutions.filter((s) => l.subs?.includes(s.id));
       const facts = boxFacts(box);
       const subDiet = combineDiet([facts.diet, ...subs.map((s) => s.toItem.diet)]);
@@ -214,7 +276,7 @@ export async function quoteCart(
         boxId: box.id,
         capacity: item.capacity,
         dishes: [],
-        problem: problem ?? (item.soldOut ? `${box.name} is sold out that day` : null),
+        problem: problem ?? offMenu ?? (item.soldOut ? `${box.name} is sold out that day` : null),
         warning: hit.length ? `Contains ${hit.join(", ").toLowerCase()} — on your avoid list` : null,
       });
     } else {
@@ -246,10 +308,12 @@ export async function quoteCart(
   const priceable = out.filter((l) => l.unitPrice > 0);
   const firstDate = dates[0];
   const tax = await taxRuleFor(firstDate);
-  const spec: CompanySpec = user && company ? await companySpecFor(user.id, company, dates) : null;
+  const split = user && company ? await companySplitFor(user.id, company, [...new Set(priceable.map((l) => l.date))].sort()) : { spec: null, eligible: null };
+  const spec: CompanySpec = split.spec;
+  const zoneSpec = zoneQuote.spec;
 
   // Coupon base = subtotal after company discount.
-  const pre = priceDays({ lines: priceable, zone: zone && { fee: zone.fee, freeAbove: zone.freeAbove, minOrder: zone.minOrder }, company: spec, tax, globalFreeAbove: settings.freeDeliveryAbove });
+  const pre = applyDayCompanyShares(priceDays({ lines: priceable, zone: zoneSpec, company: spec, tax, globalFreeAbove: settings.freeDeliveryAbove }), spec, split.eligible);
   let coupon: { type: "PERCENT" | "FLAT"; value: number; maxDiscount: number | null; minSubtotal: number } | null = null;
   let couponCode: string | null = null;
   let couponId: string | null = null;
@@ -265,10 +329,11 @@ export async function quoteCart(
       } else couponError = r.error;
     }
   }
-  const priced = coupon ? priceDays({ lines: priceable, zone: zone && { fee: zone.fee, freeAbove: zone.freeAbove, minOrder: zone.minOrder }, company: spec, tax, globalFreeAbove: settings.freeDeliveryAbove, coupon }) : pre;
+  const priced = coupon ? applyDayCompanyShares(priceDays({ lines: priceable, zone: zoneSpec, company: spec, tax, globalFreeAbove: settings.freeDeliveryAbove, coupon }), spec, split.eligible) : pre;
 
   const lineProblem = out.find((l) => l.problem);
   let error: string | null = lineProblem ? `${lineProblem.name} (${lineProblem.date}): ${lineProblem.problem}` : null;
+  if (!error && zoneQuote.problem) error = zoneQuote.problem;
   const minOrder = zone?.minOrder || settings.minOrderAmount;
   const smallDay = minOrder ? priced.days.find((d) => d.subtotal < minOrder) : null;
   if (!error && smallDay) error = `Minimum order is ${rs(minOrder)} per delivery day (${smallDay.date})`;
@@ -400,6 +465,7 @@ export async function placeCartOrder(
   }
   const settings = await getSettings();
   if (settings.maintenanceMode) throw new OrderError(settings.maintenanceMessage);
+  await assertAccountCanOrder(user.id);
   const address = user.addresses.find((a) => a.id === input.addressId);
   if (!address) throw new OrderError("Choose a delivery address");
   if (!address.zoneId || !address.zone?.isActive) throw new OrderError(`We don't deliver to ${address.area} yet. Choose another address or ask us to add your area.`);
@@ -409,7 +475,7 @@ export async function placeCartOrder(
   if (input.couponCode && q.couponError) throw new OrderError(q.couponError);
   const kitchenId = q.kitchenId!;
 
-  const slot = input.slotId ? await db.deliverySlot.findFirst({ where: { id: input.slotId, kitchenId, isActive: true } }) : null;
+  const slot = input.slotId ? await zoneSlot(address.zone, input.slotId, kitchenId) : null;
   if (input.slotId && !slot) throw new OrderError("That delivery window isn't available for your area");
 
   const company = activeCompany(user);

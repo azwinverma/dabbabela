@@ -12,8 +12,9 @@ import { CURRENT_USER_INCLUDE, toCurrentUser } from "@/lib/user-context";
 import { csv, money } from "./reports";
 import { changeWindowOpen } from "./calendar";
 import { combineDiet, getOffersForDates } from "./menu";
-import { priceDays, type CompanySpec } from "./pricing";
-import { companySpecFor } from "./corporate";
+import { companyShareFor, priceDays, type CompanySpec } from "./pricing";
+import { companyMenuBoxIds, companySpecFor, departmentBudgetRemaining } from "./corporate";
+import { assertCustomerCanOrder, CrmError } from "./crm";
 import { assertDayCapacity, CapacityError, lockKitchenDay, slotBooked } from "./capacity";
 import { addCredit, spendCredit, walletBalance } from "./ledger";
 import { EDITABLE_STATUSES } from "./transitions";
@@ -26,8 +27,20 @@ import {
   quoteCart,
   staffPaymentMethods,
   taxRuleFor,
+  zoneSlot,
+  zoneSpecFor,
   type CartLine,
 } from "./orders";
+
+/** Suspended / deleted customers can't be ordered for by staff either (WP-11). */
+async function assertCanOrderFor(userId: string) {
+  try {
+    await assertCustomerCanOrder(userId);
+  } catch (e) {
+    if (e instanceof CrmError) throw new OrderAdminError(e.message);
+    throw e;
+  }
+}
 
 /**
  * Staff order management (WP-03): manual / phone orders, corporate bulk orders, line edits and substitutions
@@ -201,6 +214,7 @@ export async function createManualOrder(actor: Actor, input: ManualOrderInput) {
     if (!input.newCustomer) throw new OrderAdminError("Pick a customer or enter a new one");
     customerId = (await findOrCreateCustomer(actor, input.newCustomer)).id;
   }
+  await assertCanOrderFor(customerId);
   let customer = await loadCustomer(customerId);
 
   let addressId = input.addressId ?? null;
@@ -294,6 +308,11 @@ export type BulkOrderInput = {
   memberMethod?: "CASH" | "WALLET";
   idempotencyKey: string;
   notes?: string | null;
+  /**
+   * When the company share would go beyond what's left of the member's department budget: refuse the member
+   * (default) or order with the company share capped at the budget and the rest paid by the employee.
+   */
+  overBudget?: "refuse" | "employee-pays";
 };
 
 export type BulkResult = { memberId: string; name: string; ok: boolean; message: string; orderIds: string[]; companyShare: number; customerShare: number; replayed: boolean };
@@ -333,6 +352,9 @@ export async function createCorporateBulkOrder(actor: Actor, input: BulkOrderInp
   if (byMember.size > 300) throw new OrderAdminError("At most 300 employees per bulk order");
   const members = await db.companyMember.findMany({ where: { id: { in: [...byMember.keys()] }, companyId: company.id }, include: { user: { select: { name: true } } } });
   const day = weekdayOf(input.date);
+  const paying = company.billingMode !== "EMPLOYEE_PAID";
+  const allowed = paying ? await companyMenuBoxIds(company.id) : null;
+  const ym = input.date.slice(0, 7);
 
   const results: BulkResult[] = [];
   for (const [memberId, boxes] of byMember) {
@@ -347,14 +369,36 @@ export async function createCorporateBulkOrder(actor: Actor, input: BulkOrderInp
       continue;
     }
     try {
+      await assertCanOrderFor(m.userId);
+      const offMenu = allowed ? [...boxes.keys()].filter((b) => !allowed.has(b)) : [];
+      if (offMenu.length) throw new OrderAdminError(`Not on ${company.name}'s lunch menu`);
       const user = await loadCustomer(m.userId);
       const addressId = await memberAddressId(user);
       if (!addressId) throw new OrderAdminError("No office location or address on file");
       const fresh = await loadCustomer(m.userId);
       const zoneKitchen = fresh.addresses.find((a) => a.id === addressId)?.zone?.kitchenId;
       if (zoneKitchen) assertScope(actor, zoneKitchen);
+      const lines: CartLine[] = [...boxes].map(([boxId, qty]) => ({ kind: "box", id: boxId, date: input.date, qty }));
+      // Same employee + same dabbas under the same key = the same order, even across page reloads.
+      const idempotencyKey = `staff-bulk:${key}:${m.id}:${[...boxes].sort(([x], [y]) => x.localeCompare(y)).map(([b, q]) => `${b}x${q}`).join(",")}`.slice(0, 190);
+      let warning = "";
+      if (paying && !(await db.payment.findUnique({ where: { idempotencyKey }, select: { id: true } }))) {
+        // Department budget, as in team orders: refuse (default) or let the employee pay what the budget can't cover.
+        const left = await departmentBudgetRemaining(company.id, m.department, ym);
+        if (left != null) {
+          const q = await quoteCart(fresh, { lines, addressId });
+          if (!q.ok) throw new OrderAdminError(q.error ?? "Can't order those dabbas");
+          const meals = lines.reduce((a, l) => a + l.qty, 0);
+          const wanted = companyShareFor(q.total, meals, await companySpecFor(m.userId, company, [input.date], { ignoreBudget: true }));
+          if (wanted > left) {
+            const msg = `${m.department} budget for ${ym} has ${rs(left)} left; this lunch needs ${rs(wanted)} from the company`;
+            if (input.overBudget !== "employee-pays") throw new OrderAdminError(`Over budget — ${msg}`);
+            warning = ` (${msg}; ${rs(wanted - left)} paid by the employee)`;
+          }
+        }
+      }
       const r = await placeCartOrder(fresh, {
-        lines: [...boxes].map(([boxId, qty]) => ({ kind: "box", id: boxId, date: input.date, qty })),
+        lines,
         addressId,
         slotId: input.slotId ?? null,
         method: input.memberMethod === "WALLET" ? "WALLET" : "CASH",
@@ -362,14 +406,13 @@ export async function createCorporateBulkOrder(actor: Actor, input: BulkOrderInp
         source: "CORPORATE",
         placedById: actor.id,
         staffMethods: true,
-        // Same employee + same dabbas under the same key = the same order, even across page reloads.
-        idempotencyKey: `staff-bulk:${key}:${m.id}:${[...boxes].sort(([x], [y]) => x.localeCompare(y)).map(([b, q]) => `${b}x${q}`).join(",")}`.slice(0, 190),
+        idempotencyKey,
       });
       results.push({
         ...base,
         ok: true,
         replayed: r.replayed,
-        message: r.replayed ? "Already ordered" : `Order ${r.orders.map((o) => o.number).join(", ")}`,
+        message: r.replayed ? "Already ordered" : `Order ${r.orders.map((o) => o.number).join(", ")}${warning}`,
         orderIds: r.orders.map((o) => o.id),
         companyShare: r.orders.reduce((a, o) => a + o.companyShare, 0),
         customerShare: r.orders.reduce((a, o) => a + o.customerShare, 0),
@@ -455,7 +498,8 @@ export async function priceDelta(order: EditableOrder, before: Pick<ItemState, "
   const date = isoDate(order.deliveryDate);
   const settings = await getSettings();
   const [tax, company] = await Promise.all([taxRuleFor(date), companySpecForOrder(order)]);
-  const zone = order.zone ? { fee: order.zone.fee, freeAbove: order.zone.freeAbove, minOrder: order.zone.minOrder } : null;
+  // Same fee basis as checkout: distance band from the order's pin snapshot, else the flat zone fee.
+  const zone = zoneSpecFor(order.zone, { lat: order.lat, lng: order.lng }).spec;
   const price = (items: typeof before) =>
     priceDays({ lines: items.filter((i) => i.quantity > 0).map((i) => ({ date, qty: i.quantity, unitPrice: i.unitPrice, unitCost: i.unitCost, boxId: i.boxId })), zone, company, tax, globalFreeAbove: settings.freeDeliveryAbove });
   const a = price(before);
@@ -827,8 +871,8 @@ export async function reassignDelivery(actor: Actor, orderId: string, input: { v
 
   if (input.slotId !== undefined && input.slotId !== order.slotId) {
     if (input.slotId) {
-      const slot = await db.deliverySlot.findFirst({ where: { id: input.slotId, kitchenId: order.kitchenId, isActive: true } });
-      if (!slot) throw new OrderAdminError("That delivery window isn't available at this order's kitchen");
+      const slot = await zoneSlot(order.zone, input.slotId, order.kitchenId);
+      if (!slot) throw new OrderAdminError("That delivery window isn't available for this order's kitchen and zone");
       const n = await slotBooked(slot.id, date);
       if (n + 1 > slot.capacity) throw new OrderAdminError(`The ${slot.label} window is full on ${date}`);
       Object.assign(data, { slotId: slot.id, slotLabel: slot.label });
@@ -845,6 +889,8 @@ export async function reassignDelivery(actor: Actor, orderId: string, input: { v
     if (!a) throw new OrderAdminError("That address isn't one of the customer's");
     if (!a.zone || !a.zone.isActive) throw new OrderAdminError(`We don't deliver to ${a.area}`);
     if (a.zone.kitchenId && a.zone.kitchenId !== order.kitchenId) throw new OrderAdminError("That address is served by another kitchen — reassign the kitchen first");
+    const far = zoneSpecFor(a.zone, { lat: a.lat, lng: a.lng }).problem;
+    if (far) throw new OrderAdminError(far);
     const snap = addressSnapshot(a);
     Object.assign(data, snap);
     before.address = { addressId: order.addressId, area: order.area, addressLine: order.addressLine, zoneId: order.zoneId };

@@ -2,6 +2,7 @@ import type { Weekday } from "@prisma/client";
 import { db } from "@/lib/db";
 import type { SiteSettings } from "@/lib/settings";
 import { addDays, dateOnly, isoDate, isValidISODate, ktmNow, weekdayOf } from "@/lib/dates";
+import { kitchenOrderProblem } from "./capacity";
 
 export type Closures = Map<string, string>;
 
@@ -44,14 +45,43 @@ export async function changeWindowOpen(date: string, kitchenId: string, settings
   return !lock;
 }
 
-/** Days a kitchen has already locked (no new orders). Without a kitchen, days locked by every active kitchen. */
+/**
+ * Kitchen-status problems per date in [from, to] (WP-07 `kitchenGate`: PAUSED/CLOSED/inactive kitchen, weekday outside
+ * `workingDays`). One kitchen → its problems; no kitchen → per active kitchen, keyed by kitchen id.
+ */
+export async function kitchenGateProblems(from: string, to: string, kitchenId: string): Promise<Map<string, string>> {
+  const k = await db.kitchen.findUnique({ where: { id: kitchenId }, select: { name: true, isActive: true, status: true, statusNote: true, workingDays: true } });
+  const out = new Map<string, string>();
+  if (!k || !isValidISODate(from) || !isValidISODate(to)) return out;
+  for (let d = from; d <= to; d = addDays(d, 1)) {
+    const p = kitchenOrderProblem(k, d);
+    if (p) out.set(d, p);
+  }
+  return out;
+}
+
+/**
+ * Days a kitchen can't take new orders: locked days plus days its status gate refuses (paused/closed kitchen,
+ * non-working weekday). Without a kitchen, days blocked at every active kitchen.
+ */
 export async function getLockedDates(from: string, to: string, kitchenId?: string | null) {
   const locks = await db.dayLock.findMany({ where: { date: { gte: dateOnly(from), lte: dateOnly(to) }, ...(kitchenId ? { kitchenId } : {}) }, select: { date: true, kitchenId: true } });
-  if (kitchenId) return new Set(locks.map((l) => isoDate(l.date)));
-  const kitchens = await db.kitchen.count({ where: { isActive: true } });
-  const byDate = new Map<string, number>();
-  for (const l of locks) byDate.set(isoDate(l.date), (byDate.get(isoDate(l.date)) ?? 0) + 1);
-  return new Set([...byDate].filter(([, n]) => n >= Math.max(1, kitchens)).map(([d]) => d));
+  if (kitchenId) {
+    const out = new Set(locks.map((l) => isoDate(l.date)));
+    for (const d of (await kitchenGateProblems(from, to, kitchenId)).keys()) out.add(d);
+    return out;
+  }
+  const kitchens = await db.kitchen.findMany({ where: { isActive: true }, select: { id: true, name: true, isActive: true, status: true, statusNote: true, workingDays: true } });
+  const blocked = new Map<string, Set<string>>();
+  const add = (d: string, k: string) => blocked.set(d, (blocked.get(d) ?? new Set()).add(k));
+  for (const l of locks) add(isoDate(l.date), l.kitchenId);
+  if (isValidISODate(from) && isValidISODate(to)) {
+    for (let d = from; d <= to; d = addDays(d, 1)) for (const k of kitchens) if (kitchenOrderProblem(k, d)) add(d, k.id);
+  }
+  const active = new Set(kitchens.map((k) => k.id));
+  return new Set(
+    [...blocked].filter(([, ks]) => (active.size ? [...active].every((k) => ks.has(k)) : ks.size >= 1)).map(([d]) => d),
+  );
 }
 
 /** The next N dates customers can order for (closures and locked days excluded). */

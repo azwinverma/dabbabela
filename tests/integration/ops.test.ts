@@ -28,7 +28,7 @@ describe("kitchen maths", () => {
 
   it("forecasts portions per dish from order snapshots and turns them into ingredients", async () => {
     const date = serviceDay(11, 0);
-    const kitchen = await db.kitchen.findFirstOrThrow();
+    const kitchen = await db.kitchen.findFirstOrThrow({ where: { code: "KTM-1" } });
     const before = await forecast(kitchen.id, date, 10); // other test files may share this day
     const { order: o, box } = await order(date, 3);
     const f = await forecast(o.kitchenId, date, 10);
@@ -73,7 +73,7 @@ describe("production batches", () => {
 describe("inventory", () => {
   it("receives a purchase order, posts stock and updates cost; can't over-receive", async () => {
     const owner = await db.user.findUniqueOrThrow({ where: { email: "owner@test.local" } });
-    const kitchen = await db.kitchen.findFirstOrThrow();
+    const kitchen = await db.kitchen.findFirstOrThrow({ where: { code: "KTM-1" } });
     const supplier = await db.supplier.findFirstOrThrow();
     const ing = await db.ingredient.findFirstOrThrow({ where: { name: "Potato" } });
     const before = (await stockOnHand(kitchen.id, [ing.id])).get(ing.id) ?? 0;
@@ -92,7 +92,7 @@ describe("inventory", () => {
 
   it("requires a reason for adjustments and signs movements by type", async () => {
     const owner = await db.user.findUniqueOrThrow({ where: { email: "owner@test.local" } });
-    const kitchen = await db.kitchen.findFirstOrThrow();
+    const kitchen = await db.kitchen.findFirstOrThrow({ where: { code: "KTM-1" } });
     const ing = await db.ingredient.findFirstOrThrow({ where: { name: "Onion" } });
     await expect(recordMovement({ ingredientId: ing.id, kitchenId: kitchen.id, type: "ADJUSTMENT", quantity: -1, actorId: owner.id })).rejects.toThrow(/reason/);
     const w = await recordMovement({ ingredientId: ing.id, kitchenId: kitchen.id, type: "WASTE", quantity: 2, note: "Rotten sack", actorId: owner.id });

@@ -13,9 +13,24 @@ import { checkCoupon, redeemCoupon } from "./coupons";
 import { assertDayCapacity, CapacityError, lockKitchenDay } from "./capacity";
 import { addCredit, spendCredit, walletBalance } from "./ledger";
 import { availableMethods } from "./payments/methods";
-import { companySpecFor } from "./corporate";
 import { priceCustomBox, type CustomPick } from "./builder";
-import { bumpPaymentRefund, handoffOtp, initialState, orderNumber, OrderError, paymentRef, setOrderStatus, taxRuleFor } from "./orders";
+import {
+  applyDayCompanyShares,
+  assertAccountCanOrder,
+  bumpPaymentRefund,
+  cleanAttribution,
+  companySplitFor,
+  handoffOtp,
+  initialState,
+  orderNumber,
+  OrderError,
+  paymentRef,
+  setOrderStatus,
+  taxRuleFor,
+  zoneSlot,
+  zoneSpecFor,
+  type OrderAttribution,
+} from "./orders";
 import { LIVE_STATUSES } from "./transitions";
 import { notify } from "./notify";
 
@@ -261,11 +276,14 @@ export async function quoteSubscription(user: CurrentUser | null, input: PlanInp
   const meals = await resolveMeals(dates, input, plan, user?.id ?? null, kitchenId, offers);
   const blocking = meals.find((m) => m.price === 0);
 
-  const spec: CompanySpec = user && company ? await companySpecFor(user.id, company, dates) : null;
+  const split = user && company ? await companySplitFor(user.id, company, dates) : { spec: null, eligible: null };
+  const spec: CompanySpec = split.spec;
   const tax = await taxRuleFor(dates[0]);
-  const zoneSpec = plan.includesDelivery || !zone ? null : { fee: zone.fee, freeAbove: null, minOrder: 0 };
+  // Distance band fee when the address has a pin (WP-13); a pin past the last band is outside the delivery radius.
+  const zq = zoneSpecFor(zone, address ? { lat: address.lat, lng: address.lng } : null);
+  const zoneSpec = plan.includesDelivery || !zq.spec ? null : { fee: zq.spec.fee, freeAbove: null, minOrder: 0 };
   const lines = meals.filter((m) => m.price > 0).map((m) => ({ date: m.date, unitPrice: m.price, unitCost: m.cost, qty: 1 }));
-  const pre = priceDays({ lines, zone: zoneSpec, company: spec, tax, globalFreeAbove: 0 });
+  const pre = applyDayCompanyShares(priceDays({ lines, zone: zoneSpec, company: spec, tax, globalFreeAbove: 0 }), spec, split.eligible);
   let couponId: string | null = null;
   let couponCode: string | null = null;
   let couponError: string | null = null;
@@ -275,7 +293,7 @@ export async function quoteSubscription(user: CurrentUser | null, input: PlanInp
     if (r.ok) {
       couponId = r.coupon.id;
       couponCode = r.coupon.code;
-      priced = priceDays({ lines, zone: zoneSpec, company: spec, tax, globalFreeAbove: 0, coupon: r.coupon });
+      priced = applyDayCompanyShares(priceDays({ lines, zone: zoneSpec, company: spec, tax, globalFreeAbove: 0, coupon: r.coupon }), spec, split.eligible);
     } else couponError = r.error;
   }
   const regular = meals.reduce((a, m) => a + Math.max(plan.compareAtPrice ?? plan.pricePerMeal, m.price), 0);
@@ -290,8 +308,8 @@ export async function quoteSubscription(user: CurrentUser | null, input: PlanInp
     meals,
     kitchenId,
     zone,
-    addressProblem: address && !address.zoneId ? `We don't deliver to ${address.area} yet` : null,
-    error: blocking ? `${blocking.date}: ${blocking.problem}` : null,
+    addressProblem: address && !address.zoneId ? `We don't deliver to ${address.area} yet` : zq.problem,
+    error: blocking ? `${blocking.date}: ${blocking.problem}` : zq.problem,
     mealsTotal: meals.length,
     perMealEffective: meals.length ? Math.round(priced.total / meals.length) : 0,
     savings: Math.max(0, regular - priced.subtotal + priced.discount),
@@ -306,7 +324,16 @@ export async function quoteSubscription(user: CurrentUser | null, input: PlanInp
 
 export async function createSubscription(
   user: CurrentUser,
-  input: PlanInput & { addressId: string; slotId?: string | null; method: PaymentMethod; notes?: string | null; idempotencyKey?: string | null; renewedFromId?: string | null },
+  input: PlanInput & {
+    addressId: string;
+    slotId?: string | null;
+    method: PaymentMethod;
+    notes?: string | null;
+    idempotencyKey?: string | null;
+    renewedFromId?: string | null;
+    /** Marketing attribution (WP-11): only the campaign id is stored (`Subscription.campaignId`), when the Campaign exists. */
+    attribution?: OrderAttribution | null;
+  },
 ) {
   if (input.idempotencyKey) {
     const existing = await db.payment.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: { subscription: true } });
@@ -317,10 +344,11 @@ export async function createSubscription(
   const address = user.addresses.find((a) => a.id === input.addressId);
   if (!address) throw new OrderError("Choose a delivery address");
   if (!address.zoneId) throw new OrderError(`We don't deliver to ${address.area} yet`);
+  await assertAccountCanOrder(user.id);
   const q = await quoteSubscription(user, input);
   if (q.error) throw new OrderError(q.error);
   if (input.couponCode && q.couponError) throw new OrderError(q.couponError);
-  const slot = input.slotId ? await db.deliverySlot.findFirst({ where: { id: input.slotId, kitchenId: q.kitchenId, isActive: true } }) : null;
+  const slot = input.slotId ? await zoneSlot(address.zone, input.slotId, q.kitchenId) : null;
   if (input.slotId && !slot) throw new OrderError("That delivery window isn't available for your area");
 
   const company = activeCompany(user);
@@ -329,6 +357,7 @@ export async function createSubscription(
   if (q.customerShare > 0 && !methods.includes(method)) throw new OrderError("That payment method isn't available right now");
   if (method === "WALLET" && (await walletBalance(user.id)) < q.customerShare) throw new OrderError("Not enough credit — choose another payment method");
   const state = initialState(method, q.customerShare, q.companyShare);
+  const { campaignId } = await cleanAttribution(input.attribution);
 
   try {
     return await db.$transaction(
@@ -369,6 +398,7 @@ export async function createSubscription(
             pricePerMeal: q.plan.pricePerMeal,
             priceId: q.price.id,
             renewedFromId: input.renewedFromId ?? null,
+            campaignId,
             subtotal: q.subtotal,
             deliveryFee: q.deliveryFee,
             discount: q.discount,
@@ -915,7 +945,8 @@ export async function quoteAddMeal(user: CurrentUser, subId: string, input: { da
   const f = boxFacts(pick.box);
   const unitPrice = planMealPrice(sub, pick.price);
   const sameDay = await db.order.count({ where: { subscriptionId: sub.id, deliveryDate: dateOnly(input.date), status: { in: LIVE_STATUSES } } });
-  const zoneSpec = sub.plan.includesDelivery || sameDay > 0 || !zone ? null : { fee: zone.fee, freeAbove: null, minOrder: 0 };
+  const zq = zoneSpecFor(zone, { lat: address.lat, lng: address.lng });
+  const zoneSpec = sub.plan.includesDelivery || sameDay > 0 || !zq.spec ? null : { fee: zq.spec.fee, freeAbove: null, minOrder: 0 };
   const tax = await taxRuleFor(input.date);
   const priced = priceDays({ lines: [{ date: input.date, unitPrice, unitCost: f.cost, qty: 1 }], zone: zoneSpec, company: null, tax, globalFreeAbove: 0 });
   return { sub, kitchenId, address, pick, facts: f, unitPrice, tax, priced, day: priced.days[0] };
@@ -1049,7 +1080,11 @@ export async function quoteRenewal(user: CurrentUser, subId: string, weeks?: num
  * Payment goes through the normal flow (a PENDING payment → /pay/…, or wallet/cash as chosen) — never auto-charged.
  * Idempotent: renewing a plan that already has a (non-cancelled) renewal returns that renewal.
  */
-export async function renewSubscription(user: CurrentUser, subId: string, input: { method: PaymentMethod; idempotencyKey?: string | null; weeks?: number | null; slotId?: string | null }) {
+export async function renewSubscription(
+  user: CurrentUser,
+  subId: string,
+  input: { method: PaymentMethod; idempotencyKey?: string | null; weeks?: number | null; slotId?: string | null; attribution?: OrderAttribution | null },
+) {
   const r = await renewalInput(user, subId, input.weeks);
   const replay = async (id: string) => {
     const subscription = await db.subscription.findUniqueOrThrow({ where: { id } });
@@ -1058,7 +1093,7 @@ export async function renewSubscription(user: CurrentUser, subId: string, input:
   };
   if (r.existing) return replay(r.existing.id);
   try {
-    const res = await createSubscription(user, { ...r.input, addressId: r.address.id, slotId: input.slotId ?? r.sub.slotId, method: input.method, idempotencyKey: input.idempotencyKey ?? null, renewedFromId: r.sub.id });
+    const res = await createSubscription(user, { ...r.input, addressId: r.address.id, slotId: input.slotId ?? r.sub.slotId, method: input.method, idempotencyKey: input.idempotencyKey ?? null, renewedFromId: r.sub.id, attribution: input.attribution ?? null });
     if (!res.replayed) await db.subscriptionChange.create({ data: { subscriptionId: r.sub.id, type: "RENEW", detail: `Renewed as ${res.subscription.reference}`, amount: res.subscription.total, actorId: user.id } });
     return res;
   } catch (e) {

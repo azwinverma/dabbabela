@@ -43,7 +43,7 @@ export default async function Invoices({ searchParams }: { searchParams: Promise
       <div className="grid gap-4 lg:grid-cols-3">
         <Panel title="Create an invoice" className="lg:col-span-2">
           <GenerateForm companies={companies} from={prev.start} to={prev.end} />
-          <p className="mt-2 text-xs text-ink-mute">Includes every company-paid meal in the period that is due (today or earlier), not cancelled or skipped, and not already on an invoice. You get a draft to check before issuing.</p>
+          <p className="mt-2 text-xs text-ink-mute">Includes every company-paid meal in the period that is due (today or earlier), not cancelled or skipped, and not already on an invoice, plus company-share adjustments from staff order edits not billed before. The due date follows the contract&apos;s credit terms. You get a draft to check before issuing.</p>
         </Panel>
         <Panel title="Not yet invoiced">
           {pending.length ? (
@@ -53,7 +53,7 @@ export default async function Invoices({ searchParams }: { searchParams: Promise
                   <span>
                     {p.name}
                     <span className="block text-xs text-ink-mute">
-                      {p.orders} orders · {p.from && formatDay(p.from)} – {p.to && formatDay(p.to)}
+                      {p.orders} orders{p.adjustments ? ` · ${rs(p.adjustments)} staff adjustments` : ""} · {p.from && formatDay(p.from)} – {p.to && formatDay(p.to)}
                     </span>
                   </span>
                   <span className="font-semibold tabular-nums">{rs(p.amount)}</span>

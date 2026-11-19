@@ -3,7 +3,8 @@ import { requirePermission } from "@/lib/auth";
 import { isValidISODate } from "@/lib/dates";
 import { parseRupees } from "@/lib/money";
 import { fail, done, type ActionResult } from "@/lib/action";
-import { createCreditNote, generateInvoice, issueInvoice, recordInvoicePayment, voidInvoice } from "@/server/invoices";
+import { createCreditNote, recordInvoicePayment, voidInvoice } from "@/server/invoices";
+import { generateCompanyInvoice, issueCompanyInvoice } from "@/server/corporate";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong");
 
@@ -15,7 +16,8 @@ export async function generateInvoiceAction(_: ActionResult, fd: FormData): Prom
   if (!companyId) return fail("Pick a company");
   if (!isValidISODate(periodStart) || !isValidISODate(periodEnd)) return fail("Pick the billing period");
   try {
-    const inv = await generateInvoice({ companyId, periodStart, periodEnd, actorId: user.id, grouping: fd.get("grouping") === "DAY" ? "DAY" : "ORDER" });
+    // Contract-aware (WP-12): company-share adjustments billed once, due date from the contract's credit terms; company scope checked.
+    const inv = await generateCompanyInvoice(user, { companyId, periodStart, periodEnd, grouping: fd.get("grouping") === "DAY" ? "DAY" : "ORDER" });
     return done(`Draft ${inv.number} created`, `/admin/invoices/${inv.id}`);
   } catch (e) {
     return fail(msg(e));
@@ -25,7 +27,7 @@ export async function generateInvoiceAction(_: ActionResult, fd: FormData): Prom
 export async function issueInvoiceAction(id: string) {
   const user = await requirePermission("invoices.edit");
   try {
-    await issueInvoice(id, user.id);
+    await issueCompanyInvoice(user, id);
     return { ok: true };
   } catch (e) {
     return { ok: false, message: msg(e) };
