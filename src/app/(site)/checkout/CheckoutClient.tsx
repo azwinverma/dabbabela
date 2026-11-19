@@ -18,13 +18,17 @@ type Props = {
   t: AccountDict["checkout"];
   addresses: AddressView[];
   slots: { id: string; label: string; kitchenId: string }[];
+  /** Delivery windows each zone is served in (zone time windows); zones not listed get every window of their kitchen. */
+  zoneSlotIds?: Record<string, string[]>;
+  /** Kitchens not taking orders right now, with the reason to show (status note). */
+  kitchenNotes?: Record<string, string>;
   methods: PaymentMethod[];
   walletBalance: number;
   user: { name: string; phone: string; allergies: string[] };
   company: { name: string } | null;
 };
 
-export function CheckoutClient({ t, addresses, slots, methods, walletBalance, user, company }: Props) {
+export function CheckoutClient({ t, addresses, slots, zoneSlotIds = {}, kitchenNotes = {}, methods, walletBalance, user, company }: Props) {
   const cart = useCart();
   const router = useRouter();
   const [addressId, setAddressId] = useState<string | null>(addresses.find((a) => a.isDefault && a.zoneId)?.id ?? addresses.find((a) => a.zoneId)?.id ?? addresses[0]?.id ?? null);
@@ -42,7 +46,12 @@ export function CheckoutClient({ t, addresses, slots, methods, walletBalance, us
 
   const lines = useMemo(() => toCartLines(cart.items), [cart.items]);
   const address = addresses.find((a) => a.id === addressId) ?? null;
-  const kitchenSlots = slots.filter((s) => s.kitchenId === address?.kitchenId);
+  const zoneIds = address?.zoneId ? zoneSlotIds[address.zoneId] : undefined;
+  const kitchenSlots = useMemo(
+    () => slots.filter((s) => s.kitchenId === address?.kitchenId && (!zoneIds || zoneIds.includes(s.id))),
+    [slots, address?.kitchenId, zoneIds],
+  );
+  const kitchenNote = address?.kitchenId ? kitchenNotes[address.kitchenId] ?? null : null;
 
   useEffect(() => {
     if (!cart.ready || !lines.length) return;
@@ -172,6 +181,11 @@ export function CheckoutClient({ t, addresses, slots, methods, walletBalance, us
           {address && !address.zoneId && (
             <p role="alert" className="mt-3 rounded-lg border border-sindoor/30 bg-sindoor-light px-3 py-2 text-sm text-sindoor-dark">
               {t.notCovered} ({address.area}). Pick another address, or <Link href="/delivery-areas" className="font-semibold underline">see our delivery areas</Link>.
+            </p>
+          )}
+          {kitchenNote && (
+            <p role="status" className="mt-3 rounded-lg border border-besar/40 bg-besar-light px-3 py-2 text-sm text-ink">
+              {kitchenNote} Orders for this address can&apos;t be placed until it reopens.
             </p>
           )}
           {adding ? (

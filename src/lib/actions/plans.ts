@@ -1,13 +1,16 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { z } from "zod";
 import type { PaymentMethod, Weekday } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth";
 import { log } from "@/lib/logger";
 import { done, fail, type ActionResult } from "@/lib/action";
 import { str } from "@/lib/utils";
-import { OrderError } from "@/server/orders";
+import { OrderError, type OrderAttribution } from "@/server/orders";
+import { campaignIdFor } from "@/server/crm";
+import { orderTouch, readAttribution } from "@/lib/attribution";
 import { CapacityError } from "@/server/capacity";
 import { addMealToPlan, createSubscription, quoteAddMeal, quoteSubscription, renewSubscription, swapMeal, type PlanInput } from "@/server/subscriptions";
 import type { PlanQuoteDTO } from "./shop";
@@ -26,6 +29,17 @@ function errText(e: unknown, fallback = "Something went wrong — please try aga
   if (e instanceof Error && e.message && e.message.length < 200 && !/prisma|invocation/i.test(e.message)) return e.message;
   log.error("plans.action_failed", { error: e });
   return fallback;
+}
+
+/** Same reader checkout uses: last (else first) consented marketing touch + its Campaign id (WP-11). */
+async function planAttribution(): Promise<OrderAttribution | null> {
+  try {
+    const touch = orderTouch(readAttribution(await cookies()));
+    if (!touch) return null;
+    return { ...touch, campaignId: await campaignIdFor(touch.campaign) };
+  } catch {
+    return null;
+  }
 }
 
 const planSchema = z.object({
@@ -94,6 +108,7 @@ export async function subscribePlanAction(
       notes: input.notes ?? null,
       couponCode: p.data.couponCode || null,
       idempotencyKey: input.idempotencyKey,
+      attribution: await planAttribution(),
     } as Parameters<typeof createSubscription>[1]);
     revalidatePath("/account", "layout");
     return { ok: true, data: { paymentId: r.payment.id }, redirectTo: r.needsPayment ? `/pay/${r.payment.id}` : `/thank-you/${r.payment.id}` };
@@ -160,7 +175,7 @@ export async function renewPlanAction(_: ActionResult, fd: FormData): Promise<Ac
   if (!METHODS.includes(method)) return fail("Choose how to pay");
   const weeks = parseInt(str(fd.get("weeks")), 10);
   try {
-    const r = await renewSubscription(user, str(fd.get("id")), { method, idempotencyKey: str(fd.get("idempotencyKey")) || null, weeks: Number.isFinite(weeks) ? weeks : null });
+    const r = await renewSubscription(user, str(fd.get("id")), { method, idempotencyKey: str(fd.get("idempotencyKey")) || null, weeks: Number.isFinite(weeks) ? weeks : null, attribution: await planAttribution() });
     revalidatePath("/account", "layout");
     return done(r.replayed ? "This plan is already renewed" : "Renewed", r.needsPayment ? `/pay/${r.payment.id}` : `/account/plans/${r.subscription.id}`);
   } catch (e) {

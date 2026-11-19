@@ -1,9 +1,10 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { addDays, dateOnly, daysBetween, formatDay, isoDate, todayKTM } from "@/lib/dates";
+import { addDays, dateOnly, daysBetween, isoDate, todayKTM } from "@/lib/dates";
 import { audit } from "@/lib/audit";
 import { rs } from "@/lib/money";
 import { REVENUE_STATUSES } from "./transitions";
+import { COMPANY_SHARE_PREFIX, CorporateError, generateCompanyInvoice, issueCompanyInvoice, type StaffActor } from "./corporate";
 
 type Tx = Prisma.TransactionClient;
 
@@ -22,91 +23,43 @@ export function shareTax(o: { tax: number; total: number; companyShare: number }
   return Math.round((o.tax * o.companyShare) / o.total);
 }
 
+/** Staff actor (role, custom grants, company scopes) for the corporate invoice services. */
+async function staffActor(actorId: string): Promise<StaffActor> {
+  const u = await db.user.findUnique({ where: { id: actorId }, select: { id: true, role: true, staffRole: { select: { permissions: true } }, scopes: { select: { companyId: true } } } });
+  if (!u) throw new InvoiceError("Unknown staff member");
+  return { id: u.id, role: u.role, customGrants: u.staffRole?.permissions ?? [], scopes: u.scopes };
+}
+
+const asInvoiceError = (e: unknown) => (e instanceof CorporateError ? new InvoiceError(e.message) : e);
+
 /**
- * Bill the employer share of a company's meals for a period. Only orders that are not yet invoiced,
- * already due (delivery date ≤ today) and not cancelled/skipped are included, so running this twice
- * for the same period never double-bills. Creates a DRAFT.
+ * Bill the employer share of a company's meals for a period (DRAFT). Delegates to the contract-aware
+ * `generateCompanyInvoice` (corporate.ts): only not-yet-invoiced, due (delivery ≤ today), live orders, plus
+ * company-share `OrderAdjustment` rows billed exactly once, due date from the contract's credit terms.
+ * Running it twice for the same period never double-bills. Company scope + `invoices.edit` are checked there.
  */
 export async function generateInvoice(input: { companyId: string; periodStart: string; periodEnd: string; actorId: string; grouping?: "ORDER" | "DAY" }) {
   if (input.periodEnd < input.periodStart) throw new InvoiceError("Period end is before the start");
-  const lastDay = input.periodEnd < todayKTM() ? input.periodEnd : todayKTM();
-  const inv = await db.$transaction(
-    async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`invoice-company:${input.companyId}`}))`;
-      const company = await tx.company.findUniqueOrThrow({ where: { id: input.companyId } });
-      const orders = await tx.order.findMany({
-        where: {
-          companyId: company.id,
-          invoiceId: null,
-          companyShare: { gt: 0 },
-          status: { in: REVENUE_STATUSES },
-          deliveryDate: { gte: dateOnly(input.periodStart), lte: dateOnly(lastDay) },
-        },
-        include: { user: { select: { name: true } }, items: { select: { name: true, quantity: true } } },
-        orderBy: [{ deliveryDate: "asc" }, { number: "asc" }],
-      });
-      if (!orders.length) throw new InvoiceError("Nothing to invoice for that period — every meal is already billed or none were company-paid.");
-      const total = orders.reduce((a, o) => a + o.companyShare, 0);
-      const tax = orders.reduce((a, o) => a + shareTax(o), 0);
-      const discount = 0;
-      let lines: Prisma.InvoiceLineCreateWithoutInvoiceInput[];
-      if (input.grouping === "DAY") {
-        const byDay = new Map<string, typeof orders>();
-        for (const o of orders) byDay.set(isoDate(o.deliveryDate), [...(byDay.get(isoDate(o.deliveryDate)) ?? []), o]);
-        lines = [...byDay.entries()].map(([d, os]) => {
-          const meals = os.reduce((a, o) => a + o.items.reduce((b, i) => b + i.quantity, 0), 0);
-          const amount = os.reduce((a, o) => a + o.companyShare, 0);
-          return { description: `Staff lunches — ${formatDay(d, "long")} (${os.length} orders)`, quantity: meals, unitPrice: meals ? Math.round(amount / meals) : amount, amount };
-        });
-      } else {
-        lines = orders.map((o) => {
-          const meals = o.items.reduce((a, i) => a + i.quantity, 0);
-          return {
-            order: { connect: { id: o.id } },
-            description: `${formatDay(isoDate(o.deliveryDate))} · ${o.number} · ${o.user.name} · ${o.items.map((i) => (i.quantity > 1 ? `${i.name} ×${i.quantity}` : i.name)).join(", ")}`.slice(0, 300),
-            quantity: meals,
-            unitPrice: meals ? Math.round(o.companyShare / meals) : o.companyShare,
-            amount: o.companyShare,
-          };
-        });
-      }
-      const created = await tx.invoice.create({
-        data: {
-          number: await nextNumber(tx, "INV", input.periodStart.slice(0, 4)),
-          kind: "INVOICE",
-          companyId: company.id,
-          periodStart: dateOnly(input.periodStart),
-          periodEnd: dateOnly(input.periodEnd),
-          status: "DRAFT",
-          billingName: company.legalName || company.name,
-          billingAddress: company.billingAddress,
-          panVat: company.panVat,
-          subtotal: total - tax,
-          discount,
-          tax,
-          total,
-          createdById: input.actorId,
-          lines: { create: lines },
-        },
-      });
-      const linked = await tx.order.updateMany({ where: { id: { in: orders.map((o) => o.id) }, invoiceId: null }, data: { invoiceId: created.id } });
-      if (linked.count !== orders.length) throw new InvoiceError("Some orders were invoiced at the same time — try again");
-      return created;
-    },
-    { timeout: 30_000 },
-  );
-  await audit({ actorId: input.actorId, action: "invoice.generate", entity: "Invoice", entityId: inv.id, summary: `${inv.number} ${rs(inv.total)}`, after: { period: [input.periodStart, input.periodEnd] } });
-  return inv;
+  const actor = await staffActor(input.actorId);
+  try {
+    return await generateCompanyInvoice(actor, { companyId: input.companyId, periodStart: input.periodStart, periodEnd: input.periodEnd, grouping: input.grouping });
+  } catch (e) {
+    throw asInvoiceError(e);
+  }
 }
 
+/** Issue a draft. Company invoices: due = issue date + credit terms of the contract in force (else the company's terms). */
 export async function issueInvoice(id: string, actorId: string) {
-  const inv = await db.invoice.findUniqueOrThrow({ where: { id }, include: { company: true } });
+  const inv = await db.invoice.findUniqueOrThrow({ where: { id } });
   if (inv.status !== "DRAFT") throw new InvoiceError("Only drafts can be issued");
-  const today = todayKTM();
-  const updated = await db.invoice.update({
-    where: { id },
-    data: { status: "ISSUED", issuedAt: new Date(), dueDate: dateOnly(addDays(today, inv.company?.invoiceTermsDays ?? 15)) },
-  });
+  if (inv.companyId) {
+    try {
+      return await issueCompanyInvoice(await staffActor(actorId), id);
+    } catch (e) {
+      throw asInvoiceError(e);
+    }
+  }
+  const updated = await db.invoice.update({ where: { id }, data: { status: "ISSUED", issuedAt: new Date(), dueDate: dateOnly(addDays(todayKTM(), 15)) } });
   await audit({ actorId, action: "invoice.issue", entity: "Invoice", entityId: id, summary: inv.number });
   return updated;
 }
@@ -222,23 +175,66 @@ export async function ageing(companyId?: string): Promise<{ buckets: Ageing; row
   return { buckets, rows };
 }
 
-/** Companies with billable employer share that isn't on an invoice yet. */
-export async function uninvoicedByCompany() {
-  const rows = await db.order.groupBy({
-    by: ["companyId"],
-    where: { companyId: { not: null }, invoiceId: null, companyShare: { gt: 0 }, status: { in: REVENUE_STATUSES }, deliveryDate: { lte: dateOnly(todayKTM()) } },
-    _sum: { companyShare: true },
-    _count: true,
-    _min: { deliveryDate: true },
-    _max: { deliveryDate: true },
+const ADJ_TAG = /\[adj:([a-z0-9]+)\]/;
+
+/**
+ * Company-share `OrderAdjustment` rows (staff edits, WP-03) on due, billable orders that no non-void invoice has billed
+ * yet (`[adj:<id>]` line tag, as written by `generateCompanyInvoice`), summed per company.
+ */
+export async function unbilledAdjustmentsByCompany(companyId?: string) {
+  const adjustments = await db.orderAdjustment.findMany({
+    where: {
+      reason: { startsWith: COMPANY_SHARE_PREFIX },
+      order: { companyId: companyId ?? { not: null }, status: { in: REVENUE_STATUSES }, deliveryDate: { lte: dateOnly(todayKTM()) } },
+    },
+    select: { id: true, amount: true, order: { select: { companyId: true, deliveryDate: true } } },
   });
-  const companies = await db.company.findMany({ where: { id: { in: rows.map((r) => r.companyId!) } }, select: { id: true, name: true } });
-  return rows.map((r) => ({
-    companyId: r.companyId!,
-    name: companies.find((c) => c.id === r.companyId)?.name ?? "—",
-    amount: r._sum.companyShare ?? 0,
-    orders: r._count,
-    from: r._min.deliveryDate ? isoDate(r._min.deliveryDate) : null,
-    to: r._max.deliveryDate ? isoDate(r._max.deliveryDate) : null,
-  }));
+  const out = new Map<string, { amount: number; count: number; from: string; to: string }>();
+  if (!adjustments.length) return out;
+  const billedLines = await db.invoiceLine.findMany({
+    where: { invoice: { status: { not: "VOID" }, ...(companyId ? { companyId } : {}) }, description: { contains: "[adj:" } },
+    select: { description: true },
+  });
+  const billed = new Set(billedLines.map((l) => ADJ_TAG.exec(l.description)?.[1]).filter(Boolean));
+  for (const a of adjustments) {
+    if (billed.has(a.id) || !a.order.companyId) continue;
+    const d = isoDate(a.order.deliveryDate);
+    const cur = out.get(a.order.companyId) ?? { amount: 0, count: 0, from: d, to: d };
+    out.set(a.order.companyId, { amount: cur.amount + a.amount, count: cur.count + 1, from: d < cur.from ? d : cur.from, to: d > cur.to ? d : cur.to });
+  }
+  return out;
+}
+
+/** Companies with billable employer share that isn't on an invoice yet (meals + unbilled company-share adjustments). */
+export async function uninvoicedByCompany() {
+  const [rows, adjustments] = await Promise.all([
+    db.order.groupBy({
+      by: ["companyId"],
+      where: { companyId: { not: null }, invoiceId: null, companyShare: { gt: 0 }, status: { in: REVENUE_STATUSES }, deliveryDate: { lte: dateOnly(todayKTM()) } },
+      _sum: { companyShare: true },
+      _count: true,
+      _min: { deliveryDate: true },
+      _max: { deliveryDate: true },
+    }),
+    unbilledAdjustmentsByCompany(),
+  ]);
+  const ids = [...new Set([...rows.map((r) => r.companyId!), ...adjustments.keys()])];
+  const companies = await db.company.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
+  return ids
+    .map((companyId) => {
+      const r = rows.find((x) => x.companyId === companyId);
+      const adj = adjustments.get(companyId);
+      const from = [r?._min.deliveryDate ? isoDate(r._min.deliveryDate) : null, adj?.from ?? null].filter((x): x is string => !!x).sort()[0] ?? null;
+      const to = [r?._max.deliveryDate ? isoDate(r._max.deliveryDate) : null, adj?.to ?? null].filter((x): x is string => !!x).sort().reverse()[0] ?? null;
+      return {
+        companyId,
+        name: companies.find((c) => c.id === companyId)?.name ?? "—",
+        amount: (r?._sum.companyShare ?? 0) + (adj?.amount ?? 0),
+        adjustments: adj?.amount ?? 0,
+        orders: r?._count ?? 0,
+        from,
+        to,
+      };
+    })
+    .filter((r) => r.amount !== 0);
 }
