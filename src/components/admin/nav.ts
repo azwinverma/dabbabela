@@ -83,7 +83,7 @@ export const ADMIN_NAV_ALL: NavGroup[] = [
       { href: "/admin/site", label: "Navigation, SEO & redirects", icon: "Globe", perm: "seo.view", ready: false, owner: "WP-14" },
       { href: "/admin/blog", label: "Journal", icon: "Newspaper", perm: "content.view" },
       { href: "/admin/banners", label: "Banners & promos", icon: "Megaphone", perm: "marketing.view" },
-      { href: "/admin/campaigns", label: "Campaigns & referrals", icon: "Target", perm: "marketing.view", ready: false, owner: "WP-15" },
+      { href: "/admin/campaigns", label: "Campaigns & referrals", icon: "Target", perm: "marketing.view", ready: true, owner: "WP-15" },
       { href: "/admin/testimonials", label: "Testimonials", icon: "Quote", perm: "content.view" },
       { href: "/admin/faqs", label: "FAQs", icon: "CircleHelp", perm: "content.view" },
       { href: "/admin/media", label: "Media library", icon: "Images", perm: "media.view" },
