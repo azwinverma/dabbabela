@@ -1,21 +1,21 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { dateOnly, formatStamp, ktmNow } from "@/lib/dates";
-import { getSettings } from "@/lib/settings";
+import { formatDay, formatStamp } from "@/lib/dates";
 import { DIET_LABEL } from "@/lib/labels";
-import { forecast, kitchenOrders } from "@/server/kitchen";
-import { PageHeader, Panel, StatCard, Table, Th, Td, EmptyRow, OrderBadge } from "@/components/admin/ui";
+import { mealsAhead, productionDashboard } from "@/server/kitchen";
+import { Callout, PageHeader, Panel, StatCard, Table, Th, Td, EmptyRow, OrderBadge } from "@/components/admin/ui";
 import { Badge } from "@/components/ui/Badge";
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
 import { DayPicker } from "@/components/admin/ops/DayPicker";
 import { pickDate, pickKitchen } from "@/components/admin/ops/scope";
-import { advanceBatchAction, lockDayAction, packingAction, planBatchesAction, startOrdersAction } from "./actions";
+import { advanceBatchAction, kitchenStatusAction, lockDayAction, packingAction, planBatchesAction, startOrdersAction } from "./actions";
 
 export const metadata = { title: "Kitchen" };
 
 type SP = { kitchen?: string; date?: string; buffer?: string };
+
+const ISSUE_TONE = { critical: "bad", warning: "warn", info: "info" } as const;
 
 export default async function KitchenPage({ searchParams }: { searchParams: Promise<SP> }) {
   const user = await requirePermission("kitchen.view");
@@ -24,53 +24,77 @@ export default async function KitchenPage({ searchParams }: { searchParams: Prom
   if (!kitchen) return <PageHeader title="Kitchen" description="No active kitchen yet — add one under Kitchens & slots." />;
   const date = pickDate(sp.date);
   const buffer = Math.max(0, Math.min(30, parseInt(sp.buffer ?? "5", 10) || 0));
-  const [settings, lock, f, orders, batches] = await Promise.all([
-    getSettings(),
-    db.dayLock.findUnique({ where: { kitchenId_date: { kitchenId: kitchen.id, date: dateOnly(date) } } }),
-    forecast(kitchen.id, date, buffer),
-    kitchenOrders(kitchen.id, date),
-    db.productionBatch.findMany({ where: { kitchenId: kitchen.id, date: dateOnly(date) }, include: { menuItem: { select: { name: true } } }, orderBy: [{ station: "asc" }, { plannedPortions: "desc" }] }),
-  ]);
-  const now = ktmNow();
-  const afterCutoff = date < now.date || (date === now.date && now.time >= settings.orderCutoff);
+  const [d, ahead] = await Promise.all([productionDashboard(kitchen.id, date, { bufferPct: buffer }), mealsAhead(kitchen.id, date, 7)]);
+  const f = d.forecast;
+  const orders = d.orders;
+  const lock = d.lock;
   const qs = `kitchen=${kitchen.id}&date=${date}`;
   const toStart = orders.filter((o) => o.status === "SCHEDULED" || o.status === "CONFIRMED");
-  const stations = [...new Set(f.dishes.map((d) => d.station))];
+  const stations = [...new Set(d.dishes.map((x) => x.station))];
+  const canPause = can(user, "kitchen.approve") || can(user, "rules.edit");
+  const chip = "rounded-lg border border-ink-line bg-white px-3 py-2 text-sm font-semibold hover:border-ink";
 
   return (
     <div>
       <PageHeader
         title="Kitchen"
-        description="Lock the day after the cut-off, cook in batches, pack with checks. Numbers come from locked order snapshots."
+        description="Production dashboard: lock the day after the cut-off, cook in batches, pack with checks. Numbers come from locked order snapshots."
         actions={
           <>
-            <Link className="rounded-lg border border-ink-line bg-white px-3 py-2 text-sm font-semibold hover:border-ink" href={`/admin/kitchen/prep?${qs}&buffer=${buffer}`}>Prep sheets</Link>
-            <Link className="rounded-lg border border-ink-line bg-white px-3 py-2 text-sm font-semibold hover:border-ink" href={`/admin/kitchen/tickets?${qs}`}>Tickets (KOT)</Link>
-            <Link className="rounded-lg border border-ink-line bg-white px-3 py-2 text-sm font-semibold hover:border-ink" href={`/admin/kitchen/labels?${qs}`}>Labels</Link>
-            <Link className="rounded-lg border border-ink-line bg-white px-3 py-2 text-sm font-semibold hover:border-ink" href={`/admin/kitchen/requirements?${qs}&buffer=${buffer}`}>Ingredients</Link>
-            <Link className="rounded-lg border border-ink-line bg-white px-3 py-2 text-sm font-semibold hover:border-ink" href={`/admin/kitchen/qc?${qs}`}>QC log</Link>
+            <Link className={chip} href={`/admin/kitchen/prep?${qs}&buffer=${buffer}`}>Prep sheets</Link>
+            <Link className={chip} href={`/admin/kitchen/tickets?${qs}`}>Tickets (KOT)</Link>
+            <Link className={chip} href={`/admin/kitchen/labels?${qs}`}>Labels</Link>
+            <Link className={chip} href={`/admin/kitchen/requirements?${qs}&buffer=${buffer}`}>Ingredients</Link>
+            <Link className={chip} href={`/admin/kitchen/qc?${qs}`}>QC log</Link>
           </>
         }
       />
       <DayPicker path="/admin/kitchen" date={date} kitchenId={kitchen.id} kitchens={kitchens} extra={{ buffer: String(buffer) }} />
 
-      <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <StatCard label="Meals to cook" value={f.meals} sub={`${f.orders} orders`} tone="brand" />
-        <StatCard label="Awaiting payment" value={f.pendingPayment} sub="not counted yet" tone={f.pendingPayment ? "warn" : "default"} />
-        <StatCard label="Allergy flags" value={f.allergenFlagged} sub="orders with a customer note" tone={f.allergenFlagged ? "warn" : "default"} />
-        <StatCard label="Packed" value={orders.filter((o) => ["PACKED", "OUT_FOR_DELIVERY", "DELIVERED"].includes(o.status)).length} sub={`of ${orders.length}`} tone="good" />
+      {d.kitchen.status !== "OPEN" && (
+        <Callout tone={d.kitchen.status === "CLOSED" ? "bad" : "warn"} title={d.kitchen.status === "CLOSED" ? "Kitchen shut down — no new orders" : "New orders paused"} className="mb-4">
+          {d.kitchen.statusNote} Existing orders below still need cooking.
+          {canPause && d.kitchen.status === "PAUSED" && (
+            <ActionForm action={kitchenStatusAction} className="mt-2">
+              <input type="hidden" name="kitchenId" value={kitchen.id} />
+              <input type="hidden" name="status" value="OPEN" />
+              <SubmitButton size="sm" variant="outline">Resume taking orders</SubmitButton>
+            </ActionForm>
+          )}
+        </Callout>
+      )}
+
+      {/* forecast strip */}
+      <ul className="no-print mb-4 grid grid-cols-7 gap-1 text-center text-xs">
+        {ahead.map((a) => (
+          <li key={a.date}>
+            <Link href={`/admin/kitchen?kitchen=${kitchen.id}&date=${a.date}&buffer=${buffer}`} className={`block rounded-lg border px-1 py-1.5 hover:border-ink ${a.date === date ? "border-ink bg-ink text-paper" : "border-ink-line/60 bg-white"}`}>
+              <span className="font-semibold">{formatDay(a.date)}</span>
+              <span className="block text-sm font-bold tabular-nums">{a.meals}</span>
+              {a.pending > 0 && <span className="block opacity-70">+{a.pending} unpaid</span>}
+            </Link>
+          </li>
+        ))}
+      </ul>
+
+      <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+        <StatCard label="Meals due" value={f.meals} sub={`${f.orders} orders · ${f.pendingPayment} awaiting payment`} tone="brand" />
+        <StatCard label="Capacity" value={`${d.capacity.booked} / ${d.capacity.limit}`} sub={`${d.capacity.left} meals left`} tone={d.capacity.booked > d.capacity.limit ? "warn" : "default"} />
+        <StatCard label="Preparation" value={`${d.progress.pct}%`} sub={`${d.progress.done}/${d.progress.batches} batches done · ${d.progress.cooking} cooking`} tone={d.progress.pct === 100 && d.progress.batches ? "good" : "default"} />
+        <StatCard label="Packed" value={`${d.packing.packed} / ${d.packing.total}`} sub={d.packing.failedChecks ? `${d.packing.failedChecks} failed check(s)` : `${d.packing.pct}%`} tone={d.packing.failedChecks ? "warn" : "good"} />
+        <StatCard label="Ready for dispatch" value={d.readyForDispatch.length} sub={can(user, "dispatch.view") ? <Link href={`/admin/dispatch?${qs}`} className="underline">open dispatch</Link> : "packed, not out yet"} />
         <div className="rounded-xl border border-ink-line/80 bg-white p-4 shadow-card">
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink-mute">Day lock</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink-mute">Cut-off {d.cutoff}</p>
           {lock ? (
             <p className="mt-1.5 text-sm font-semibold text-saag-dark">Locked {formatStamp(lock.lockedAt)} · {lock.orderCount} orders</p>
           ) : (
             <>
-              <p className="mt-1 text-xs text-ink-mute">{afterCutoff ? "Cut-off passed — lock to confirm orders." : `Cut-off ${settings.orderCutoff}. Locking early stops customer changes.`}</p>
+              <p className="mt-1 text-xs text-ink-mute">{d.afterCutoff ? "Cut-off passed — lock to confirm orders." : "Locking early stops customer changes."}</p>
               {can(user, "kitchen.approve") && (
                 <ActionForm action={lockDayAction} className="mt-2">
                   <input type="hidden" name="kitchenId" value={kitchen.id} />
                   <input type="hidden" name="date" value={date} />
-                  <SubmitButton size="sm" variant={afterCutoff ? "primary" : "outline"} confirm={afterCutoff ? undefined : "The cut-off hasn't passed. Lock anyway? Customers won't be able to change orders for this day."}>
+                  <SubmitButton size="sm" variant={d.afterCutoff ? "primary" : "outline"} confirm={d.afterCutoff ? undefined : "The cut-off hasn't passed. Lock anyway? Customers won't be able to change orders for this day."}>
                     Lock day
                   </SubmitButton>
                 </ActionForm>
@@ -80,8 +104,52 @@ export default async function KitchenPage({ searchParams }: { searchParams: Prom
         </div>
       </div>
 
+      {d.issues.length > 0 && (
+        <Panel title={`Production issues (${d.issues.length})`} className="mb-5">
+          <ul className="space-y-1.5">
+            {d.issues.map((i, n) => (
+              <li key={n}>
+                <Callout tone={ISSUE_TONE[i.severity]} className="py-2">
+                  {i.message} {i.href && <Link href={i.href} className="font-semibold underline">Open</Link>}
+                </Callout>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      )}
+
       <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
         <div className="space-y-5">
+          <Panel title="Meals by delivery slot" bodyClass="p-0">
+            <Table className="rounded-none border-0 shadow-none">
+              <thead>
+                <tr>
+                  <Th>Slot</Th>
+                  <Th className="text-right">Orders</Th>
+                  <Th className="text-right">Meals</Th>
+                  <Th className="text-right">Not started</Th>
+                  <Th className="text-right">Preparing</Th>
+                  <Th className="text-right">Ready</Th>
+                  <Th className="text-right">Dispatched</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.bySlot.map((s) => (
+                  <tr key={s.slot}>
+                    <Td className="font-semibold">{s.slot}</Td>
+                    <Td className="text-right tabular-nums">{s.orders}</Td>
+                    <Td className="text-right font-semibold tabular-nums">{s.meals}</Td>
+                    <Td className="text-right tabular-nums">{s.notStarted || "—"}</Td>
+                    <Td className="text-right tabular-nums">{s.preparing || "—"}</Td>
+                    <Td className="text-right tabular-nums">{s.ready || "—"}</Td>
+                    <Td className="text-right tabular-nums">{s.dispatched || "—"}</Td>
+                  </tr>
+                ))}
+                {!d.bySlot.length && <EmptyRow colSpan={7}>No meals for this day yet.</EmptyRow>}
+              </tbody>
+            </Table>
+          </Panel>
+
           <Panel
             title="Production batches"
             actions={
@@ -91,7 +159,7 @@ export default async function KitchenPage({ searchParams }: { searchParams: Prom
                 <label className="text-xs text-ink-mute">
                   Buffer % <input name="buffer" type="number" min={0} max={30} defaultValue={buffer} className="field ml-1 inline w-16 py-1" />
                 </label>
-                <SubmitButton size="sm" variant="dark">{batches.length ? "Refresh plan" : "Plan batches"}</SubmitButton>
+                <SubmitButton size="sm" variant="dark">{d.batches.length ? "Refresh plan" : "Plan batches"}</SubmitButton>
               </ActionForm>
             }
             bodyClass="p-0"
@@ -107,9 +175,12 @@ export default async function KitchenPage({ searchParams }: { searchParams: Prom
                 </tr>
               </thead>
               <tbody>
-                {batches.map((b) => (
+                {d.batches.map((b) => (
                   <tr key={b.id}>
-                    <Td className="font-semibold">{b.menuItem.name}</Td>
+                    <Td className="font-semibold">
+                      {b.menuItem.name}
+                      {b.assignedTo && <div className="text-xs font-normal text-ink-mute">cook: {b.assignedTo}</div>}
+                    </Td>
                     <Td className="text-xs">{b.station}</Td>
                     <Td className="text-right tabular-nums">
                       {b.plannedPortions} + {b.bufferPortions}
@@ -118,6 +189,7 @@ export default async function KitchenPage({ searchParams }: { searchParams: Prom
                     <Td>
                       <Badge tone={b.status === "DONE" ? "good" : b.status === "COOKING" ? "brand" : b.status === "CANCELLED" ? "bad" : "neutral"}>{b.status.toLowerCase()}</Badge>
                       {b.stockPosted && <div className="mt-0.5 text-[11px] text-ink-mute">stock posted</div>}
+                      {d.shortages.recorded.some((s) => s.batchId === b.id) && <div className="mt-0.5 text-[11px] font-semibold text-sindoor">stock short</div>}
                     </Td>
                     <Td>
                       {b.status === "PLANNED" && (
@@ -133,13 +205,52 @@ export default async function KitchenPage({ searchParams }: { searchParams: Prom
                           <SubmitButton size="sm" variant="dark">Done</SubmitButton>
                         </ActionForm>
                       )}
+                      {(b.status === "PLANNED" || b.status === "COOKING") && (
+                        <details className="mt-1 text-xs">
+                          <summary className="cursor-pointer text-ink-mute">Cancel…</summary>
+                          <ActionForm action={advanceBatchAction.bind(null, b.id, "CANCELLED")} className="mt-1 flex gap-1">
+                            <input name="notes" placeholder="Why?" className="field w-32 py-1" required />
+                            <SubmitButton size="sm" variant="ghost">Cancel batch</SubmitButton>
+                          </ActionForm>
+                        </details>
+                      )}
+                      {b.status === "CANCELLED" && b.notes && <span className="text-xs text-ink-mute">{b.notes}</span>}
                     </Td>
                   </tr>
                 ))}
-                {!batches.length && <EmptyRow colSpan={5}>{f.meals ? "Plan batches to start cooking." : "No meals for this day yet."}</EmptyRow>}
+                {!d.batches.length && <EmptyRow colSpan={5}>{f.meals ? "Plan batches to start cooking." : "No meals for this day yet."}</EmptyRow>}
               </tbody>
             </Table>
-            <p className="px-4 py-2 text-xs text-ink-mute">“Done” records cooked and wasted portions and deducts ingredients from stock once, using the recipe version in force.</p>
+            <p className="px-4 py-2 text-xs text-ink-mute">“Done” records cooked and wasted portions and deducts ingredients from stock once, using the recipe version in force. Stock that wasn&apos;t there is recorded as a shortage and shown above.</p>
+          </Panel>
+
+          <Panel title="Dishes by recipe" bodyClass="p-0">
+            <Table className="rounded-none border-0 shadow-none">
+              <thead>
+                <tr>
+                  <Th>Dish</Th>
+                  <Th className="text-right">Portions</Th>
+                  <Th>Ingredients (gross, incl. trim)</Th>
+                  <Th>Batch</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.dishes.map((x) => (
+                  <tr key={x.menuItemId}>
+                    <Td className="font-semibold">
+                      {x.name}
+                      <div className="text-xs font-normal text-ink-mute">{x.station}</div>
+                    </Td>
+                    <Td className="text-right tabular-nums">
+                      <b>{x.total}</b> <span className="text-xs text-ink-mute">({x.portions}+{x.buffer})</span>
+                    </Td>
+                    <Td className="text-xs">{x.hasRecipe ? x.lines.map((l) => `${l.name} ${l.gross} ${l.unit.toLowerCase()}`).join(" · ") : <span className="font-semibold text-sindoor">no recipe</span>}</Td>
+                    <Td>{x.batch ? <Badge tone={x.batch.status === "DONE" ? "good" : x.batch.status === "COOKING" ? "brand" : x.batch.status === "CANCELLED" ? "bad" : "neutral"}>{x.batch.status.toLowerCase()}{x.batch.stale ? " · stale" : ""}</Badge> : <span className="text-xs text-ink-mute">not planned</span>}</Td>
+                  </tr>
+                ))}
+                {!d.dishes.length && <EmptyRow colSpan={4}>No dishes yet.</EmptyRow>}
+              </tbody>
+            </Table>
           </Panel>
 
           <Panel
@@ -206,6 +317,52 @@ export default async function KitchenPage({ searchParams }: { searchParams: Prom
         </div>
 
         <div className="space-y-5">
+          {d.kitchen.status === "OPEN" && canPause && (
+            <Panel title="Pause new orders">
+              <ActionForm action={kitchenStatusAction} className="space-y-2">
+                <input type="hidden" name="kitchenId" value={kitchen.id} />
+                <input type="hidden" name="status" value="PAUSED" />
+                <input name="reason" placeholder="Reason, e.g. gas outage" className="field w-full" required minLength={3} />
+                <SubmitButton size="sm" variant="outline" confirm="Stop new orders for this kitchen now? Existing orders stay.">Pause orders</SubmitButton>
+              </ActionForm>
+            </Panel>
+          )}
+          <Panel title={`Shortages (${d.shortages.forecast.length + d.shortages.recorded.length})`}>
+            <ul className="space-y-1 text-sm">
+              {d.shortages.forecast.map((r) => (
+                <li key={r.ingredientId} className="flex justify-between gap-2">
+                  <span>{r.name}</span>
+                  <span className="tabular-nums text-sindoor">−{r.short} {r.unit.toLowerCase()}</span>
+                </li>
+              ))}
+              {d.shortages.recorded.map((r, i) => (
+                <li key={`${r.batchId}-${r.ingredientId}-${i}`} className="flex justify-between gap-2">
+                  <span>
+                    {r.name} <span className="text-xs text-ink-mute">used by {r.dish} ({r.type.toLowerCase()})</span>
+                  </span>
+                  <span className="tabular-nums font-semibold text-sindoor">−{r.shortage} {r.unit.toLowerCase()}</span>
+                </li>
+              ))}
+              {!d.shortages.forecast.length && !d.shortages.recorded.length && <li className="text-ink-mute">Stock covers the day.</li>}
+            </ul>
+            {d.shortages.forecast.length > 0 && (
+              <Link href={`/admin/kitchen/requirements?${qs}&buffer=${buffer}`} className="mt-2 inline-block text-xs font-semibold text-sindoor hover:underline">
+                Ingredient plan & draft purchases →
+              </Link>
+            )}
+          </Panel>
+          <Panel title={`Ready for dispatch (${d.readyForDispatch.length})`}>
+            <ul className="space-y-1 text-sm">
+              {d.readyForDispatch.map((o) => (
+                <li key={o.id} className="flex justify-between gap-2">
+                  <span className="font-mono font-semibold">#{o.code}</span>
+                  <span className="text-xs text-ink-mute">{o.slot ?? "any slot"} · {o.area}</span>
+                </li>
+              ))}
+              {!d.readyForDispatch.length && <li className="text-ink-mute">Nothing packed and waiting.</li>}
+            </ul>
+            <p className="mt-2 text-xs text-ink-mute">Tickets printed: {d.tickets.printed}/{d.tickets.total}</p>
+          </Panel>
           <Panel title="Dabbas">
             <ul className="space-y-1.5 text-sm">
               {f.boxes.map((b) => (
@@ -222,13 +379,13 @@ export default async function KitchenPage({ searchParams }: { searchParams: Prom
               <div key={st} className="mb-3 last:mb-0">
                 <p className="label">{st}</p>
                 <ul className="space-y-1 text-sm">
-                  {f.dishes
-                    .filter((d) => d.station === st)
-                    .map((d) => (
-                      <li key={d.menuItemId} className="flex justify-between gap-2">
-                        <span>{d.name}</span>
+                  {d.dishes
+                    .filter((x) => x.station === st)
+                    .map((x) => (
+                      <li key={x.menuItemId} className="flex justify-between gap-2">
+                        <span>{x.name}</span>
                         <span className="tabular-nums">
-                          <b>{d.total}</b> <span className="text-xs text-ink-mute">({d.portions}+{d.buffer})</span>
+                          <b>{x.total}</b> <span className="text-xs text-ink-mute">({x.portions}+{x.buffer})</span>
                         </span>
                       </li>
                     ))}
@@ -239,9 +396,9 @@ export default async function KitchenPage({ searchParams }: { searchParams: Prom
           </Panel>
           <Panel title="Diet & allergens">
             <div className="flex flex-wrap gap-1.5">
-              {f.diets.map((d) => (
-                <Badge key={d.diet} tone={DIET_LABEL[d.diet].veg ? "good" : "warn"}>
-                  {DIET_LABEL[d.diet].label}: {d.meals}
+              {f.diets.map((x) => (
+                <Badge key={x.diet} tone={DIET_LABEL[x.diet].veg ? "good" : "warn"}>
+                  {DIET_LABEL[x.diet].label}: {x.meals}
                 </Badge>
               ))}
             </div>
@@ -254,6 +411,7 @@ export default async function KitchenPage({ searchParams }: { searchParams: Prom
               ))}
               {!f.allergens.length && <span className="text-sm text-ink-mute">None listed.</span>}
             </div>
+            {f.allergenFlagged > 0 && <p className="mt-2 text-xs font-semibold text-sindoor">{f.allergenFlagged} order(s) carry a customer allergy note.</p>}
           </Panel>
         </div>
       </div>

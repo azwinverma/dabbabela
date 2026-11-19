@@ -1,5 +1,7 @@
 import { db } from "@/lib/db";
 import { requirePermission } from "@/lib/auth";
+import { can } from "@/lib/permissions";
+import { DayPicker } from "@/components/admin/ops/DayPicker";
 import { dateOnly, formatDay, formatStamp } from "@/lib/dates";
 import { DIET_LABEL } from "@/lib/labels";
 import { KITCHEN_STATUSES } from "@/server/kitchen";
@@ -13,30 +15,56 @@ export const metadata = { title: "Kitchen tickets" };
 
 type Comp = { name: string; qty: number; substitutedFrom?: string };
 
-export default async function TicketsPage({ searchParams }: { searchParams: Promise<{ kitchen?: string; date?: string }> }) {
+export default async function TicketsPage({ searchParams }: { searchParams: Promise<{ kitchen?: string; date?: string; slot?: string; show?: string }> }) {
   const user = await requirePermission("kitchen.view");
   const sp = await searchParams;
-  const { kitchen } = await pickKitchen(user, sp.kitchen);
+  const { kitchens, kitchen } = await pickKitchen(user, sp.kitchen);
   if (!kitchen) return null;
   const date = pickDate(sp.date);
-  const orders = await db.order.findMany({
+  const all = await db.order.findMany({
     where: { kitchenId: kitchen.id, deliveryDate: dateOnly(date), status: { in: KITCHEN_STATUSES } },
     include: { items: { include: { customizations: true } }, ticket: true },
     orderBy: [{ slotLabel: "asc" }, { area: "asc" }],
   });
+  const slots = [...new Set(all.map((o) => o.slotLabel ?? "Any time"))];
+  const slot = sp.slot && slots.includes(sp.slot) ? sp.slot : "";
+  const unprintedOnly = sp.show === "unprinted";
+  const orders = all.filter((o) => (!slot || (o.slotLabel ?? "Any time") === slot) && (!unprintedOnly || !o.ticket?.printedAt));
+  const unprinted = all.filter((o) => !o.ticket?.printedAt).length;
+  const canEdit = can(user, "kitchen.edit");
   return (
     <div>
       <PageHeader
         back={{ href: `/admin/kitchen?kitchen=${kitchen.id}&date=${date}`, label: "Kitchen" }}
         title="Kitchen order tickets"
-        description={`${orders.length} tickets · ${formatDay(date, "full")}`}
+        description={`${orders.length} of ${all.length} tickets · ${unprinted} not printed · ${formatDay(date, "full")}`}
         actions={
           <>
             <PrintButton />
-            {orders.length > 0 && <ConfirmAction action={markPrintedAction.bind(null, orders.map((o) => o.id))} label="Mark printed" />}
+            {orders.length > 0 && canEdit && <ConfirmAction action={markPrintedAction.bind(null, orders.map((o) => o.id))} label={`Mark ${orders.length} printed`} />}
           </>
         }
       />
+      <DayPicker path="/admin/kitchen/tickets" date={date} kitchenId={kitchen.id} kitchens={kitchens}>
+        <label className="text-xs font-semibold text-ink-mute">
+          Slot
+          <select name="slot" defaultValue={slot} className="field mt-1 w-40">
+            <option value="">All slots</option>
+            {slots.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs font-semibold text-ink-mute">
+          Show
+          <select name="show" defaultValue={unprintedOnly ? "unprinted" : ""} className="field mt-1 w-36">
+            <option value="">All tickets</option>
+            <option value="unprinted">Not printed</option>
+          </select>
+        </label>
+      </DayPicker>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 print:grid-cols-3">
         {orders.map((o) => (
           <article key={o.id} className="break-inside-avoid rounded-lg border-2 border-dashed border-ink bg-white p-3 font-mono text-xs">

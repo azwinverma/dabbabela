@@ -8,7 +8,8 @@ import { audit } from "@/lib/audit";
 import { done, fail, type ActionResult } from "@/lib/action";
 import { dateOnly, isValidISODate } from "@/lib/dates";
 import { lockDay, setOrderStatus } from "@/server/orders";
-import { advanceBatch, markTicketsPrinted, planBatches, recordPacking, requirements, forecast, suggestQty } from "@/server/kitchen";
+import { advanceBatch, markTicketsPrinted, planBatches, recordPacking, requirements, requirementsHorizon, setKitchenStatus, forecast, suggestQty } from "@/server/kitchen";
+import type { KitchenStatus } from "@/server/capacity";
 import { createPurchaseOrder } from "@/server/inventory";
 import { assertKitchen, guard, kitchenWhere } from "@/components/admin/ops/scope";
 
@@ -52,9 +53,28 @@ export async function advanceBatchAction(batchId: string, to: BatchStatus, _p: A
       const v = String(fd.get(k) ?? "").trim();
       return v === "" ? undefined : Math.max(0, parseInt(v, 10) || 0);
     };
-    await advanceBatch(batchId, to, user.id, { actualPortions: num("actual"), wastePortions: num("waste"), assignedTo: String(fd.get("assignedTo") ?? "").trim() || undefined });
+    const notes = String(fd.get("notes") ?? "").trim().slice(0, 300) || undefined;
+    const r = await advanceBatch(batchId, to, user.id, { actualPortions: num("actual"), wastePortions: num("waste"), assignedTo: String(fd.get("assignedTo") ?? "").trim() || undefined, notes });
     revalidatePath("/admin/kitchen");
+    if (r.shortages.length) {
+      // posted, but some stock wasn't there — say so instead of a silent "done"
+      return fail(`Batch done and usage posted, but stock was short: ${r.shortages.map((s) => `${s.name} ${s.shortage}`).join(", ")}. Count and correct the stock.`);
+    }
     return done(to === "DONE" ? "Batch done — ingredient usage posted to stock" : `Batch ${to.toLowerCase()}`);
+  });
+}
+
+/** Pause / reopen new orders from the production dashboard (kitchen.approve or rules.edit; checked + audited in the service). */
+export async function kitchenStatusAction(_p: ActionResult, fd: FormData): Promise<ActionResult> {
+  return guard(async () => {
+    const user = await requirePermission("kitchen.view");
+    const kitchenId = String(fd.get("kitchenId") ?? "");
+    const status = String(fd.get("status") ?? "") as KitchenStatus;
+    if (status !== "OPEN" && status !== "PAUSED") return fail("Use the kitchen page to shut a kitchen down");
+    const r = await setKitchenStatus(user, kitchenId, status, String(fd.get("reason") ?? ""));
+    revalidatePath("/admin/kitchen");
+    revalidatePath(`/admin/kitchens/${kitchenId}`);
+    return done(!r.changed ? "No change" : status === "OPEN" ? "Taking orders again" : `New orders paused${r.upcoming ? ` — ${r.upcoming} upcoming order(s) kept` : ""}`);
   });
 }
 
@@ -113,8 +133,8 @@ export async function draftPurchasesAction(_p: ActionResult, fd: FormData): Prom
     const { kitchenId, date } = kd(fd);
     assertKitchen(user, kitchenId);
     const buffer = Math.max(0, parseInt(String(fd.get("buffer") ?? "5"), 10) || 0);
-    const f = await forecast(kitchenId, date, buffer);
-    const req = await requirements(kitchenId, f.dishes.map((d) => ({ menuItemId: d.menuItemId, name: d.name, total: d.total })));
+    const days = Math.max(1, Math.min(14, parseInt(String(fd.get("days") ?? "1"), 10) || 1));
+    const req = days > 1 ? await requirementsHorizon(kitchenId, date, days, buffer) : await forecast(kitchenId, date, buffer).then((f) => requirements(kitchenId, f.dishes.map((d) => ({ menuItemId: d.menuItemId, name: d.name, total: d.total }))));
     const bySupplier = new Map<string, { ingredientId: string; quantity: number; unitCost: number }[]>();
     let noSupplier = 0;
     for (const r of req.rows.filter((x) => x.short > 0)) {
@@ -127,8 +147,8 @@ export async function draftPurchasesAction(_p: ActionResult, fd: FormData): Prom
       bySupplier.set(r.supplierId, list);
     }
     if (!bySupplier.size) return fail(noSupplier ? `${noSupplier} short ingredient(s) have no supplier set` : "No shortages for this day");
-    for (const [supplierId, lines] of bySupplier) await createPurchaseOrder({ supplierId, kitchenId, lines, expectedOn: date, notes: `Shortages for ${date}`, actorId: user.id });
-    await audit({ actorId: user.id, action: "inventory.draft_pos", entity: "PurchaseOrder", summary: `${bySupplier.size} draft PO(s) for ${date}` });
+    for (const [supplierId, lines] of bySupplier) await createPurchaseOrder({ supplierId, kitchenId, lines, expectedOn: date, notes: `Shortages for ${date}${days > 1 ? ` (+${days - 1} days)` : ""}`, actorId: user.id });
+    await audit({ actorId: user.id, action: "inventory.draft_pos", entity: "PurchaseOrder", summary: `${bySupplier.size} draft PO(s) for ${date}${days > 1 ? ` (${days} days)` : ""}` });
     revalidatePath("/admin/inventory/purchases");
     return done(`${bySupplier.size} draft purchase order(s) created${noSupplier ? ` · ${noSupplier} item(s) without supplier` : ""}`, "/admin/inventory/purchases");
   });

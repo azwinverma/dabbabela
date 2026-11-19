@@ -396,7 +396,45 @@ Note: Postgres treats NULLs as distinct in unique keys, so `DailySettlement(date
 
 **Depends:** WP-01, WP-04 (box fields, for the swap UI only).
 
-## WP-07: Kitchen management ⬜ (M)
+## WP-07: Kitchen management ✅ (M)
+**Done 2026-11-05.** No schema change.
+- **Status gate (`capacity.ts`):** `kitchenOrderProblem` / `kitchenGate` — PAUSED, CLOSED (shut down), archived (`isActive` false) or a
+  weekday outside non-empty `workingDays` refuses **new meals** inside `assertDayCapacity` (every order path: cart, staff orders,
+  subscriptions, add-a-meal, reassignment into the kitchen, disruption moves). Calls with `meals: 0` (swaps, line edits on existing
+  orders) still pass; existing orders are never touched. Capacity changes are services now: `setCapacityOverride` (reports meals
+  already over), `clearCapacityOverride`, `setDailyCapacity` — `rules.edit` + kitchen scope, audited before/after (`capacity.set|clear|default`).
+- **Kitchen services (`kitchen.ts`, actor-checked):** `setKitchenStatus` (pause/reopen-from-pause: `kitchen.approve` or `rules.edit`;
+  shut down / reopen a shutdown: `rules.edit`; reason required; audit `kitchen.pause|shutdown|reopen` with upcoming orders kept),
+  `saveKitchenHours` (open/close, working days; audit `kitchen.hours`), `assignKitchenManager` (staff, active, able to access the
+  kitchen; audit `kitchen.manager`), `kitchenStaff`, `assignStaffToKitchen` / `removeStaffFromKitchen` (through `access.setScopes`,
+  so `staff.edit` + escalation guards + `staff.scope` audit; refuses removing a primary kitchen or someone's last kitchen, which would
+  widen them to all kitchens).
+- **Production dashboard:** `productionDashboard(kitchenId, date)` — meals by delivery slot (not started / preparing / ready /
+  dispatched), dishes grouped by recipe with scaled ingredient lines and batch state (stale plan flagged), requirements, batch
+  progress %, packing %, failed checks, ready for dispatch, ticket print status, capacity vs booked, explicit cut-off (menu-day
+  override or global) + lock, forecast strip (`mealsAhead`), shortages (forecast + **recorded on finished batches** via
+  `batchShortages`, read from the ledger's `SHORTAGE:` rows) and a production-issues list (over capacity, shortages, missing recipes,
+  cut-off passed unlocked, QC fails, failed packing, cancelled batches, paused kitchen…).
+- **Requirements:** `requirements()` now uses inventory.ts `scaleRecipe` (same maths as `postBatchStock`/`recipeForProduction`) and
+  returns `byDish`; `bomNeed` kept as a deprecated wrapper. `requirementsHorizon(kitchenId, from, days)` (1–14 days) on the
+  ingredients page; draft POs can cover the horizon.
+- **Batches:** `advanceBatch` returns `{ shortages }` (surfaced in the action message and the board); cancel needs a reason
+  (audited `kitchen.batch_cancel`); a repeated DONE no longer rewrites portions.
+- **Performance:** `kitchenPerformance(kitchenId, from, to)` — on-time packing (first PACKED event ≤ slot start; unpacked after the
+  window = late), QC pass rate, waste % (WASTE ÷ USAGE+WASTE ledger cost, plus batch portions), recipe cost per meal (current recipes
+  × dishes ordered) and actual ledger cost per meal, operating costs (APPROVED/PAID `Expense` by kitchen, read-only, by category).
+- **UI:** `/admin/kitchens` (scoped directory: status, manager, hours, today vs capacity, upcoming orders); `/admin/kitchens/[id]`
+  (status with reason, manager, hours/working days, closures next 30 days + link to holidays, 7-day capacity strip + overrides, staff
+  assign/remove, performance + operating costs by date range, delivery windows; out-of-scope → 404); `/admin/kitchen` rebuilt on
+  the dashboard (issues, slots, dishes by recipe, shortages, ready for dispatch, pause/resume); ingredients page horizon + by recipe;
+  tickets page slot / not-printed filters. Kitchen actions check scope; slot edits refuse another kitchen's slot.
+- Tests: `tests/integration/kitchen-mgmt.test.ts` (8: shutdown/pause block ordering + reopen restores + audit; working days; capacity
+  override respected + audited + clear; dashboard totals = booked orders and requirements = Σ `recipeForProduction`; recorded batch
+  shortage surfaced; performance metrics from records; manager/staff assignment rules; scope + permission refusals). The test uses
+  its own kitchens and never updates the seeded kitchen (an update moves its row, and `ops.test.ts` uses an unordered `findFirst`).
+- **Deferred:** E2E acceptance 8/10 (WP-20 Playwright); per-order ticket reprint; performance trend charts; storefront hiding of
+  dates for paused kitchens (request below).
+
 **Owns:** `src/server/kitchen.ts` (except `postBatchStock`, which moves to WP-08), `src/server/capacity.ts`, `src/app/admin/kitchens/**`, `src/app/admin/kitchen/**`.
 
 **Delivers:**
@@ -845,7 +883,7 @@ _Record here when a package needs a change in a file owned by another package._
 | From | To | Request | Status |
 |---|---|---|---|
 | WP-08 | WP-07 | Move `postBatchStock` from `kitchen.ts` to `inventory.ts` (WP-08 does the move first; WP-07 rebases) | done (WP-08: moved, re-exported from `kitchen.ts`; `advanceBatch` unchanged) |
-| WP-08 | WP-07 | Production dashboard: surface `postBatchStock(...).shortages` (today ignored by `advanceBatch`) and use `recipeForProduction` / `scaleRecipe` (inventory.ts) instead of the duplicate `bomNeed` in `requirements()` if wanted | open |
+| WP-08 | WP-07 | Production dashboard: surface `postBatchStock(...).shortages` (today ignored by `advanceBatch`) and use `recipeForProduction` / `scaleRecipe` (inventory.ts) instead of the duplicate `bomNeed` in `requirements()` if wanted | done (WP-07: `advanceBatch` returns `{ shortages }`, shown in the action + dashboard; `batchShortages()` reads recorded ones; `requirements()` uses `scaleRecipe`) |
 | WP-08 | WP-09 | Purchase-return credit: create the supplier credit / reduce payable from `purchaseReturns(poId).credit` (audit `po.return` carries lines + credit); invoices are shown read-only on the PO page via `supplierInvoicesForPO`. Food cost can use lot cost from USAGE/WASTE `StockMovement.unitCost` | open |
 | WP-08 | WP-16 | Detectors: call `inventoryAlerts(kitchenIds)` or the single functions (`lowStockAlerts`, `expiringLotAlerts`, `unexpectedConsumptionAlerts`, `stockDiscrepancyAlerts`, `lateDeliveryAlerts`) from `src/server/inventory.ts`; each row has a stable `dedupeKey` | open |
 | WP-08 | WP-10 | Inventory valuation report → `stockValuation(kitchenIds)` | open |
@@ -891,6 +929,11 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-12 | WP-16 | Detectors: `unpaidInvoices(companyId)` (overdue days), contracts expiring (`CorporateContract.endsOn` within 30 days, ACTIVE), `minCommitment(companyId, ym).shortfall`, `budgetStatus(companyId, ym)` rows with `over` | open |
 | WP-12 | WP-10 | Corporate order report → `companyOrderReport` / `departmentSummary` (`corporate.ts`) | open |
 | WP-12 | WP-00 (next schema change) | Dated company-invoice receipts (a receipt table, or nullable `Payment.userId`) — today the dated record is the `invoice.payment` audit row (`invoicePaymentHistory`); `OrderAdjustment.invoiceLineId` to replace the `[adj:<id>]` line tag | open |
+| WP-07 | WP-06 | `calendar.ts orderableDates` / `getLockedDates`: drop dates where `kitchenGate(kitchenId, date)` (`capacity.ts`) returns a problem (PAUSED/CLOSED kitchen, weekday outside `workingDays`), so pickers don't offer days that checkout refuses (`assertDayCapacity` already refuses them) | open |
+| WP-07 | WP-11 | Storefront checkout / coverage (`(site)/checkout`, `delivery-areas`): kitchens filtered by `isActive` only — also hide or explain kitchens whose `status` ≠ OPEN, showing `statusNote` | open |
+| WP-07 | WP-16 | Detectors: `productionDashboard(kitchenId, date).issues` (severity + message), `batchShortages(kitchenId, date)` and over-capacity (`capacity.booked > limit`) from `src/server/kitchen.ts`; kitchen status changes are audited as `kitchen.pause|shutdown|reopen` | open |
+| WP-07 | WP-10 | Kitchen performance report → `kitchenPerformance(kitchenId, from, to)` (`src/server/kitchen.ts`) | open |
+| WP-07 | WP-00 / WP-20 | `tests/integration/ops.test.ts` uses `db.kitchen.findFirstOrThrow()` without a filter; any update to the seeded kitchen reorders rows and breaks it. Use `{ where: { code: "KTM-1" } }` | open |
 
 ## External blockers (⛔)
 | Blocker | Affects |
@@ -920,3 +963,4 @@ _Record here when a package needs a change in a file owned by another package._
 | 2026-11-05 | WP-13 | Riders page + profiles, distance fee bands / zone windows (coverage hook), route grouping + cost, changed-after-routing flags, required failed reasons, rider date picker (past read-only), per-rider/zone performance; 10 integration tests |
 | 2026-11-05 | WP-11 | CRM on the kit (directory, saved views, 360, audited edits, suspend, approved credit, notes, comm prefs, privacy, masked exports); consented first/last-touch attribution → user → order; middleware request id; 16 integration tests |
 | 2026-11-05 | WP-12 | Corporate: contract versions + supersede + credit terms + min-commitment shortfall, department budgets (refuse / employee pays), eligibility in team and self orders, company menus, delivery instructions + grouped deliveries, contract-aware invoices with company adjustments, payments/overdue, company scope for staff, `/team` budgets + deliveries; 9 integration tests |
+| 2026-11-05 | WP-07 | Kitchen management: open/pause/shut down (blocks new orders in `assertDayCapacity`, audited), manager, hours/working days, staff assignment, audited capacity services, production dashboard (slots, recipes, progress, packing, dispatch-ready, shortages incl. recorded batch shortages, issues, cut-off), requirements via `scaleRecipe` + horizon, per-kitchen performance + operating costs; 8 integration tests |
