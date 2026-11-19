@@ -784,7 +784,46 @@ campaign, no consent → nothing stored, request-id header, portion kept).
 
 **Depends:** WP-01.
 
-## WP-15: Promotions and marketing ⬜ (M)
+## WP-15: Promotions and marketing ✅ (M)
+**Done 2026-11-19.**
+- **Coupons** (`src/server/coupons.ts`, signatures of `checkCoupon`/`redeemCoupon` kept): free-delivery-only codes (0 discount) are
+  accepted; optional `lines` on `checkCoupon` makes box-scoped codes check `minSubtotal` and the discount on the eligible lines' share of
+  the base (same maths as `pricing.ts`); no eligible line → refused. `checkCoupons(codes)` refuses combining unless every code is
+  `stackable` (referral welcome coupon never stacks). `redeemCoupon` takes a per-customer advisory lock before the per-user count, then
+  the guarded usage counter. Admin service `saveCouponRecord` / `setCouponActive` (`pricing.edit`, audited before/after, reason
+  required to change a used code's value, refuses referral-code clashes) and `couponUsage` (redemptions, customers, discount, last used,
+  orders, recognised revenue of those orders). `/admin/coupons` on the kit (DataTable, filters: text, live/scheduled/expired/disabled,
+  campaign; badges for free delivery / first order / dabbas / stackable); detail page with all fields (free delivery, dabba multi-select,
+  stackable, campaign link, blank per-customer = unlimited) and usage stat cards.
+- **Campaigns** (`src/server/marketing.ts`, `marketing.*` checked in every function): name, channel, UTM key (unique case-insensitive),
+  dates, budget, notes, active → derived status Running/Scheduled/Ended/Paused; spend entries add/remove (audited); idempotent import of
+  the old `Setting` "marketing.spend" months into a "Monthly marketing spend (imported)" campaign (setting left for the old CAC report).
+  `campaignPerformance(actor, {from, to, model})`: spend (period + to date vs budget), sign-ups, single orders + plans (analytics
+  *bookings* basis), new customers (first booked order in the period), recognised revenue (analytics `recognisedWhere`; only with
+  `analytics.view`), linked-coupon redemptions, ROAS, CAC; "no data" where nothing exists. **Attribution:** last touch (default) =
+  `Order.campaignId` or the plan's `Subscription.campaignId`, sign-ups by `User.attribution.last.campaign` (else first); first touch =
+  the user's first-touch `User.attribution.campaign` = `Campaign.utmCampaign`. `/admin/campaigns` (list + totals + model/period filter
+  + explanation), `/admin/campaigns/[id]` (edit, performance, spend, linked coupons, message templates).
+- **Templates:** campaign email/SMS templates stored as `NotificationTemplate` key `campaign.<id>` (en/ne, SMS ≤ 480 chars, audited);
+  page shows provider status (Resend / SMS configured?) and the opted-in audience; **nothing is sent** (no broadcast built).
+- **Referrals:** settings in `Setting` "marketing.referrals" (on/off, friend's discount, referrer reward, caps per referrer and per
+  month) backed by a managed welcome coupon (first order only, 1 per customer, can't be typed directly or edited on the coupons page).
+  Every customer gets a code (`ensureReferralCode`). A new customer links a friend's code on `/account/referrals` or by typing it as
+  the coupon at checkout (`checkCoupon` maps it to the welcome coupon; `Order.couponCode` = the referral code). Refused: own code, a
+  second code, customers who already ordered, staff. Same phone / delivery address (normalised or within ~30 m) / device (IP + UA from
+  sessions and sign-ins) → HELD; staff approve (APPROVED) or reject with a note (audited). `settleReferral` credits the referrer's wallet
+  (`CreditLedger` reason `REFERRAL`) only when the referee has a DELIVERED order with payment PAID/PARTIALLY_REFUNDED: referrer-locked
+  transaction + conditional REWARDED update with `rewardLedgerId` → exactly once; caps → QUALIFIED (retried). Triggers: admin "Pay
+  qualifying rewards now", the referrer's page view, `settleReferralFor(refereeId)` hook (requests below). `/admin/campaigns/referrals`
+  (settings, totals, list with signals, approve/reject).
+Tests: `tests/integration/marketing.test.ts` (9: free-delivery-only accepted + nothing-coupon refused, box-scoped minimum on eligible
+lines, per-user limit under concurrent checkouts on different days, stacking refused + total never below 0, campaign performance equals
+the underlying records (spend window, sign-ups case-insensitive, booked orders, recognised revenue, new customers, CAC/ROAS, first-touch,
+permissions, audit), legacy spend import once, self-referral + duplicate referee refused, already-ordered refused + look-alike held +
+approve, welcome discount at checkout + reward only after delivered **and** paid + exactly once under concurrency).
+**Deferred:** loyalty (not specified beyond "backlog after referrals"); sending campaign messages (no broadcast + provider blockers);
+referral terms legal review (external).
+
 **Owns:** `src/server/coupons.ts` (keep the `validateCoupon`/`redeemCoupon` signatures), `src/server/marketing.ts` (new), `src/app/admin/coupons/**`, `src/app/admin/campaigns/**` (new), `src/app/(site)/account/referrals/**` (new).
 
 **Delivers:**
@@ -890,7 +929,7 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-08 | WP-19 | `src/components/admin/ops/InvTabs.tsx` is no longer used (inventory pages use `src/app/admin/inventory/_components/InventoryTabs.tsx`); delete when convenient | open |
 | WP-12 | WP-03 / WP-05 | Negotiated per-box company price hook in `quoteCart` (`orders.ts`) → call `corporate.ts priceFor(company, boxId)` | done (WP-05 helper; WP-03: `quoteCart` box lines use `negotiatedUnitPrice` with the `boxPrices` of the company's ACTIVE contract in force on the line's date, before substitution deltas) |
 | WP-15 | WP-05 | `pricing.ts` must respect `Coupon.freeDelivery` (delivery fee → 0) and `boxIds` scope | done (WP-05) |
-| WP-05 | WP-15 | `checkCoupon` (`coupons.ts`) refuses a coupon whose discount is 0, so a pure free-delivery coupon (value 0) is rejected. Allow `freeDelivery` coupons with 0 discount; for `boxIds` coupons, check `minSubtotal`/discount on the eligible lines (needs the lines passed in) | planned |
+| WP-05 | WP-15 | `checkCoupon` (`coupons.ts`) refuses a coupon whose discount is 0, so a pure free-delivery coupon (value 0) is rejected. Allow `freeDelivery` coupons with 0 discount; for `boxIds` coupons, check `minSubtotal`/discount on the eligible lines (needs the lines passed in) | done (WP-15: free-delivery 0-discount accepted; optional `lines` → eligible-line minimum + discount. Callers must pass the lines — see WP-15 → WP-03/WP-06 row) |
 | WP-05 | WP-03 | `quoteCart` / subscriptions: pass `{ kitchenId }` to `priceCustomBox` so per-kitchen option availability is enforced at checkout (today it's enforced in the builder's quote/save only) | done for `quoteCart` (WP-03: `{ kitchenId }` passed); subscriptions part → WP-06 |
 | WP-05 | WP-11 | `saveCustomBoxAction` (`shop.ts`) drops `portionId` when it re-maps items. Keep `portionId` | done (WP-11: `portionId` validated and passed to `priceCustomBox`; saved items keep it) |
 | WP-11 | WP-03 | Pass `attribution` into `placeCartOrder` | done (WP-03: optional `attribution: OrderAttribution` — UTM keys sanitised into `Order.attribution`, `campaignId` kept only if the Campaign exists. WP-11: `placeOrderAction` passes the consented last/first touch + campaign id) |
@@ -910,7 +949,7 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-11 | WP-06 | Subscription attribution: let `createSubscription` accept `attribution`/`campaignId` (→ `Subscription.campaignId`, e.g. via `cleanAttribution` from `orders.ts`) and pass it from `subscribePlanAction`/`renewPlanAction` with `orderTouch(readAttribution(await cookies()))` + `campaignIdFor()` (`src/lib/attribution.ts`, `src/server/crm.ts`) | open |
 | WP-11 | WP-03 / WP-12 | Suspended customers: staff-placed orders (`orders-admin.ts`) and company/team orders (`team.ts`) should refuse a customer whose account is suspended or deleted — call `assertCustomerCanOrder(userId)` (`src/server/crm.ts`) or check `isActive`/`deletedAt` in `placeCartOrder` | open |
 | WP-11 | WP-14 | Privacy policy: add the attribution-cookie paragraph (`dabba_consent` 180 d, `dabba_ft` 90 d, `dabba_lt` 30 d; UTM values, referring host, landing path; stored on account/orders; "No thanks" deletes). Footer "Cookie choices" link: `onClick={() => window.dispatchEvent(new Event("dabba:consent-open"))}` (export `OPEN_EVENT` in `ConsentNotice.tsx`). Note: WP-11 mounted `<ConsentNotice />` in `src/app/(site)/layout.tsx` (one line) | open |
-| WP-11 | WP-15 / WP-10 | Attribution report: first touch = `User.acquisitionSource`/`User.attribution` (flat first touch + `last`), order = `Order.attribution` (last touch) + `Order.campaignId`. The `/api/admin/export/customers` CSV could reuse `exportCustomerDirectory` (adds acquisition source, filters) | open |
+| WP-11 | WP-15 / WP-10 | Attribution report: first touch = `User.acquisitionSource`/`User.attribution` (flat first touch + `last`), order = `Order.attribution` (last touch) + `Order.campaignId`. The `/api/admin/export/customers` CSV could reuse `exportCustomerDirectory` (adds acquisition source, filters) | WP-15 part done (`campaignPerformance` first/last touch on `/admin/campaigns`); WP-10 part open |
 | WP-11 | e2e owners / WP-20 | The site now shows an in-flow consent bar above the header until answered; e2e contexts that assert on top-of-page layout can pre-set cookie `dabba_consent=granted` or `denied` | open |
 | WP-06 | WP-16 | Daily cron: call `syncPlanPriceMirrors()` (scheduled plan price becomes the `MealPlan` mirror read by home/CMS pricing tables) next to `completeAndRemind()` | open |
 | WP-06 | WP-09 | "Pay the difference" for a swap up-charge on a paid plan when wallet credit is short: a Payment for the delta whose `markPaymentPaid` applies the pending swap (today WP-06 refuses and asks for credit) | open |
@@ -934,6 +973,14 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-07 | WP-16 | Detectors: `productionDashboard(kitchenId, date).issues` (severity + message), `batchShortages(kitchenId, date)` and over-capacity (`capacity.booked > limit`) from `src/server/kitchen.ts`; kitchen status changes are audited as `kitchen.pause|shutdown|reopen` | open |
 | WP-07 | WP-10 | Kitchen performance report → `kitchenPerformance(kitchenId, from, to)` (`src/server/kitchen.ts`) | open |
 | WP-07 | WP-00 / WP-20 | `tests/integration/ops.test.ts` uses `db.kitchen.findFirstOrThrow()` without a filter; any update to the seeded kitchen reorders rows and breaks it. Use `{ where: { code: "KTM-1" } }` | open |
+| WP-15 | WP-03 / WP-06 | Pass the priced lines to `checkCoupon(code, { …, lines })` — `quoteCart` (`orders.ts`, `lines: priceable`) and plan quotes (`subscriptions.ts`, `lines`) — so box-scoped coupons check the minimum order and discount on the covered dabbas at checkout (without `lines` the whole base is used, as before) | open |
+| WP-15 | WP-03 / payments owner (WP-09) | Referral rewards: after commit, `void settleReferralFor(order.userId)` (`src/server/marketing.ts`) when `setOrderStatus` moves an order to DELIVERED and when `markPaymentPaid` marks orders paid. Idempotent; until wired, rewards are paid by the admin button / the referrer's page view | open |
+| WP-15 | WP-16 | Daily cron: `settleReferralRewards()` (`src/server/marketing.ts`) | open |
+| WP-15 | WP-18 | Wallet page `REASON` label for `REFERRAL` ("Referral reward"); account nav link to `/account/referrals` ("Refer a friend") | open |
+| WP-15 | WP-10 / reports owner | `cac()` in `reports.ts` still reads `Setting` "marketing.spend"; switch to Σ `CampaignSpend` per month (`importLegacySpend` moved the months into a campaign) | open |
+| WP-15 | WP-11 | Optional: accept `?ref=CODE` at sign-up (`auth.ts`) and call `claimReferral(userId, code)`; checkout coupon field hint "Friend's referral code works here too" | open |
+| WP-15 | `ledger.ts` owner | Add `"REFERRAL"` to `LedgerEntry["reason"]` (marketing.ts writes the row directly in its own transaction) | open |
+| WP-15 | WP-00 (next schema change) | `Referral.rewardedAt`, `Referral.note` (hold reason / staff decision — today in the audit log), and setting `CouponRedemption.orderId` (orders.ts passes only `paymentId`) | open |
 
 ## External blockers (⛔)
 | Blocker | Affects |
@@ -964,3 +1011,4 @@ _Record here when a package needs a change in a file owned by another package._
 | 2026-11-05 | WP-11 | CRM on the kit (directory, saved views, 360, audited edits, suspend, approved credit, notes, comm prefs, privacy, masked exports); consented first/last-touch attribution → user → order; middleware request id; 16 integration tests |
 | 2026-11-05 | WP-12 | Corporate: contract versions + supersede + credit terms + min-commitment shortfall, department budgets (refuse / employee pays), eligibility in team and self orders, company menus, delivery instructions + grouped deliveries, contract-aware invoices with company adjustments, payments/overdue, company scope for staff, `/team` budgets + deliveries; 9 integration tests |
 | 2026-11-05 | WP-07 | Kitchen management: open/pause/shut down (blocks new orders in `assertDayCapacity`, audited), manager, hours/working days, staff assignment, audited capacity services, production dashboard (slots, recipes, progress, packing, dispatch-ready, shortages incl. recorded batch shortages, issues, cut-off), requirements via `scaleRecipe` + horizon, per-kitchen performance + operating costs; 8 integration tests |
+| 2026-11-19 | WP-15 | Promotions: free-delivery/box-scoped coupon checks, stacking rule, per-customer lock, coupons on the kit + usage; campaigns + spend + legacy import + first/last-touch performance; campaign templates (no sending); referrals with fraud holds and exactly-once wallet rewards, `/account/referrals`; 9 integration tests |
