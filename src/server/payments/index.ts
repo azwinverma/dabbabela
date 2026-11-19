@@ -98,6 +98,8 @@ export async function markPaymentPaid(paymentId: string, opts: { amount?: number
   if (!result.already) {
     void notify("payment.received", { userId: result.payment.userId }, { amount: rs(opts.amount ?? result.payment.amount), reference: result.payment.reference }, { dedupeKey: `paid:${paymentId}` });
     if (opts.actorId) await audit({ actorId: opts.actorId, action: "payment.mark_paid", entity: "Payment", entityId: paymentId, summary: `${result.payment.reference} marked paid`, reason: opts.note });
+    // WP-15: payment may be the last condition for a referral reward (idempotent; never blocks payment).
+    void import("../marketing").then((m) => m.settleReferralFor(result.payment.userId)).catch((error) => log.error("referral.settle_failed", { paymentId, error }));
   }
   return result;
 }

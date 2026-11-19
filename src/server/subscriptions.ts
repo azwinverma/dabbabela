@@ -282,14 +282,14 @@ export async function quoteSubscription(user: CurrentUser | null, input: PlanInp
   // Distance band fee when the address has a pin (WP-13); a pin past the last band is outside the delivery radius.
   const zq = zoneSpecFor(zone, address ? { lat: address.lat, lng: address.lng } : null);
   const zoneSpec = plan.includesDelivery || !zq.spec ? null : { fee: zq.spec.fee, freeAbove: null, minOrder: 0 };
-  const lines = meals.filter((m) => m.price > 0).map((m) => ({ date: m.date, unitPrice: m.price, unitCost: m.cost, qty: 1 }));
+  const lines = meals.filter((m) => m.price > 0).map((m) => ({ date: m.date, unitPrice: m.price, unitCost: m.cost, qty: 1, boxId: m.boxId ?? null }));
   const pre = applyDayCompanyShares(priceDays({ lines, zone: zoneSpec, company: spec, tax, globalFreeAbove: 0 }), spec, split.eligible);
   let couponId: string | null = null;
   let couponCode: string | null = null;
   let couponError: string | null = null;
   let priced = pre;
   if (input.couponCode?.trim() && user) {
-    const r = await checkCoupon(input.couponCode, { userId: user.id, base: pre.subtotal - pre.companyDiscount, scope: "SUBSCRIPTIONS" });
+    const r = await checkCoupon(input.couponCode, { userId: user.id, base: pre.subtotal - pre.companyDiscount, scope: "SUBSCRIPTIONS", lines });
     if (r.ok) {
       couponId = r.coupon.id;
       couponCode = r.coupon.code;

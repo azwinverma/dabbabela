@@ -321,7 +321,7 @@ export async function quoteCart(
   if (input.couponCode?.trim()) {
     if (!user) couponError = "Log in to use a coupon";
     else {
-      const r = await checkCoupon(input.couponCode, { userId: user.id, base: pre.subtotal - pre.companyDiscount, scope: "ORDERS" });
+      const r = await checkCoupon(input.couponCode, { userId: user.id, base: pre.subtotal - pre.companyDiscount, scope: "ORDERS", lines: priceable });
       if (r.ok) {
         coupon = r.coupon;
         couponCode = r.coupon.code;
@@ -639,6 +639,8 @@ export async function setOrderStatus(ids: string[], to: OrderStatus, actorId: st
     res.changed.push(o.id);
     if (to === "OUT_FOR_DELIVERY") void notify("order.out_for_delivery", { userId: o.userId }, { number: o.number, otp: o.deliveryOtp ?? "" }, { dedupeKey: `ofd:${o.id}` });
     if (to === "DELIVERED") void notify("order.delivered", { userId: o.userId }, { number: o.number }, { link: `/account/orders/${o.id}`, dedupeKey: `del:${o.id}` });
+    // WP-15: a delivered + paid first order releases the referrer's reward (idempotent; never blocks delivery).
+    if (to === "DELIVERED") void import("./marketing").then((m) => m.settleReferralFor(o.userId)).catch((error) => log.error("referral.settle_failed", { orderId: o.id, error }));
     if (to === "FAILED_DELIVERY") void notify("order.failed_delivery", { userId: o.userId }, { number: o.number, reason: note || "We couldn't reach you" }, { dedupeKey: `fail:${o.id}:${Date.now()}` });
   }
   return res;
