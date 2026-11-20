@@ -54,7 +54,7 @@ export async function overCapacity(f: AnalyticsFilters, start: string, days = 7)
     db.$queryRaw<{ kitchenId: string; d: Date; meals: bigint }[]>`
       SELECT o."kitchenId", o."deliveryDate" AS d, SUM(oi.quantity) AS meals
       FROM "OrderItem" oi JOIN "Order" o ON o.id = oi."orderId"
-      WHERE o."kitchenId" = ANY(${ids}) AND o."deliveryDate" BETWEEN ${range.gte} AND ${range.lte} AND o.status::text = ANY(${LIVE_STATUSES as string[]})
+      WHERE o."kitchenId" = ANY(${ids}) AND o."deliveryDate" BETWEEN (${range.gte} AT TIME ZONE 'UTC')::date AND (${range.lte} AT TIME ZONE 'UTC')::date AND o.status::text = ANY(${LIVE_STATUSES as string[]})
       GROUP BY 1, 2`,
     db.kitchenCapacity.findMany({ where: { kitchenId: { in: ids }, date: range }, select: { kitchenId: true, date: true, maxMeals: true } }),
   ]);

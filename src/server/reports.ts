@@ -111,7 +111,7 @@ export async function customerMetrics(r: Range) {
   if (ids.length) {
     const days = await db.$queryRaw<{ userId: string; d: bigint }[]>`
       SELECT "userId", COUNT(DISTINCT "deliveryDate") AS d FROM "Order"
-      WHERE "userId" = ANY(${ids}) AND "deliveryDate" <= ${dateOnly(r.to)}
+      WHERE "userId" = ANY(${ids}) AND "deliveryDate" <= (${dateOnly(r.to)} AT TIME ZONE 'UTC')::date
         AND status::text = ANY(${REVENUE_STATUSES as string[]})
       GROUP BY "userId"`;
     repeat = days.filter((x) => Number(x.d) >= 2).length;
@@ -186,7 +186,7 @@ export async function popularDishes(r: Range, take = 10) {
     SELECT c->>'name' AS name, SUM((c->>'qty')::int * oi.quantity) AS n
     FROM "OrderItem" oi JOIN "Order" o ON o.id = oi."orderId"
     CROSS JOIN LATERAL jsonb_array_elements(oi.components) c
-    WHERE o."deliveryDate" BETWEEN ${dateOnly(r.from)} AND ${dateOnly(r.to)}
+    WHERE o."deliveryDate" BETWEEN (${dateOnly(r.from)} AT TIME ZONE 'UTC')::date AND (${dateOnly(r.to)} AT TIME ZONE 'UTC')::date
       AND o.status::text = ANY(${REVENUE_STATUSES as string[]})
       ${kids(r) ? Prisma.sql`AND o."kitchenId" = ANY(${kids(r)})` : Prisma.empty}
     GROUP BY 1 ORDER BY 2 DESC LIMIT ${take}`;
@@ -234,7 +234,7 @@ export async function cac(ym: string) {
       SELECT "userId", MIN("deliveryDate") AS first FROM "Order"
       WHERE status::text = ANY(${REVENUE_STATUSES as string[]})
       GROUP BY "userId"
-    ) f WHERE f.first BETWEEN ${dateOnly(start)} AND ${dateOnly(end)}`;
+    ) f WHERE f.first BETWEEN (${dateOnly(start)} AT TIME ZONE 'UTC')::date AND (${dateOnly(end)} AT TIME ZONE 'UTC')::date`;
   const newCustomers = Number(rows[0]?.n ?? 0);
   return { ym, spend, newCustomers, cac: spend != null && newCustomers ? Math.round(spend / newCustomers) : null };
 }

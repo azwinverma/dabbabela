@@ -19,7 +19,7 @@ export async function customerStats(f: AnalyticsFilters) {
   const rows = await db.$queryRaw<{ active: bigint; orders: bigint; returning: bigint; fresh: bigint }[]>`
     WITH inr AS (
       SELECT o."userId", COUNT(*) AS n FROM "Order" o
-      WHERE o.status::text = ANY(${REC}) AND o."deliveryDate" BETWEEN ${day.gte} AND ${day.lte} ${dims}
+      WHERE o.status::text = ANY(${REC}) AND o."deliveryDate" BETWEEN (${day.gte} AT TIME ZONE 'UTC')::date AND (${day.lte} AT TIME ZONE 'UTC')::date ${dims}
       GROUP BY 1
     ), firsts AS (
       SELECT o."userId", MIN(o."deliveryDate") AS first FROM "Order" o
@@ -42,7 +42,7 @@ export async function ltv(f: AnalyticsFilters) {
   const rows = await db.$queryRaw<{ customers: bigint; total: bigint | null }[]>`
     SELECT COUNT(*) AS customers, SUM(v) AS total FROM (
       SELECT o."userId", SUM(o.total - o.tax - o."refundedAmount") AS v FROM "Order" o
-      WHERE o.status::text = ANY(${REC}) AND o."deliveryDate" <= ${end} ${orderDimsSql(f, "o")}
+      WHERE o.status::text = ANY(${REC}) AND o."deliveryDate" <= (${end} AT TIME ZONE 'UTC')::date ${orderDimsSql(f, "o")}
       GROUP BY 1
     ) t`;
   const customers = Number(rows[0]?.customers ?? 0);

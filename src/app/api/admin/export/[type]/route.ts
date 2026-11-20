@@ -74,7 +74,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ type: st
     const r = await db.$queryRaw<{ name: string; n: bigint }[]>`
       SELECT c->>'name' AS name, SUM((c->>'qty')::int * oi.quantity) AS n
       FROM "OrderItem" oi JOIN "Order" o ON o.id = oi."orderId" CROSS JOIN LATERAL jsonb_array_elements(oi.components) c
-      WHERE o."deliveryDate" BETWEEN ${dateOnly(from)} AND ${dateOnly(to)} AND o.status::text = ANY(${REVENUE_STATUSES as string[]})
+      WHERE o."deliveryDate" BETWEEN (${dateOnly(from)} AT TIME ZONE 'UTC')::date AND (${dateOnly(to)} AT TIME ZONE 'UTC')::date AND o.status::text = ANY(${REVENUE_STATUSES as string[]})
         ${scope ? Prisma.sql`AND o."kitchenId" = ANY(${scope})` : Prisma.empty}
       GROUP BY 1 ORDER BY 2 DESC`;
     rows = [["Dish", "Portions"], ...r.map((x) => [x.name, Number(x.n)])];

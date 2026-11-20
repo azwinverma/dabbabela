@@ -120,7 +120,7 @@ export const customerLifetimeValue: ReportDef = {
       db.$queryRaw<{ userId: string; v: bigint; c: bigint; first: Date; last: Date; name: string | null; email: string | null; deletedAt: Date | null }[]>`
         SELECT t.*, u.name, u.email, u."deletedAt" FROM (
           SELECT o."userId", SUM(o.total - o.tax - o."refundedAmount") AS v, COUNT(*) AS c, MIN(o."deliveryDate") AS first, MAX(o."deliveryDate") AS last
-          FROM "Order" o WHERE o.status::text = ANY(${REC}) AND o."deliveryDate" <= ${end} ${orderDimsSql(f, "o")}
+          FROM "Order" o WHERE o.status::text = ANY(${REC}) AND o."deliveryDate" <= (${end} AT TIME ZONE 'UTC')::date ${orderDimsSql(f, "o")}
           GROUP BY 1
         ) t JOIN "User" u ON u.id = t."userId"
         ORDER BY t.v DESC, t."userId" ASC LIMIT ${w.take} OFFSET ${w.skip}`,
@@ -163,12 +163,12 @@ export const popularMeals: ReportDef = {
       choice.level === "dabba"
         ? await db.$queryRaw<{ name: string; n: bigint; o: bigint }[]>`
             SELECT oi.name, SUM(oi.quantity) AS n, COUNT(DISTINCT o.id) AS o FROM "OrderItem" oi JOIN "Order" o ON o.id = oi."orderId"
-            WHERE o."deliveryDate" BETWEEN ${day.gte} AND ${day.lte} AND o.status::text = ANY(${LIVE}) ${dims}
+            WHERE o."deliveryDate" BETWEEN (${day.gte} AT TIME ZONE 'UTC')::date AND (${day.lte} AT TIME ZONE 'UTC')::date AND o.status::text = ANY(${LIVE}) ${dims}
             GROUP BY 1`
         : await db.$queryRaw<{ name: string; n: bigint; o: bigint }[]>`
             SELECT c->>'name' AS name, SUM(COALESCE((c->>'qty')::int, 1) * oi.quantity) AS n, COUNT(DISTINCT o.id) AS o
             FROM "OrderItem" oi JOIN "Order" o ON o.id = oi."orderId" CROSS JOIN LATERAL jsonb_array_elements(oi.components) c
-            WHERE o."deliveryDate" BETWEEN ${day.gte} AND ${day.lte} AND o.status::text = ANY(${LIVE}) ${dims}
+            WHERE o."deliveryDate" BETWEEN (${day.gte} AT TIME ZONE 'UTC')::date AND (${day.lte} AT TIME ZONE 'UTC')::date AND o.status::text = ANY(${LIVE}) ${dims}
             GROUP BY 1`;
     const total = rows.reduce((a, r) => a + Number(r.n), 0);
     const all = rows.map((r) => ({ name: r.name ?? "—", qty: Number(r.n), orders: Number(r.o), share: ratio(Number(r.n), total) })).sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));

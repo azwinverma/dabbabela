@@ -210,12 +210,12 @@ export async function trendSeries(f: AnalyticsFilters, bucket: Bucket = "day") {
   const [rec, single, plans, cashRows] = await Promise.all([
     db.$queryRaw<{ b: Date; v: bigint; c: bigint }[]>`
       SELECT ${trunc(Prisma.sql`o."deliveryDate"`)} AS b, SUM(o.total - o.tax - o."refundedAmount") AS v, COUNT(*) AS c
-      FROM "Order" o WHERE o.status::text = ANY(${RECOGNISED_STATUSES as string[]}) AND o."deliveryDate" BETWEEN ${day.gte} AND ${day.lte} ${dims}
+      FROM "Order" o WHERE o.status::text = ANY(${RECOGNISED_STATUSES as string[]}) AND o."deliveryDate" BETWEEN (${day.gte} AT TIME ZONE 'UTC')::date AND (${day.lte} AT TIME ZONE 'UTC')::date ${dims}
       GROUP BY 1`,
     db.$queryRaw<{ b: Date; v: bigint }[]>`
       SELECT ${trunc(Prisma.sql`${KTM_DATE('o."createdAt"')}`)} AS b, SUM(o.total) AS v
       FROM "Order" o WHERE o."subscriptionId" IS NULL AND o.status::text <> ALL(${NOT_BOOKED as string[]})
-        AND o."createdAt" >= ${st.gte} AND o."createdAt" < ${st.lt} ${dims}
+        AND o."createdAt" >= (${st.gte} AT TIME ZONE 'UTC') AND o."createdAt" < (${st.lt} AT TIME ZONE 'UTC') ${dims}
       GROUP BY 1`,
     db.subscription.findMany({ where: bookingsPlanWhere(f), select: { createdAt: true, total: true } }),
     db.payment.findMany({ where: cashWhere(f), select: { paidAt: true, amount: true } }),
@@ -285,7 +285,7 @@ export async function byPlan(f: AnalyticsFilters): Promise<BreakdownRow[]> {
   const rows = await db.$queryRaw<{ id: string | null; name: string | null; v: bigint; c: bigint }[]>`
     SELECT p.id, p.name, SUM(o.total - o.tax - o."refundedAmount") AS v, COUNT(*) AS c
     FROM "Order" o LEFT JOIN "Subscription" s ON s.id = o."subscriptionId" LEFT JOIN "MealPlan" p ON p.id = s."planId"
-    WHERE o.status::text = ANY(${RECOGNISED_STATUSES as string[]}) AND o."deliveryDate" BETWEEN ${day.gte} AND ${day.lte} ${orderDimsSql(f, "o")}
+    WHERE o.status::text = ANY(${RECOGNISED_STATUSES as string[]}) AND o."deliveryDate" BETWEEN (${day.gte} AT TIME ZONE 'UTC')::date AND (${day.lte} AT TIME ZONE 'UTC')::date ${orderDimsSql(f, "o")}
     GROUP BY 1, 2`;
   return sortRows(rows.map((r) => ({ key: r.id ?? NONE, label: r.name ?? "Single orders (no plan)", value: Number(r.v), count: Number(r.c) })));
 }
@@ -304,7 +304,7 @@ export async function byCategory(f: AnalyticsFilters): Promise<BreakdownRow[]> {
     SELECT mc.id, mc.name, SUM(oi."lineTotal") AS v, SUM(oi.quantity) AS c
     FROM "OrderItem" oi JOIN "Order" o ON o.id = oi."orderId"
       LEFT JOIN "LunchBox" b ON b.id = oi."boxId" LEFT JOIN "MealCategory" mc ON mc.id = b."categoryId"
-    WHERE o.status::text = ANY(${RECOGNISED_STATUSES as string[]}) AND o."deliveryDate" BETWEEN ${day.gte} AND ${day.lte} ${orderDimsSql(f, "o")}
+    WHERE o.status::text = ANY(${RECOGNISED_STATUSES as string[]}) AND o."deliveryDate" BETWEEN (${day.gte} AT TIME ZONE 'UTC')::date AND (${day.lte} AT TIME ZONE 'UTC')::date ${orderDimsSql(f, "o")}
     GROUP BY 1, 2`;
   return sortRows(rows.map((r) => ({ key: r.id ?? NONE, label: r.name ?? "Uncategorised / Build-a-Dabba", value: Number(r.v), count: Number(r.c) })));
 }
@@ -315,7 +315,7 @@ export async function byChannel(f: AnalyticsFilters): Promise<{ rows: BreakdownR
   const rows = await db.$queryRaw<{ ch: string | null; v: bigint; c: bigint }[]>`
     SELECT u."acquisitionSource" AS ch, SUM(o.total - o.tax - o."refundedAmount") AS v, COUNT(*) AS c
     FROM "Order" o JOIN "User" u ON u.id = o."userId"
-    WHERE o.status::text = ANY(${RECOGNISED_STATUSES as string[]}) AND o."deliveryDate" BETWEEN ${day.gte} AND ${day.lte} ${orderDimsSql(f, "o")}
+    WHERE o.status::text = ANY(${RECOGNISED_STATUSES as string[]}) AND o."deliveryDate" BETWEEN (${day.gte} AT TIME ZONE 'UTC')::date AND (${day.lte} AT TIME ZONE 'UTC')::date ${orderDimsSql(f, "o")}
     GROUP BY 1`;
   const out = sortRows(rows.map((r) => ({ key: r.ch ?? NONE, label: r.ch ?? "Not captured yet", value: Number(r.v), count: Number(r.c) })));
   return { rows: out, captured: out.some((r) => r.key !== NONE) };

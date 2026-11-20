@@ -110,7 +110,7 @@ export const ingredientConsumption: ReportDef = {
         SUM(CASE WHEN m.type = 'USAGE' THEN ROUND((ABS(m.quantity) * COALESCE(m."unitCost", i."costPerUnit"))::numeric) ELSE 0 END) AS uc,
         SUM(CASE WHEN m.type = 'WASTE' THEN ROUND((ABS(m.quantity) * COALESCE(m."unitCost", i."costPerUnit"))::numeric) ELSE 0 END) AS wc
       FROM "StockMovement" m JOIN "Ingredient" i ON i.id = m."ingredientId" JOIN "Kitchen" k ON k.id = m."kitchenId"
-      WHERE m.type::text IN ('USAGE', 'WASTE') AND m."createdAt" >= ${st.gte} AND m."createdAt" < ${st.lt} ${kitchenSql(f, Prisma.sql`m."kitchenId"`)}
+      WHERE m.type::text IN ('USAGE', 'WASTE') AND m."createdAt" >= (${st.gte} AT TIME ZONE 'UTC') AND m."createdAt" < (${st.lt} AT TIME ZONE 'UTC') ${kitchenSql(f, Prisma.sql`m."kitchenId"`)}
       GROUP BY i.name, k.name, i.unit`;
     const all = rows
       .map((r) => {
@@ -198,7 +198,7 @@ export const stockWastage: ReportDef = {
       db.$queryRaw<{ c: Prisma.Decimal | number | null }[]>`
         SELECT SUM(ROUND((ABS(m.quantity) * COALESCE(m."unitCost", i."costPerUnit"))::numeric)) AS c
         FROM "StockMovement" m JOIN "Ingredient" i ON i.id = m."ingredientId"
-        WHERE m.type::text = 'WASTE' AND m."createdAt" >= ${st.gte} AND m."createdAt" < ${st.lt} ${kitchenSql(f, Prisma.sql`m."kitchenId"`)}`,
+        WHERE m.type::text = 'WASTE' AND m."createdAt" >= (${st.gte} AT TIME ZONE 'UTC') AND m."createdAt" < (${st.lt} AT TIME ZONE 'UTC') ${kitchenSql(f, Prisma.sql`m."kitchenId"`)}`,
       db.stockMovement.findMany({
         where,
         orderBy: { createdAt: "desc" },

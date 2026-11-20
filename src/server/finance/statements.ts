@@ -260,7 +260,7 @@ export async function duplicatePaymentSuspects(since: Date, until = new Date()) 
     JOIN "Payment" b ON b."userId" = a."userId" AND b.amount = a.amount AND b.id <> a.id
       AND b."paidAt" >= a."paidAt" AND b."paidAt" <= a."paidAt" + interval '10 minutes' AND (b."paidAt" > a."paidAt" OR b.id > a.id)
     WHERE a.status::text = ANY(${PAID_STATES}) AND b.status::text = ANY(${PAID_STATES})
-      AND a."paidAt" >= ${since} AND a."paidAt" < ${until} AND a.amount > 0 AND a.method::text <> 'WALLET' AND b.method::text <> 'WALLET'
+      AND a."paidAt" >= (${since} AT TIME ZONE 'UTC') AND a."paidAt" < (${until} AT TIME ZONE 'UTC') AND a.amount > 0 AND a.method::text <> 'WALLET' AND b.method::text <> 'WALLET'
     ORDER BY a."paidAt" DESC
     LIMIT 100`;
 }

@@ -92,7 +92,7 @@ export async function mealRevenueRows(f: AnalyticsFilters) {
   const rows = await db.$queryRaw<{ name: string; qty: bigint; line: bigint; cost: bigint; rev: Prisma.Decimal | number | null; orders: bigint }[]>`
     WITH o AS (
       SELECT o.id, (o.total - o.tax - o."refundedAmount") AS net FROM "Order" o
-      WHERE o.status::text = ANY(${REC}) AND o."deliveryDate" BETWEEN ${day.gte} AND ${day.lte} ${orderDimsSql(f, "o")}
+      WHERE o.status::text = ANY(${REC}) AND o."deliveryDate" BETWEEN (${day.gte} AT TIME ZONE 'UTC')::date AND (${day.lte} AT TIME ZONE 'UTC')::date ${orderDimsSql(f, "o")}
     ), lt AS (
       SELECT oi."orderId", SUM(oi."lineTotal") AS s, COUNT(*) AS c FROM "OrderItem" oi JOIN o ON o.id = oi."orderId" GROUP BY 1
     )

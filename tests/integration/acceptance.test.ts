@@ -53,6 +53,9 @@ import { teamOrderAction, updateMemberAction } from "@/app/team/(portal)/actions
 import { changeStatusAction, cancelAction } from "@/app/admin/orders/actions";
 import { packingAction } from "@/app/admin/kitchen/actions";
 import { deliverAction, failAction } from "@/app/rider/actions";
+import { recognised } from "@/server/analytics/revenue";
+import { mealRevenueRows } from "@/server/reports-center/sales";
+import { mealsBooked } from "@/server/capacity";
 import { loadUser, primaryBoxOn, serviceDay } from "../helpers";
 
 const A = "customer.a@demo.dabbabela.local";
@@ -200,5 +203,32 @@ describe("kitchen-scoped staff", () => {
     const r = await as("dispatch@demo.dabbabela.local", () => failAction(bOrderId, { ok: false }, fd({ reason: "Customer not reachable" })));
     expect(r).toMatchObject({ ok: true });
     expect((await db.order.findUniqueOrThrow({ where: { id: bOrderId } })).status).toBe("FAILED_DELIVERY");
+  });
+});
+
+describe("metric-to-record reconciliation (single day)", () => {
+  // Raw SQL compares DATE columns with Date parameters; these must hold whatever the database session time zone is
+  // (the local Postgres runs in Asia/Kathmandu, Neon in UTC) — single-day ranges used to come back empty off UTC.
+  it("recognised revenue = Σ delivered orders' (total − VAT − refunded) = Σ revenue-by-meal rows", async () => {
+    const d = serviceDay(5);
+    const a = await loadUser(A);
+    const box = await primaryBoxOn(d);
+    const placed = await placeCartOrder(a, { lines: [{ kind: "box", id: box.id, date: d, qty: 2 }], addressId: a.addresses.find((x) => x.zoneId)!.id, method: "CASH", idempotencyKey: "wp20-recon" });
+    const id = placed.orders[0].id;
+    expect(await mealsBooked(placed.orders[0].kitchenId, d)).toBeGreaterThanOrEqual(2);
+    await db.order.update({ where: { id }, data: { status: "DELIVERED" } });
+    try {
+      const f = { from: d, to: d, kitchenIds: null };
+      const delivered = await db.order.findMany({ where: { deliveryDate: dateOnly(d), status: "DELIVERED" }, select: { total: true, tax: true, refundedAmount: true } });
+      const records = delivered.reduce((s, o) => s + o.total - o.tax - o.refundedAmount, 0);
+      const kpi = await recognised(f);
+      const rows = await mealRevenueRows(f);
+      expect(delivered.length).toBeGreaterThan(0);
+      expect(kpi.value).toBe(records);
+      expect(rows.find((r) => r.name === placed.orders[0].items?.[0]?.name || r.name === box.name)?.qty).toBeGreaterThanOrEqual(2);
+      expect(Math.abs(rows.reduce((s, r) => s + r.revenue, 0) - kpi.value)).toBeLessThanOrEqual(rows.length); // per-row rounding only
+    } finally {
+      await db.order.update({ where: { id }, data: { status: "SCHEDULED" } });
+    }
   });
 });

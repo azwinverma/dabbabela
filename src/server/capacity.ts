@@ -82,7 +82,7 @@ export async function dishBooked(menuItemId: string, date: string, kitchenId: st
     CROSS JOIN LATERAL jsonb_array_elements(oi.components) c
     WHERE oi."customBoxId" IS NOT NULL
       AND o."kitchenId" = ${kitchenId}
-      AND o."deliveryDate" = ${dateOnly(date)}
+      AND o."deliveryDate" = (${dateOnly(date)} AT TIME ZONE 'UTC')::date
       AND o.status::text = ANY(${LIVE_STATUSES as string[]})
       AND c->>'menuItemId' = ${menuItemId}`;
   return Number(rows[0]?.n ?? 0);
