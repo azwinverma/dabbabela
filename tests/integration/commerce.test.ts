@@ -351,7 +351,8 @@ describe("kitchen day lock & disruption", () => {
   it("moves orders to the next service day on a bandh and closes the date", async () => {
     const { user, addressId } = await addr(B);
     const owner = await db.user.findUniqueOrThrow({ where: { email: "owner@test.local" } });
-    const d = serviceDay(9, 0);
+    // The service day after the lock test's day (serviceDay(8, 0)); serviceDay(9, 0) collides with it whenever today + 8 is a Saturday.
+    const d = serviceDay(8, 1);
     const b = await primaryBoxOn(d);
     const res = await placeCartOrder(user, { lines: [{ kind: "box", id: b.id, date: d, qty: 1 }], addressId, method: "CASH" });
     const r = await handleDisruption({ date: d, kitchenId: null, reason: "Nepal bandh", kind: "BANDH", outcome: "MOVE", actorId: owner.id });

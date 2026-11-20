@@ -13,6 +13,9 @@ const SCHEMA = process.env.TEST_SCHEMA ?? `t${Date.now()}${process.pid}`; // pid
 process.env.TEST_SCHEMA = SCHEMA;
 const u = new URL(BASE);
 u.searchParams.set("schema", SCHEMA);
+// Each test file gets a fresh Prisma client (module isolation); cap its pool so leaked clients
+// from earlier files can't exhaust Postgres max_connections (Prisma defaults to cpus*2+1).
+if (!u.searchParams.has("connection_limit")) u.searchParams.set("connection_limit", "5");
 const TEST_DB = u.toString();
 process.env.TEST_DB_URL = TEST_DB;
 
