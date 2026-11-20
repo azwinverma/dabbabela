@@ -1,6 +1,6 @@
 # Feature audit: Super Admin / ERP / CMS brief vs. current code
 
-_Audited 2026-11-04 against commit `abf91f4` plus the uncommitted E2E work. Status is based on the code, not on earlier docs._
+_Audited 2026-11-04 against commit `abf91f4` plus the uncommitted E2E work. Status is based on the code, not on earlier docs. **Final status after WP-20 (2026-11-20): see [Final status](#final-status-2026-11-20).**_
 Companion docs: [SUPER_ADMIN_ARCHITECTURE.md](SUPER_ADMIN_ARCHITECTURE.md) (target design) ·
 [ADMIN_IMPLEMENTATION_TRACKER.md](ADMIN_IMPLEMENTATION_TRACKER.md) (work packages).
 
@@ -18,6 +18,39 @@ Companion docs: [SUPER_ADMIN_ARCHITECTURE.md](SUPER_ADMIN_ARCHITECTURE.md) (targ
 * **Money:** integer paisa everywhere (`src/lib/money.ts`).
 * **Order lifecycle:** a state machine in `src/server/transitions.ts`; changes are recorded in `OrderStatusEvent` and audited.
 * **Plan purchase:** buying a plan **creates every meal `Order` up front**, inside one transaction (`src/server/subscriptions.ts` `createSubscription`). That's why "daily order generation" isn't a cron job: the orders already exist exactly once.
+
+---
+
+## Final status (2026-11-20)
+_Updated at WP-20._ The per-feature tables below are the **2026-11-04 baseline**, kept for traceability; this table is the current
+state per brief section. Evidence for each line is the work package's section in [ADMIN_IMPLEMENTATION_TRACKER.md](ADMIN_IMPLEMENTATION_TRACKER.md)
+and its integration tests; the brief §26 flow is proven end to end by `e2e/acceptance.spec.ts`.
+
+| § | Section | Status | Closed by | Still open (why) |
+|---|---|---|---|---|
+| 1 | Executive dashboard | ✅ | WP-02 (metric registry, recognised vs booked, presets, drill-down, filters, CSV), WP-09 P&L, WP-10 XLSX | Historical "as at" deferred-revenue snapshot; MRR/failed renewals limited by manual renewal (by design) |
+| 2 | Order management | ✅ | WP-03 (phone/bulk orders, edits/substitutions with adjustments, reassignment, timeline, export) | Custom Build-a-Dabba lines from the staff order page |
+| 3 | Subscription engine | ✅ | WP-06 (versioned prices, per-plan policies, swap, add meal, renewal, per-day cut-off); price history proven in acceptance step 18 | Auto-debit renewal (⛔ gateway tokenisation); "pay the difference" for swaps |
+| 4 | Menu management | ✅ | WP-04 (categories, kitchen availability, DnD week builder, scheduled publish, revisions); acceptance steps 1–2 | — |
+| 5 | Custom lunchbox builder | ✅ | WP-05 (portions, diet rules, availability, stock warning, server price); dish capacity time-zone fix in WP-20 | — |
+| 6 | Kitchen management | ✅ | WP-07 (status, capacity, production dashboard, requirements); acceptance steps 7–10 | Per-order ticket reprint, performance trend charts |
+| 7 | Ingredients, suppliers, inventory | ✅ | WP-08 (units, lots/FEFO, locations, transfers, returns, valuation); acceptance step 9 | Two-step transfers; E2E for purchasing/receiving |
+| 8 | CRM | ✅ | WP-11 (directory, 360, notes, credit, suspend, privacy, attribution) | Legal review of the attribution notice (⛔) |
+| 9 | Corporate / B2B | ✅ | WP-12 (contracts, budgets, eligibility, company menus, invoices with adjustments, portal) | Company-menu enforcement on self-ordering; dated invoice receipts (schema) |
+| 10 | Delivery & logistics | ✅ | WP-13 (riders, distance bands, route grouping, performance); acceptance steps 11–13; rider-app scope fix in WP-20 | Route optimisation (by design: licensed provider) |
+| 11 | Finance | ✅ | WP-09 (expenses, payables, settlement, period close, cash flow, journal, profitability) | Live gateway statements & API refunds (⛔ merchant keys); chart of accounts (⛔ accountant); VAT/invoice rules (⛔ tax advice) |
+| 12 | CMS | ✅ | WP-14 (blocks, pages, schedule/restore, nav, branding, SEO, policy revisions); acceptance step 16 | Legal review of policies (⛔) |
+| 13 | Promotions & marketing | ✅ | WP-15 (coupons, campaigns + spend + attribution, referrals with fraud holds) | Sending campaign messages (⛔ providers); loyalty (backlog) |
+| 14 | Staff, roles, permissions | ✅ | WP-01 (granular RBAC, custom roles, scopes, login activity, revoke); WP-20 guard + IDOR tests | Email invite links (⛔ email provider) |
+| 15 | Settings | ✅ | WP-01/03/06/07/14 settings; modification window (cleanup pass) | Invoice-numbering settings |
+| 16 | Reports | ✅ | WP-10 (27 reports, filters, paging, totals, CSV/XLSX, scoped, masked, audited); acceptance step 14; reconciliation test | Scheduled/emailed reports; saved views on report pages |
+| 17 | Alerts & automation | ✅ | WP-16 (18 detectors, ack/assign/resolve, escalation, idempotent JobRun steps, `/admin/jobs`) | SMS escalation (⛔ SMS); Pro-plan 15-minute cron is opt-in |
+| 18 | Audit | ✅ | WP-17 (request id, IP/UA, approver, redaction, search UI); acceptance step 15 | — |
+| 19 | Customer frontend | ✅ | WP-18 (today card, upcoming, calendar, payments, address pin, states); acceptance step 12 | Native Nepali review; photos (⛔) |
+| 20–24 | Platform (DB, admin UX, security, tests, deployment) | 🟡 | WP-19 kit/search/saved views; WP-20 security pass, `perf_indexes`, acceptance E2E, docs | Sentry (⛔ account), Turnstile, nonce CSP, pen test, staging with real keys (⛔), remaining `npm audit` items (no non-breaking fix) |
+| 26 | Acceptance criteria | ✅ | `e2e/acceptance.spec.ts` (18 steps, see [IMPLEMENTATION_STATUS](IMPLEMENTATION_STATUS.md#acceptance-flow-brief-26-and-how-each-step-is-covered)) | Payment step uses cash; eSewa is sandbox-only and covered by integration tests |
+
+**Not production-ready:** see the external blockers in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md#external-blockers-need-the-owner).
 
 ---
 

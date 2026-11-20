@@ -1063,14 +1063,34 @@ Packages adopt these opportunistically; no package depends on WP-19.
 
 **Depends:** WP-00.
 
-## WP-20: Acceptance, security, performance, launch ⬜ (L)
-**Owns:** `e2e/acceptance.spec.ts` (new), `tests/integration/acceptance.test.ts`, `docs/*` final updates.
+## WP-20: Acceptance, security, performance, launch ✅ (L)
+**Owns:** `e2e/acceptance.spec.ts` (new), `tests/integration/acceptance.test.ts` (new), `tests/unit/action-guards.test.ts` (new), `docs/*` final updates.
 
-**Delivers:**
-- **Acceptance E2E:** the brief §26 flow end to end (meal created → published → subscribed → paid sandbox → kitchen → stock → dispatch → delivered → reports → audit).
-- **Reconciliation:** a metric-to-record reconciliation test.
-- **Security and performance:** a security review pass (authz on every new action, IDOR checks, upload checks); `npm audit` triage; query plans and indexes for reports.
-- **Release:** a staging deploy; the status doc updated honestly.
+**Delivered (2026-11-20):**
+- **Acceptance E2E** (`e2e/acceptance.spec.ts`, brief §26, 18 steps through the real UI, passed 4 runs in a row plus the full suite):
+  super admin creates a dish with a recipe and a dabba and publishes it on next week's menu → public `/menu` → customer picks it in a
+  weekly plan → server-priced amount asserted (meals × plan price + the dabba's surcharge) → cash checkout and plan/payment/order states
+  → day lock + cut-off job re-run (Admin → Scheduled jobs and the cron endpoint) create no duplicates → kitchen ingredient requirement →
+  batch done posts stock movements once → prepared + packed → dispatch route → the customer's today card follows each status → rider
+  OTP delivery (wrong code refused) → revenue-by-meal + order-status reports → order timeline + audit log → CMS publish on the public
+  site → access control → dabba and plan price changes leave the payment, subscription and order prices untouched. DB shortcuts (moving
+  the meal to today, reopening today's day lock) are explained in the spec header. Shared demo rows are restored; the plan is cancelled.
+- **Reconciliation:** `tests/integration/acceptance.test.ts` — recognised revenue = Σ delivered order records = Σ revenue-by-meal rows
+  for a single day.
+- **Security:** static guard test (every exported server action and route handler calls a server-side guard; documented allow-list);
+  IDOR integration tests (customer ↔ customer, company ↔ company, kitchen-scoped staff incl. the rider app). Fixed: rider-app staff
+  path (any `rider.edit` holder could deliver any kitchen's order without the OTP — now needs `dispatch.edit` + kitchen scope), the
+  idempotency-key race fallback returning another user's payment, CSV export prefixing negative amounts, QC log batch scope.
+  Next.js 15.5.28 → 15.5.29 (three advisories). Remaining `npm audit` items documented in SECURITY.md.
+- **Correctness found by the acceptance run:** raw SQL compared `DATE`/`timestamp` columns with timestamptz parameters, so on a
+  non-UTC database session single-day reports came back empty and Build-a-Dabba dish capacity under-counted; normalised with
+  `AT TIME ZONE 'UTC'`.
+- **Performance:** additive migration `20261120061329_perf_indexes` (8 `CREATE INDEX` on hot foreign keys: `OrderItem.orderId` — every
+  capacity check in quotes/orders —, `OrderAdjustment.orderId`, `Payment.subscriptionId`, `Refund.paymentId`,
+  `DeliveryAssignment.routeId`, `DeliveryRoute(kitchenId, date)`, `InvoiceLine.invoiceId`, `Order.createdAt`). Quote/menu paths were
+  already batched (no N+1 found); detector loops are per kitchen.
+- **Docs:** IMPLEMENTATION_STATUS, FEATURE_AUDIT (final status per brief section), SECURITY, DEPLOYMENT (launch checklist), README.
+- **Not done here:** a staging deploy with production-like keys (⛔ external), penetration test, Sentry (⛔ account).
 
 **Depends:** all.
 
@@ -1109,7 +1129,7 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-11 | WP-03 / WP-12 | Suspended customers: staff-placed orders (`orders-admin.ts`) and company/team orders (`team.ts`) should refuse a customer whose account is suspended or deleted — call `assertCustomerCanOrder(userId)` (`src/server/crm.ts`) or check `isActive`/`deletedAt` in `placeCartOrder` | done (integration pass: `placeCartOrder` and `createSubscription` refuse inactive/deleted accounts (`assertAccountCanOrder`, covers team orders, which go through `placeCartOrder`); `createManualOrder` and each bulk member call `assertCustomerCanOrder`) |
 | WP-11 | WP-14 | Privacy policy: add the attribution-cookie paragraph (`dabba_consent` 180 d, `dabba_ft` 90 d, `dabba_lt` 30 d; UTM values, referring host, landing path; stored on account/orders; "No thanks" deletes). Footer "Cookie choices" link: `onClick={() => window.dispatchEvent(new Event("dabba:consent-open"))}` (export `OPEN_EVENT` in `ConsentNotice.tsx`). Note: WP-11 mounted `<ConsentNotice />` in `src/app/(site)/layout.tsx` (one line) | done (WP-14: privacy section added by `ensureCmsContent()` with the old text kept as a `PageRevision`; footer "Cookie choices" button dispatches `OPEN_EVENT`) |
 | WP-11 | WP-15 / WP-10 | Attribution report: first touch = `User.acquisitionSource`/`User.attribution` (flat first touch + `last`), order = `Order.attribution` (last touch) + `Order.campaignId`. The `/api/admin/export/customers` CSV could reuse `exportCustomerDirectory` (adds acquisition source, filters) | WP-15 part done (`campaignPerformance` first/last touch on `/admin/campaigns`); WP-10 part open |
-| WP-11 | e2e owners / WP-20 | The site now shows an in-flow consent bar above the header until answered; e2e contexts that assert on top-of-page layout can pre-set cookie `dabba_consent=granted` or `denied` | open |
+| WP-11 | e2e owners / WP-20 | The site now shows an in-flow consent bar above the header until answered; e2e contexts that assert on top-of-page layout can pre-set cookie `dabba_consent=granted` or `denied` | done (WP-20: `playwright.config.ts` pre-sets `dabba_consent=denied` for every context) |
 | WP-06 | WP-16 | Daily cron: call `syncPlanPriceMirrors()` (scheduled plan price becomes the `MealPlan` mirror read by home/CMS pricing tables) next to `completeAndRemind()` | done (WP-16: `housekeeping.plan-prices` step, after `plans`) |
 | WP-06 | WP-09 | "Pay the difference" for a swap up-charge on a paid plan when wallet credit is short: a Payment for the delta whose `markPaymentPaid` applies the pending swap (today WP-06 refuses and asks for credit) | open |
 | WP-06 | WP-18 | Account home / orders `MealActions`: use the per-day cut-off (`earliestCutoff(DayOffer.cutoff, company)`) like `/account/plans/[id]`; link "Renew" for plans ending soon (`/account/plans/[id]#renew`) | done (WP-18: `mealWindows` on home, orders list and order detail; Renew link via `dashboardPlans().renewDue`) |
@@ -1134,7 +1154,7 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-07 | WP-00 / WP-20 | `tests/integration/ops.test.ts` uses `db.kitchen.findFirstOrThrow()` without a filter; any update to the seeded kitchen reorders rows and breaks it. Use `{ where: { code: "KTM-1" } }` | done (integration pass: looks up `code: "KTM-1"`) |
 | WP-18 | WP-03 | Customer `cancelOrder` (`orders.ts`) checks only the global cut-off; use `dayCutoff(offer.cutoff, company.cutoffOverride)` like `skipMeal`. The account pages already hide Cancel after the per-day cut-off (stricter), so only direct action calls are affected | done (cleanup: customer cancel uses `dayCutoff(offer.cutoff, company.cutoffOverride)`) |
 | WP-18 | `actions/account.ts` / `DeliveryFields.tsx` owner | `saveAddressAction` accepts half a pin (lat without lng); validate with `parsePin` (`src/server/customer-dashboard.ts`). The checkout `AddressForm` could add the manual lat/lng fallback like `addresses/PinForm.tsx` | done (cleanup: `saveAddressAction` validates with `parsePin` — both or neither, Nepal range; checkout/account `AddressForm` has manual latitude/longitude fields next to the geolocation button) |
-| WP-18 | WP-20 | E2E acceptance 12: customer sees status updates through to delivered on `/account` (today card step line; page refreshes every 60 s while moving) | open |
+| WP-18 | WP-20 | E2E acceptance 12: customer sees status updates through to delivered on `/account` (today card step line; page refreshes every 60 s while moving) | done (WP-20: `e2e/acceptance.spec.ts` steps 10–13 assert the current step on the today card through In the kitchen → Packed → On the way (+ code) → Delivered) |
 | WP-15 | WP-03 / WP-06 | Pass the priced lines to `checkCoupon(code, { …, lines })` — `quoteCart` (`orders.ts`, `lines: priceable`) and plan quotes (`subscriptions.ts`, `lines`) — so box-scoped coupons check the minimum order and discount on the covered dabbas at checkout (without `lines` the whole base is used, as before) | done (lead: `quoteCart` passes `priceable`; plan quote passes lines with `boxId`) |
 | WP-15 | WP-03 / payments owner (WP-09) | Referral rewards: after commit, `void settleReferralFor(order.userId)` (`src/server/marketing.ts`) when `setOrderStatus` moves an order to DELIVERED and when `markPaymentPaid` marks orders paid. Idempotent; until wired, rewards are paid by the admin button / the referrer's page view | done (lead: `setOrderStatus` → DELIVERED and `markPaymentPaid` call `settleReferralFor`, errors logged) |
 | WP-15 | WP-16 | Daily cron: `settleReferralRewards()` (`src/server/marketing.ts`) | done (WP-16: `housekeeping.referrals` step) |
@@ -1191,3 +1211,4 @@ _Record here when a package needs a change in a file owned by another package._
 | 2026-11-20 | WP-10 | Reports center: 27 reports (`src/server/reports-center`, `/admin/reports/[key]`) reusing analytics/finance/inventory/kitchen/corporate/dispatch/marketing; filters, server paging, totals, CSV + dependency-free XLSX, permission-checked, PII-masked, audited, kitchen-scoped; relabelled `/admin/reports`; CAC from campaign spend; adjustments in receivables; 12 integration tests |
 | 2026-11-20 | WP-16 | Alerts center: 18 detectors (orders, renewals, selections, capacity, stock, production, deliveries, refunds, waste, corporate, finance, integrations, security) with dedupe / re-open / auto-resolve, ack/assign/resolve + bulk, escalation via outbox; housekeeping wires scheduled menus/pages/prices/referrals + detectors + escalation as idempotent JobRun steps; `/admin/jobs` with re-run/retry; 13 integration tests |
 | 2026-11-20 | Cleanup pass | Closed 14 cross-package requests: per-day cut-off on customer cancel, address pin validation + manual lat/lng at checkout, adjustment columns in the orders CSV, `alert.escalation` template, detectors after a manual day lock, dashboard banner on Alerts only, staff modification window setting, REFERRAL ledger reason + wallet label + Refer-a-friend nav, `site.cookieChoices`, branding favicon/theme colour, company drops grouped with instructions on manifests, distance bands on `/delivery-areas`, `?ref=` at sign-up; 7 integration tests (`tests/integration/cleanup.test.ts`) |
+| 2026-11-20 | WP-20 | Acceptance E2E (brief §26, 18 steps) + reconciliation test; static server-action/route guard test + IDOR tests; fixes: rider-app staff scope/OTP bypass, idempotency race owner check, CSV negatives, QC batch scope, raw-SQL time-zone dependence (reports, dish capacity); Next 15.5.29; `perf_indexes` migration (8 indexes); final docs |

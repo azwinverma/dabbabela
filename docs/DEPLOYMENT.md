@@ -80,9 +80,29 @@ Neon keeps point-in-time history (plan dependent). Monthly: restore yesterday in
 | Staff member leaves | Admin → Staff → deactivate (sessions revoked immediately). |
 | Suspected account compromise | Deactivate, reset password + 2FA, review Audit log. |
 
+## Verifying a staging deployment (before launch)
+1. `npx prisma migrate status` against the staging database shows every migration applied, including `20261120061329_perf_indexes`
+   (indexes only; safe on a live database, `CREATE INDEX` takes a short lock per table — run off-peak on a large database).
+2. `/api/health` is 200 and lists the integrations you expect as configured.
+3. Run the E2E suite against staging (sandbox keys, demo seed allowed on staging only):
+   `E2E_BASE_URL=https://<staging> E2E_ALLOW=1 npx playwright test` (global setup switches `staff2fa` off for the run and restores
+   it). The specs read and assert on the database directly (`e2e/db.ts`), so the local `DATABASE_URL` must point at the **staging**
+   database, and `CRON_SECRET` must match staging; the demo accounts must exist there.
+   **Never point E2E at production.**
+4. Call `/api/cron/daily?job=housekeeping` once with the bearer secret and check Admin → Scheduled jobs shows every step done.
+5. `npm audit --omit=dev` — compare against the triage in [SECURITY.md](SECURITY.md#dependency-audit-2026-11-20).
+
 ## Launch checklist (production)
+**Verified in code/tests (WP-20, 2026-11-20):** acceptance flow (brief §26) end to end; server-side guard on every action/route;
+IDOR isolation (customers, companies, kitchens); cron auth; dev bypasses inert in production; idempotent jobs; price history kept;
+reports reconcile with order records. Everything below still needs the owner or a live environment.
+
+- [ ] `BETTER_AUTH_SECRET`, `CRON_SECRET`, `SETUP_KEY` (long, random) set in Production; `SETUP_KEY` removed after `/setup`
+- [ ] `DISABLE_STAFF_2FA`, `SEED_DEMO`, `ALLOW_DEMO_SEED`, `PAYMENTS_SANDBOX` unset in Production; `SMS_PROVIDER` not `console`
+- [ ] Staging verified (section above), including the acceptance E2E
 - [ ] Brand cleared: trademark search, `.com.np` domain, social handles (name is provisional)
-- [ ] Company registration, PAN/VAT; enter legal name and PAN in Settings; enable the VAT tax rule only after VAT registration
+- [ ] Company registration, PAN/VAT; tax advice on VAT rate, invoice format and IRD rules; enter legal name and PAN in Settings; enable the VAT tax rule only after VAT registration
+- [ ] Accountant's chart of accounts mapped in the journal export
 - [ ] Food business registration / kitchen licence; complete the Food safety page with real details
 - [ ] Legal review of Terms, Privacy, Refunds, Allergens pages (all flagged "needs legal review")
 - [ ] eSewa merchant account → live keys; Khalti merchant → live key; test one real small payment each and refund it
@@ -95,5 +115,8 @@ Neon keeps point-in-time history (plan dependent). Monthly: restore yesterday in
 - [ ] Holidays for the next 3 months (Dashain/Tihar/Chhath etc.) added
 - [ ] Zones, fees, slots and capacity confirmed with a real delivery trial
 - [ ] Staff accounts created with 2FA; demo data absent (`SEED_DEMO` unset)
-- [ ] Uptime monitor + error tracking on; backup restore tested once
+- [ ] Uptime monitor + error tracking (Sentry) on; backup restore tested once
+- [ ] Vercel Firewall / Turnstile on public forms (contact, lead, area request, sign-up)
+- [ ] Penetration test (or at least an external review) of auth, payments and the admin
+- [ ] Remaining `npm audit` items re-checked (SECURITY.md)
 - [ ] Cut-off cron time matches the Settings cut-off

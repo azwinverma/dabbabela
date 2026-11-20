@@ -17,6 +17,19 @@
   kept verbatim and snapshot-tested so no existing user gained or lost access) ∪ an optional custom `StaffRole`. SUPER_ADMIN has everything.
 * Every admin page calls `requirePermission("<module>.view")`; every server action / API route the stricter write key
   (`.edit`, `.approve`, `.publish` …). Middleware only checks that a session cookie exists. Hiding a button is cosmetic.
+* **Enforced by a test:** `tests/unit/action-guards.test.ts` parses every `"use server"` file and every `route.ts` and fails when an
+  exported action/handler doesn't call a server-side guard (admin files: `requirePermission`/`requireAnyPermission`/`requireSuperAdmin`/
+  `guarded`; `/team`: `requireCompanyAdmin`; `/rider`: `requirePermission`; elsewhere a session check; route handlers may instead check
+  `CRON_SECRET`). Intentional exceptions are listed in the test with the reason (public forms with honeypot + rate limit, auth actions,
+  the price preview, one-time setup, gateway return URLs, health, consent). A guard being present doesn't prove the record is scoped —
+  that's what the IDOR tests below are for.
+* **IDOR tests** (`tests/integration/acceptance.test.ts`): customer A can't cancel/skip/pause B's orders and plans, switch/start B's
+  payments, remove B's addresses or touch B's saved dabbas; a reused idempotency key never returns B's payment; another company's admin
+  can't change members or order for them; a kitchen-scoped dispatcher can't change, cancel, pack, deliver or fail another kitchen's order.
+  The acceptance E2E adds: another customer gets 404 on the order page, a customer can't open the admin order page or report exports.
+* **Rider app:** riders act only on stops of their own routes (past routes read-only). Anyone else using it acts as staff (no OTP/photo
+  requirement) and therefore needs `dispatch.edit` and the order's/route's kitchen in scope (fixed in WP-20; before, any `rider.edit`
+  holder could deliver any kitchen's order without the customer's code).
 * **Escalation guards:** only super admins create/edit roles (`roles.edit`); you can't grant a custom role or base role containing a
   permission you don't hold; kitchen-scoped staff can't widen anyone's scope; the last super admin can't be demoted or deactivated.
   All role, scope, assignment and session changes are audited with before/after.
@@ -53,12 +66,36 @@
 * Uploads: magic-byte sniffing (JPG/PNG/WEBP/AVIF, PDF where allowed), 5 MB limit, **no SVG**, random
   names, Vercel Blob in production (local disk refused in production).
 * Public forms: honeypot + per-IP rate limit stored in Postgres.
-* CSV exports neutralise spreadsheet formula injection.
+* CSV exports neutralise spreadsheet formula injection (cells starting `= + - @ TAB CR` get a `'` prefix; plain negative numbers are
+  left as numbers). XLSX exports write inline strings only, never formulas.
 * No outbound requests to user-supplied URLs (no SSRF surface); gateway URLs come from env.
 
 ## Secrets
 Only in environment variables (`.env.example` lists them). Production requires `BETTER_AUTH_SECRET`,
-`CRON_SECRET`, `SETUP_KEY`. Cron endpoints require `Authorization: Bearer $CRON_SECRET`.
+`CRON_SECRET`, `SETUP_KEY`. Cron endpoints require `Authorization: Bearer $CRON_SECRET` (constant-time compare; no secret configured
+= every call refused; covered by the acceptance E2E).
+* `/setup` needs `SETUP_KEY` (constant-time, 800 ms delay on a wrong key) and refuses once any super admin exists; there's no per-IP
+  limit, so use a long random key and remove it after setup.
+
+## Development bypasses (all inert in production)
+* `DISABLE_STAFF_2FA=true` is ignored when `NODE_ENV=production` (`src/lib/auth.ts`, upload route).
+* Demo data: `prisma/seed.ts` throws in production; `/setup` forces demo off in production; `seedDemo` also needs `ALLOW_DEMO_SEED`.
+* `SMS_PROVIDER=console` (prints OTPs) is refused when `NODE_ENV=production`.
+* E2E global setup refuses `NODE_ENV=production` unless `E2E_ALLOW` is set, and restores `flags.staff2fa` afterwards.
+
+## Dependency audit (2026-11-20)
+`npm audit --omit=dev`: Next.js upgraded 15.5.28 → **15.5.29** (exact pin), which clears its three direct advisories
+(GHSA-7qx7-33qx-rqx2, GHSA-f3mh-rxg3-f5g2, GHSA-pc58-hwjq-p385). Remaining 10 (9 high, 1 moderate), none with a non-breaking fix:
+| Package | Via | Exposure | Plan |
+|---|---|---|---|
+| `postcss` ≤ 8.5.22 (bundled inside `next`) → `next` flagged moderate | Next's own CSS pipeline | Build time only, on our own CSS (source-map path traversal / `</style>` stringify need attacker-controlled CSS) | Take the Next release that bundles a patched PostCSS |
+| `zod` < 4.6.6 (app + `@vercel/blob` → `@vercel/oidc` → `@vercel/cli-config`) | memory exhaustion validating oversized constrained collections | Server actions cap bodies at 6 MB and our arrays have `.max()`; blob's copy validates Vercel's own config | Zod 4 is a breaking migration — backlog |
+| `effect`, `deepmerge-ts` → `@prisma/config` → `prisma` | ReDoS in `Schema.TemplateLiteral`, recursive merge | Prisma CLI/config loading at build/migrate time on our own files, not request handling | Prisma 7 upgrade (breaking) — backlog |
+
+## Database time zone
+Prisma sends JS `Date` parameters to `$queryRaw` as `timestamptz`. Raw SQL must normalise them (`(${d} AT TIME ZONE 'UTC')`, plus
+`::date` for `DATE` columns) before comparing with `DATE` or `timestamp` columns, otherwise results depend on the database session time
+zone (fixed in WP-20 for reports, analytics, exports and dish capacity; the reconciliation test in `acceptance.test.ts` guards it).
 
 ## Logging & audit
 * Structured JSON logs with emails, phones, tokens, passwords, OTPs and signatures redacted.
@@ -66,6 +103,10 @@ Only in environment variables (`.env.example` lists them). Production requires `
 * `/api/health` exposes only booleans (DB up, integrations configured, failed jobs/messages counts).
 
 ## Known gaps (tracked in IMPLEMENTATION_STATUS)
-* No external error tracker wired yet (Sentry or similar) — logs only.
+* No external error tracker wired yet (Sentry or similar) — logs only (⛔ account).
 * No WAF/bot challenge on public forms beyond honeypot + rate limit (add Vercel Firewall / Turnstile).
-* Penetration test and dependency audit (`npm audit` reports advisories in transitive dev deps) pending.
+* No penetration test yet; the WP-20 review is code review + the automated guard/IDOR tests.
+* CSP allows `'unsafe-inline'` scripts (nonce-based CSP in the backlog).
+* Payment-proof uploads are stored in Vercel Blob with `access: "public"` (unguessable URL, not authenticated) — move to private
+  blobs/signed URLs when the plan allows.
+* Remaining `npm audit` advisories above (no non-breaking fix).
