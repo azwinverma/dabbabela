@@ -6,12 +6,14 @@ import { done, fail, type ActionResult } from "@/lib/action";
 import { log } from "@/lib/logger";
 import { parseRupees } from "@/lib/money";
 import { str } from "@/lib/utils";
+import { LIMITS, rateLimit } from "@/lib/rate-limit";
 import { cancelTopup, startTopup, TopupError } from "@/server/wallet-topup";
 
 /** Customer starts a wallet top-up; the payment page for it takes over (gateway redirect or bank proof). */
 export async function startTopupAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   const user = await getCurrentUser();
   if (!user) return fail("Log in to add credit");
+  if (!(await rateLimit("shop:payStart", user.id, LIMITS.payStart.max, LIMITS.payStart.windowMs))) return fail("Too many attempts — wait a minute and try again");
   const preset = str(fd.get("preset"));
   const amount = parseRupees(preset && preset !== "custom" ? preset : str(fd.get("amount")));
   if (amount == null || amount <= 0) return fail("Enter how much credit to add", { amount: "Enter an amount in rupees" });

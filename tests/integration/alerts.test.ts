@@ -122,6 +122,8 @@ beforeAll(async () => {
   ids.hour = hour.toISOString().slice(0, 13);
   for (let i = 0; i < 10; i++) await db.loginEvent.create({ data: { email: `attacker-${T}@test.local`, method: "email", success: false, reason: "INVALID_EMAIL_OR_PASSWORD", createdAt: new Date(hour.getTime() + i * 60_000) } });
   ids.audit = (await db.auditLog.create({ data: { actorId: owner.id, action: "staff.promote", entity: "User", entityId: custId, summary: "wp16 → SUPER_ADMIN", after: { role: "SUPER_ADMIN" }, createdAt: ago(30) } })).id;
+  // approvals (Phase 2B): a maker-checker request pending for 5 hours
+  ids.approval = (await db.approvalRequest.create({ data: { kind: "WALLET_ADJUSTMENT", amount: 300_000, entity: "User", entityId: custId, payload: { userId: custId, amount: 300_000, note: "wp16" }, reason: "wp16 stale approval", requestedById: owner.id, createdAt: ago(300) } })).id;
 });
 
 afterAll(async () => {
@@ -160,6 +162,7 @@ const EXPECTED = () => ({
   "wallet-topups": `wallet-topups:uncredited:${ids.ghostTopup}`,
   "wallet-topup-velocity": `wallet-topup-velocity:${custId}:${today}`,
   security: `security:logins:attacker-${T}@test.local:${ids.hour}`,
+  approvals: `approvals:pending:${ids.approval}`,
 });
 
 describe("detectors", () => {

@@ -24,8 +24,8 @@ const SRC = path.join(ROOT, "src");
 
 /** Intentionally public server actions (validated + rate-limited inside, or pre-auth by nature). */
 const PUBLIC_ACTIONS: Record<string, string[]> = {
-  "src/lib/actions/public.ts": ["setLocaleAction", "leadAction", "contactAction", "areaRequestAction", "subscribeAction"], // honeypot + per-IP limit
-  "src/lib/actions/auth.ts": ["loginAction", "verifyTwoFactorAction", "sendOtpAction", "verifyOtpAction", "registerAction", "logoutAction", "forgotAction", "resetAction"], // Better Auth rate limits
+  "src/lib/actions/public.ts": ["setLocaleAction", "leadAction", "contactAction", "areaRequestAction", "subscribeAction"], // honeypot + per-IP limit (+ Turnstile on lead/contact/area)
+  "src/lib/actions/auth.ts": ["loginAction", "verifyTwoFactorAction", "sendOtpAction", "verifyOtpAction", "registerAction", "logoutAction", "forgotAction", "resetAction"], // own per-IP/per-account limits (src/lib/rate-limit.ts) + Turnstile on login/OTP/sign-up/reset
   "src/lib/actions/build.ts": ["quoteBuildAction"], // price preview only; ordering re-quotes on the server
   "src/app/setup/actions.ts": ["setupAction"], // SETUP_KEY (constant time) + refuses once a super admin exists
   "src/app/admin/_kit/session.ts": ["signOutAction"],

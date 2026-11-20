@@ -34,6 +34,23 @@ export function assertKitchen(user: KitchenScoped, kitchenId: string) {
   if (!inScope(user, kitchenId)) throw new Error("That kitchen isn't in your scope");
 }
 
+/**
+ * Payments have no kitchen of their own: a kitchen-scoped staff member may act on a payment only when at least one
+ * of its orders is in their kitchens (payments without orders — plan/top-up/invoice — need an unscoped user).
+ */
+export async function assertPaymentInScope(user: KitchenScoped, paymentId: string) {
+  const ids = scopeIds(user);
+  if (!ids) return;
+  const n = await db.order.count({ where: { paymentId, kitchenId: { in: ids } } });
+  if (!n) throw new Error("That payment isn't in your kitchen scope");
+}
+
+/** Prisma where for payments a scoped staff member may see (see assertPaymentInScope). */
+export function paymentWhere(user: KitchenScoped) {
+  const ids = scopeIds(user);
+  return ids ? { orders: { some: { kitchenId: { in: ids } } } } : {};
+}
+
 /** Where-clause fragment for kitchen-scoped queries (any model with a kitchenId column). */
 export function kitchenWhere(user: KitchenScoped) {
   const ids = scopeIds(user);

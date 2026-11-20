@@ -6,10 +6,45 @@
 * Nepal mobile OTP sign-in (6 digits, 5 min, 3 attempts) — enabled only with the `phoneOtp` flag and a
   configured SMS provider.
 * TOTP two-factor with backup codes. **Required for every staff role** when `staff2fa` is on
-  (production default). `DISABLE_STAFF_2FA` is ignored when `NODE_ENV=production`.
+  (production default). `DISABLE_STAFF_2FA` is ignored when `NODE_ENV=production`. Coverage (re-checked in Phase 2B): every
+  admin page/action (`requirePermission`/`requireAnyPermission`/`requireStaff`/`guarded`), the admin layout, `/rider` (layout,
+  pages and actions use `requirePermission`), `/api/admin/export/*` and `/admin/**/route.ts` (`requireStaff`), the upload route
+  (explicit check) and — fixed in 2B — the admin kit actions (global search, saved views), which used only `getCurrentUser` and
+  now refuse staff without 2FA (`staffTwoFactorOk`).
 * Database sessions (30 days, sliding) — revocable: deactivating a user, resetting a staff password or
   2FA, and privacy deletion delete their sessions. Session creation is refused for inactive/deleted users.
-* Rate limits stored in Postgres (sign-in 6/min, sign-up 5/5 min, reset 3/5 min, OTP 3/5 min, TOTP 6/min).
+  **Staff sessions** also have an absolute lifetime (`STAFF_SESSION_MAX_HOURS`, default 24 h, checked in `getCurrentUser`; the
+  expired row is deleted). Cookies: `httpOnly`, `SameSite=Lax`, `Secure` whenever the base URL is https (Better Auth default,
+  i.e. always in production), prefix `dabba`.
+* **Sessions & devices** (`/account/security`, same page for customers and staff): every active session with device, last
+  activity and masked IP; "Sign out this device", "Sign out all other devices", "Sign out everywhere" (incl. this one). Sessions
+  are addressed by id — tokens are never sent to the browser (before Phase 2B the page embedded other sessions' tokens in hidden
+  form fields; fixed). Recent sign-ins (last 15 `LoginEvent`s, success/failure, method, device) are listed too. Admins see and
+  revoke a staff member's sessions and login history on `/admin/staff/[id]`. All revocations are audited.
+* **Rate limits** (Postgres `RateLimit` table, atomic upsert, `src/lib/rate-limit.ts`). Better Auth's own limiter only sees
+  requests to `/api/auth/*`; our forms are server actions calling `auth.api.*`, which bypass it — so the actions limit themselves
+  (on in production; `AUTH_RATE_LIMIT=false` only for the E2E server):
+
+  | Action | Limit |
+  |---|---|
+  | Email sign-in | 6 / 5 min per email, 10 / 5 min per IP |
+  | Sign-up | 5 / 10 min per IP |
+  | Password reset request | 3 / 10 min per email and per IP; reset submit 10 / 10 min per IP |
+  | Mobile code send | 3 / 5 min per phone and per IP (SMS cost); verify 8 / 5 min |
+  | 2FA code | 8 / 5 min per IP |
+  | Place order / start plan | 12 / min per user |
+  | Start / switch payment | 15 / min per user; transfer-proof upload 10 / 10 min |
+  | Gateway return verification (eSewa/Khalti) | 30 / min per IP (each triggers a server-to-server lookup) |
+  | Wrong coupon codes | 10 / 10 min per IP, then codes aren't checked |
+  | Contact / area / lead / newsletter forms | 4–5 / 10 min per IP (always on) |
+
+  Better Auth's HTTP limits stay as a second layer (sign-in 6/min, sign-up 5/5 min, reset 3/5 min, OTP 3/5 min, TOTP 6/min).
+* **Bot protection — Cloudflare Turnstile** (`src/lib/turnstile.ts`, `src/components/ui/Turnstile.tsx`) on sign-up, email
+  sign-in, mobile-code request, password-reset request and the contact, area-request and team-lead forms. Env-gated: with
+  `TURNSTILE_SECRET_KEY` + `NEXT_PUBLIC_TURNSTILE_SITE_KEY` set the token is verified server-side via siteverify (5 s timeout,
+  remote IP, expected action) and **fails closed in production**; unset = skipped (dev/tests/E2E), reported as
+  `turnstile:false` in `/api/health`. The newsletter box (in every footer) keeps honeypot + rate limit only, to avoid loading the
+  widget on every page.
 
 ## Authorisation
 * **Granular permissions** (`src/lib/permissions/`): `module.action` keys (view · create · edit · delete · publish · approve · export ·
@@ -35,6 +70,21 @@
   All role, scope, assignment and session changes are audited with before/after.
 * **Scopes:** `User.kitchenId` ∪ `StaffScope` kitchens limit kitchen data (orders, kitchen, dispatch, inventory) through
   `kitchenWhere`/`inScope`. Exports and reports get the same treatment in WP-10.
+* **Money endpoints review (Phase 2B).** Gaps found and fixed, each with a test (`tests/integration/approvals.test.ts`,
+  `security-hardening.test.ts`):
+  - refund request/approve/reject/process and bank-transfer verify/reject ignored kitchen scope → `assertPaymentInScope` (a
+    scoped user may act on a payment only when one of its orders is in their kitchens); payment list/detail/verify queue and the
+    refund queue are filtered with `paymentWhere`;
+  - refund order ↔ payment mismatch and per-order cap (see Payments);
+  - `/api/admin/export/{payments,refunds,subscriptions,ledger}` ignored kitchen scope → filtered through their orders;
+    `type=privacy` (full unmasked data-subject export) now also needs `customers.pii` and an existing user;
+  - company invoices: record payment / void / credit note and the invoice list/detail ignored staff **company** scope → checked;
+  - refunds ledger page put the full customer email in a link URL for staff without `customers.pii`, and allowed partial
+    email/phone probing → links use the user id; without PII only name or an exact full email matches; results masked;
+  - team CSV export wasn't audited → `team.report_export`;
+  - session tokens rendered into `/account/security` (see Authentication); `switchMethodAction` follow-up read now user-scoped.
+  Verified OK: `/pay/[id]`, `/thank-you/[id]`, receipts and order pages (`userId` filters), wallet pages, gateway returns
+  (signature + server lookup), team invoices/reports (company id), admin receipt (scope + PII), other exports, upload route.
 * **Login activity:** every sign-in attempt (email, phone OTP, TOTP, backup code) is recorded in `LoginEvent` with IP, user agent and a
   failure code — never passwords, codes or tokens. Staff pages list sessions with revoke one / revoke all.
 * Customer data is always queried with `userId` from the session, never from the request.
@@ -42,8 +92,31 @@
   proves another company's data can't be read).
 * PII (phone/email) masked without `customers.pii`; CSV exports follow the same rule and are audited.
 
+## Maker-checker approvals (Phase 2B)
+* `src/server/approvals.ts`, UI `/admin/approvals` (queue with status/kind/mine filters, detail with requested-vs-now "diff",
+  approve with note / reject with required note / withdraw / retry), sidebar badge = pending requests the viewer could decide.
+* Refunds (any Payment purpose — order, plan, top-up, invoice), manual wallet adjustments (credit **or** debit, incl. profile
+  goodwill credit) and order adjustments whose absolute amount is **≥ `approvalThreshold`** (setting, default Rs 2,000) create a
+  PENDING `ApprovalRequest` instead of executing. Below the threshold nothing changed.
+* Nobody decides their own request — super admins included (checked in the service and in the guarded `updateMany`). The
+  checker needs `approvals.approve` **and** the action's own permission (`refunds.approve` for all three kinds) and the request's
+  kitchen in scope. Grants: `approvals.view` = whoever could request refunds (OWNER, OPS, FINANCE, SUPPORT), `approvals.approve` =
+  whoever could approve refunds (OWNER, FINANCE); super admin has both. Registered in `registry.ts` / `system.ts` (role editor).
+* Approval executes immediately inside one transaction under a per-request advisory lock, re-running the normal service
+  (`requestRefundTx` — refundable amount on the payment and the order, `adjustCreditTx` — balance can't go negative,
+  `adjustOrderTx`). EXECUTED at most once (racing approvers: one wins; `idempotencyKey` is unique and a retried submit returns the
+  same request). Failures are stored as FAILED with the error and can be retried. A refund created by an approval is already
+  APPROVED (approvedBy = checker) and still needs proof to be processed.
+* Safety net for refunds created by other paths (e.g. cancel with a REFUND settlement): `approveRefund` refuses a refund ≥ the
+  threshold when the approver is its requester.
+* Everything audited (`approval.request/approve/reject/cancel/execute/failed`); approvers notified in-app + email outbox
+  (`approval.requested`), requester told the outcome (`approval.decided`); alert detector `approvals` flags requests pending
+  > 4 h (critical > 24 h) and FAILED executions.
+
 ## Payments
 * Prices recomputed on the server for every quote and order; client totals are ignored.
+* Refund integrity (fixed in 2B): a refund naming an order must use that order's own payment (before, an order from payment B
+  could be refunded against payment A), and it can't exceed what's left on that order (customer share − refunded − open requests).
 * eSewa: HMAC-SHA256 signature verified (constant time), transaction id must match one of our attempts,
   amount must match, **and** the server-to-server status API must return `COMPLETE`. Unreachable → stays
   pending; cron reconciles.
@@ -80,17 +153,32 @@
   journal), recognised as sales only when the credit pays for orders.
 
 ## Web security
-* Security headers (`next.config.ts`): CSP (`default-src 'self'`, form-action limited to eSewa, no
-  objects, frame-ancestors self), HSTS, nosniff, referrer policy, permissions policy.
-  Inline scripts are allowed (`'unsafe-inline'`) because Next.js App Router needs them without nonces —
-  a nonce-based CSP is in the backlog.
+* Security headers (`next.config.ts`): HSTS, nosniff, referrer policy, permissions policy, X-Frame-Options.
+* **Nonce-based CSP** (Phase 2B, `src/lib/csp.ts`, set in `src/middleware.ts` on every request — on the forwarded request so
+  Next stamps the nonce on its inline/bootstrap scripts, and on the response):
+  `script-src 'self' 'nonce-<random 128-bit>' 'strict-dynamic'` (no `'unsafe-inline'`; `'unsafe-eval'` only in `next dev`),
+  `style-src 'self' 'unsafe-inline'` (React style attributes / next/font), `img-src 'self' data: blob: *.public.blob.vercel-storage.com`,
+  `connect-src 'self'` + Sentry ingest origin (from the DSN) + Turnstile when configured, `frame-src` Turnstile or `'none'`,
+  `form-action 'self'` + eSewa (and `ESEWA_FORM_URL`'s origin), `frame-ancestors 'self'`, `base-uri 'self'`, `object-src 'none'`.
+  Khalti is a redirect (navigation), not governed by CSP. Every HTML page is dynamically rendered (root layout `force-dynamic`), so
+  each response carries its request's nonce; the only static routes are robots.txt, sitemap.xml and the OG image (no scripts).
+  JSON-LD `<script type="application/ld+json">` is data, not executed. Turnstile/Sentry scripts are injected by nonce-trusted code
+  (`'strict-dynamic'`). Verified by `e2e/security.spec.ts` (no CSP violations, every script carries the nonce) on home, menu,
+  register, contact, corporate, login, checkout, account, account/security, admin, admin/orders, admin/approvals and rider.
+* **Error tracking — Sentry** (`@sentry/nextjs` 11.11.0 pinned; `src/instrumentation.ts`, `src/instrumentation-client.ts`,
+  `src/lib/sentry-options.ts`). Env-gated on `SENTRY_DSN` (no SDK loaded without it); release = `VERCEL_GIT_COMMIT_SHA`;
+  `sendDefaultPii: false`; `beforeSend`/`beforeSendTransaction`/`beforeBreadcrumb` run `src/lib/sentry-scrub.ts`, which reuses
+  the audit redaction helper (`src/lib/redact.ts`: secret keys, bearer tokens, JWTs, card numbers) and also strips emails, phone
+  numbers, payment/gateway references (`PAY-…`, `pidx`, `transaction_uuid`, `providerRef` …), cookies, auth headers, request
+  bodies and query strings, keeps only the user id, and drops Next redirect/not-found control flow and network noise. Source maps
+  upload only with `SENTRY_AUTH_TOKEN`+`SENTRY_ORG`+`SENTRY_PROJECT`; the build wrapper is applied only when a DSN is set.
 * CSRF: server actions are POST-only with Next's origin check; Better Auth checks `trustedOrigins`.
 * Input validation on the server for every action (types, lengths, Nepal phone format, ISO dates,
   enum membership). Prisma parameterises all SQL; the few raw queries use tagged templates.
 * Markdown (pages/posts) renders with raw HTML escaped and link/image URLs allow-listed.
 * Uploads: magic-byte sniffing (JPG/PNG/WEBP/AVIF, PDF where allowed), 5 MB limit, **no SVG**, random
   names, Vercel Blob in production (local disk refused in production).
-* Public forms: honeypot + per-IP rate limit stored in Postgres.
+* Public forms: honeypot + per-IP rate limit stored in Postgres + Turnstile (when configured).
 * CSV exports neutralise spreadsheet formula injection (cells starting `= + - @ TAB CR` get a `'` prefix; plain negative numbers are
   left as numbers). XLSX exports write inline strings only, never formulas.
 * No outbound requests to user-supplied URLs (no SSRF surface); gateway URLs come from env.
@@ -128,10 +216,12 @@ zone (fixed in WP-20 for reports, analytics, exports and dish capacity; the reco
 * `/api/health` exposes only booleans (DB up, integrations configured, failed jobs/messages counts).
 
 ## Known gaps (tracked in IMPLEMENTATION_STATUS)
-* No external error tracker wired yet (Sentry or similar) — logs only (⛔ account).
-* No WAF/bot challenge on public forms beyond honeypot + rate limit (add Vercel Firewall / Turnstile).
-* No penetration test yet; the WP-20 review is code review + the automated guard/IDOR tests.
-* CSP allows `'unsafe-inline'` scripts (nonce-based CSP in the backlog).
+* Sentry and Turnstile are built but need accounts/keys (⛔ owner); until then logs only and honeypot + rate limits.
+* No WAF (Vercel Firewall rules are a dashboard setting, not code).
+* No penetration test yet; reviews are code review + the automated guard/IDOR tests.
+* `style-src` still allows `'unsafe-inline'` (styles can't execute code; React style attributes need it).
+* Rate limiting keys on `x-forwarded-for` (set by Vercel); behind another proxy configure it to pass the client IP.
+* Plan quotes (`quotePlanLengthAction`) don't count wrong coupon codes yet (cart quotes do).
 * Payment-proof uploads are stored in Vercel Blob with `access: "public"` (unguessable URL, not authenticated) — move to private
   blobs/signed URLs when the plan allows.
 * Remaining `npm audit` advisories above (no non-breaking fix).

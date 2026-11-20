@@ -38,6 +38,7 @@ export const ADMIN_NAV_ALL: NavGroup[] = [
     items: [
       { href: "/admin/payments", label: "Payments", icon: "Wallet", perm: "payments.view" },
       { href: "/admin/refunds", label: "Refunds & credit", icon: "Undo2", perm: "refunds.view" },
+      { href: "/admin/approvals", label: "Approvals", icon: "BadgeCheck", perm: "approvals.view", ready: true, owner: "Phase 2B" },
       { href: "/admin/invoices", label: "Invoices", icon: "FileSpreadsheet", perm: "invoices.view" },
       { href: "/admin/expenses", label: "Expenses", icon: "Receipt", perm: "expenses.view", ready: true, owner: "WP-09" },
       { href: "/admin/payables", label: "Supplier payables", icon: "HandCoins", perm: "purchasing.view", ready: true, owner: "WP-09" },

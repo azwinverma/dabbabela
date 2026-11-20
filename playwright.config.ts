@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 /**
  * E2E against a running app. Locally: `npm run build && PORT=3100 npm start`, then `npm run test:e2e`.
+ * Own server (E2E_BASE_URL): start it with AUTH_RATE_LIMIT=false, or the sign-in limits throttle the suite.
  * Needs the seeded dev database with demo users (SEED_DEMO=true).
  */
 const BASE = process.env.E2E_BASE_URL ?? "http://localhost:3100";
@@ -26,7 +27,8 @@ export default defineConfig({
   // Started after globalSetup so the server reads the E2E settings fresh. Build first: `npm run build`.
   webServer: process.env.E2E_BASE_URL
     ? undefined
-    : { command: "npx next start -p 3100", url: "http://localhost:3100/api/health", reuseExistingServer: false, timeout: 120_000 },
+    : // AUTH_RATE_LIMIT=false: the suite signs in dozens of times from one IP (src/lib/rate-limit.ts authLimitsOn).
+      { command: "npx next start -p 3100", url: "http://localhost:3100/api/health", reuseExistingServer: false, timeout: 120_000, env: { AUTH_RATE_LIMIT: "false" } },
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"] } },
     { name: "mobile", use: { ...devices["Pixel 7"] }, testMatch: /public\.spec/ },

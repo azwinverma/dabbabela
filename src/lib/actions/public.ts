@@ -1,7 +1,7 @@
 "use server";
 
 import { z } from "zod";
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import type { ActionResult } from "@/lib/action";
@@ -11,30 +11,16 @@ import { isNepalPhone, normalizeNepalPhone } from "@/lib/phone";
 import { isLocale, LOCALE_COOKIE } from "@/lib/i18n";
 import { createTicket } from "@/server/support";
 import { notify } from "@/server/notify";
-import { log } from "@/lib/logger";
+import { rateLimitIp } from "@/lib/rate-limit";
+import { checkTurnstile, TURNSTILE_FAILED } from "@/lib/turnstile";
 
 /** Per-IP form limiter backed by Postgres (works across serverless instances). */
 async function allow(bucket: string, max: number, windowMs: number) {
-  const h = await headers();
-  const ip = (h.get("x-forwarded-for")?.split(",")[0] ?? h.get("x-real-ip") ?? "local").trim();
-  const key = `form:${bucket}:${ip}`;
-  const now = Date.now();
-  try {
-    const row = await db.rateLimit.findUnique({ where: { key } });
-    if (!row || now - Number(row.lastRequest) > windowMs) {
-      await db.rateLimit.upsert({ where: { key }, create: { key, count: 1, lastRequest: BigInt(now) }, update: { count: 1, lastRequest: BigInt(now) } });
-      return true;
-    }
-    if (row.count >= max) return false;
-    await db.rateLimit.update({ where: { key }, data: { count: { increment: 1 } } });
-    return true;
-  } catch (e) {
-    log.warn("ratelimit.failed", { bucket, error: e });
-    return true;
-  }
+  return rateLimitIp(`form:${bucket}`, max, windowMs);
 }
 
 const TOO_MANY: ActionResult = { ok: false, message: "That's a lot of messages in a short time — please try again in a few minutes." };
+const BOT: ActionResult = { ok: false, message: TURNSTILE_FAILED };
 
 function errorsOf(issues: z.ZodIssue[]) {
   const errors: Record<string, string> = {};
@@ -70,6 +56,7 @@ const leadSchema = z.object({
 export async function leadAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   if (str(fd.get("website"))) return { ok: true, message: "Thanks!" }; // honeypot
   if (!(await allow("lead", 5, 10 * 60_000))) return TOO_MANY;
+  if (!(await checkTurnstile(fd, "lead")).ok) return BOT;
   const parsed = leadSchema.safeParse({
     companyName: str(fd.get("companyName")),
     contactName: str(fd.get("contactName")),
@@ -105,6 +92,7 @@ const contactSchema = z.object({
 export async function contactAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   if (str(fd.get("website"))) return { ok: true, message: "Thanks!" };
   if (!(await allow("contact", 4, 10 * 60_000))) return TOO_MANY;
+  if (!(await checkTurnstile(fd, "contact")).ok) return BOT;
   const parsed = contactSchema.safeParse({
     name: str(fd.get("name")),
     email: str(fd.get("email")).toLowerCase(),
@@ -127,6 +115,7 @@ export async function contactAction(_: ActionResult, fd: FormData): Promise<Acti
 export async function areaRequestAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   if (str(fd.get("website"))) return { ok: true, message: "Thanks!" };
   if (!(await allow("area", 4, 10 * 60_000))) return TOO_MANY;
+  if (!(await checkTurnstile(fd, "area")).ok) return BOT;
   const area = str(fd.get("area"));
   const name = str(fd.get("name"));
   const email = str(fd.get("email")).toLowerCase();

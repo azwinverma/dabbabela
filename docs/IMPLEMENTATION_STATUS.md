@@ -16,7 +16,19 @@ The external blockers listed further down are still open.
 - **E2E added:** `purchasing`, `company-invoices`, `disruption` (bandh wizard). Vitest: 401 tests / 39 files (with Phase 2A merged).
 - Not built: online payment of company invoices (purpose `INVOICE`).
 
+## Production readiness — Phase 2B security hardening (2026-11-20)
+| Item | Status | Notes |
+|---|---|---|
+| Maker-checker approvals (refunds of any payment purpose, wallet credit/debit incl. goodwill, order adjustments ≥ threshold) | ✅ | `src/server/approvals.ts`, `/admin/approvals` (queue, detail with requested-vs-now, approve/reject/withdraw/retry), sidebar badge, notifications, stale/failed alert detector. Command palette is record search only (no page registry) — not added |
+| Cloudflare Turnstile (sign-up, login, OTP request, reset request, contact, area, team lead) | ✅ code / ⛔ keys | Env-gated; fails closed in production; skipped without keys (`turnstile:false` in health) |
+| Nonce-based CSP | ✅ | Per-request nonce + `'strict-dynamic'`, no `'unsafe-inline'` scripts; Playwright checks no violations on 13 pages |
+| Sentry | ✅ code / ⛔ account | `@sentry/nextjs` 11.11.0, env-gated on `SENTRY_DSN`, PII scrubber, no source-map upload without a token |
+| Account security | ✅ | Sessions/devices with sign out this device / others / everywhere and recent sign-ins on `/account/security` (customers + staff); session tokens no longer sent to the browser; staff sessions 24 h absolute; staff 2FA now also enforced on admin kit actions |
+| Rate limits | ✅ | Auth server actions had **no** effective limit (`auth.api.*` bypasses Better Auth's limiter) — now limited; checkout, payment start/switch, gateway returns, wrong coupons added. Table in SECURITY.md |
+| Money endpoint IDOR review | ✅ | Fixed: refund order↔payment mismatch + per-order cap, kitchen scope on refund/payment actions, pages and money exports, privacy export needs PII, invoice company scope, ledger email leak, team CSV audit |
+
 ## Verification snapshot (2026-11-20, local, dev database + throwaway test schemas)
+_Phase 2B (merged with 2A + 2C + 55a768a) re-run: typecheck 0 errors; lint 0 errors (same 7 warnings); Vitest **442 / 442** in **42** files, one fully green run (a per-file Prisma disconnect, `tests/setup-db.ts`, fixes the "Can't reach database server" flakes caused by leaked per-file pools exhausting max_connections); `next build` ✅; Playwright full suite against the production build on :3200 — **46 / 46** (incl. `e2e/security.spec.ts`, 2A/2C specs)._
 | Check | Result |
 |---|---|
 | `npm run typecheck` | ✅ 0 errors |
@@ -140,8 +152,8 @@ section is in [FEATURE_AUDIT.md](FEATURE_AUDIT.md#final-status-2026-11-20). Each
 2. Through the UI, the E2E suite covers the public pages, the full acceptance flow above, cash checkout, logins and permission boundaries, plan skip/pause/resume/cancel, CMS rollback, fulfilment, team orders and refunds. Inventory purchasing/receiving, invoices, the disruption wizard, expenses and settings are covered by service/integration tests and page loads, not E2E.
 3. Recipe quantities and costs are planning estimates, and suppliers are placeholders. No nutrition values are seeded.
 4. There is no food photography; illustrated dabbas are used.
-5. The CSP allows `'unsafe-inline'` scripts (Next.js without nonces).
-6. No external error tracker (Sentry) and no bot challenge (Turnstile) on public forms.
+5. ~~The CSP allows `'unsafe-inline'` scripts~~ — nonce-based CSP since Phase 2B (styles still allow inline).
+6. Sentry and Turnstile are built (Phase 2B) but inactive until the owner creates the accounts and sets the keys.
 7. No penetration test has been done. Security review is code review plus automated guard and IDOR tests.
 8. Performance has been checked by code review and index coverage only. There's no load test, and no `EXPLAIN` on production-sized data.
 9. The local dev database holds old demo/test rows (E2E orders, "Acceptance …" dishes and dabbas, test plans).
@@ -163,10 +175,10 @@ section is in [FEATURE_AUDIT.md](FEATURE_AUDIT.md#final-status-2026-11-20). Each
 
 ## Prioritised backlog
 1. Staging deploy on Neon with sandbox keys. Run `migrate deploy` (incl. `perf_indexes`) and the acceptance E2E against it (`E2E_BASE_URL`, `E2E_ALLOW`).
-2. Sentry + Vercel Firewall/Turnstile on public forms. Then a penetration test.
+2. Create Sentry + Cloudflare Turnstile accounts and set the keys (code done in Phase 2B); Vercel Firewall rules. Then a penetration test.
 3. Native-speaker review of the Nepali copy.
 4. Playwright for inventory purchasing, invoices, the disruption wizard and expenses. An axe accessibility scan in CI.
 5. Upgrade path for the remaining audit items: Prisma 7 (config deps), Zod 4 (breaking), and a Next release that bundles a patched PostCSS.
-6. Nonce-based CSP.
+6. ~~Nonce-based CSP~~ (done, Phase 2B).
 7. Gateway API refunds once merchant API access is approved. Auto-renewal only after tokenisation is approved.
 8. Bikram Sambat date display behind the existing flag.

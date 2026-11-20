@@ -11,6 +11,7 @@ import { readRange, RangeForm, Empty } from "@/components/admin/finance/kit";
 import { duplicatePaymentSuspects, statementDuplicates } from "@/server/finance/statements";
 import { ktmDayRange, topupReconciliation } from "@/server/wallet-topup";
 import { VerifyForms } from "./VerifyForms";
+import { paymentWhere } from "@/components/admin/ops/scope";
 
 export const metadata = { title: "Payments" };
 const PER = 40;
@@ -31,14 +32,15 @@ export default async function Payments({ searchParams }: { searchParams: Promise
     <div>
       <PageHeader title="Payments" description="Every payment, how it was verified, and what the gateways told us." />
       <Tabs tabs={tabs} current={view} />
-      {view === "verify" ? <VerifyQueue canVerify={canVerify} /> : view === "reconcile" ? <Reconcile sp={sp} /> : <List sp={sp} />}
+      {view === "verify" ? <VerifyQueue canVerify={canVerify} scope={paymentWhere(user)} /> : view === "reconcile" ? <Reconcile sp={sp} /> : <List sp={sp} scope={paymentWhere(user)} />}
     </div>
   );
 }
 
-async function List({ sp }: { sp: Record<string, string | undefined> }) {
+async function List({ sp, scope }: { sp: Record<string, string | undefined>; scope: Prisma.PaymentWhereInput }) {
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
   const where: Prisma.PaymentWhereInput = {
+    ...scope,
     ...(sp.status && sp.status in PAYMENT_STATUS ? { status: sp.status as PaymentStatus } : {}),
     ...(sp.method && sp.method in METHOD_LABEL ? { method: sp.method as PaymentMethod } : {}),
     ...(sp.purpose && sp.purpose in PURPOSE_LABEL ? { purpose: sp.purpose as PaymentPurpose } : {}),
@@ -126,9 +128,9 @@ async function List({ sp }: { sp: Record<string, string | undefined> }) {
   );
 }
 
-async function VerifyQueue({ canVerify }: { canVerify: boolean }) {
+async function VerifyQueue({ canVerify, scope }: { canVerify: boolean; scope: Prisma.PaymentWhereInput }) {
   const rows = await db.payment.findMany({
-    where: { method: "BANK_TRANSFER", status: "PENDING" },
+    where: { method: "BANK_TRANSFER", status: "PENDING", ...scope },
     include: { user: { select: { name: true } }, orders: { select: { number: true, deliveryDate: true }, orderBy: { deliveryDate: "asc" }, take: 3 } },
     orderBy: { createdAt: "asc" },
   });

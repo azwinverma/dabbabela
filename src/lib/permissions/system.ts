@@ -20,6 +20,10 @@ const derivedFrom: Partial<Record<GranularPermission, LegacyPermission>> = {
   "notifications.edit": "settings",
   "roles.view": "staff",
   "orders.create": "orders.manage",
+  // Maker-checker (Phase 2B): whoever can request refunds/credit sees the queue (their own requests);
+  // whoever can approve refunds can decide other people's requests.
+  "approvals.view": "refunds.request",
+  "approvals.approve": "refunds.approve",
 };
 
 const OWNER: Role = "OWNER";

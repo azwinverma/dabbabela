@@ -23,8 +23,34 @@ export const getCurrentUser = cache(async () => {
   if (!session) return null;
   const user = await db.user.findUnique({ where: { id: session.user.id }, include: CURRENT_USER_INCLUDE });
   if (!user || !user.isActive || user.deletedAt) return null;
+  // Staff sessions have an absolute lifetime (customers keep the 30-day sliding session): a stolen or forgotten
+  // control-room session can't live for a month. The expired row is deleted so it can't be reused.
+  if (isStaffRole(user.role) && staffSessionExpired(session.session.createdAt)) {
+    await db.session.deleteMany({ where: { id: session.session.id } }).catch(() => null);
+    return null;
+  }
   return toCurrentUser(user, session.session.id);
 });
+
+/** Hours a staff session may live from sign-in (STAFF_SESSION_MAX_HOURS, default 24, min 1, max 720). */
+export function staffSessionMaxHours() {
+  const n = Number(process.env.STAFF_SESSION_MAX_HOURS ?? 24);
+  return Number.isFinite(n) ? Math.min(Math.max(n, 1), 720) : 24;
+}
+
+export function staffSessionExpired(createdAt: Date | string, now = Date.now()) {
+  return now - new Date(createdAt).getTime() > staffSessionMaxHours() * 3600_000;
+}
+
+/**
+ * Does this staff member satisfy the staff two-factor rule? (Non-staff: always true.) For callers that can't redirect
+ * — JSON routes and kit actions — so they can refuse instead. requirePermission/requireStaff redirect to setup.
+ */
+export async function staffTwoFactorOk(user: Pick<CurrentUser, "role" | "twoFactorEnabled">) {
+  if (!isStaffRole(user.role) || user.twoFactorEnabled) return true;
+  if (process.env.DISABLE_STAFF_2FA === "true" && process.env.NODE_ENV !== "production") return true;
+  return !(await getSettings()).flags.staff2fa;
+}
 
 export { kitchenScope } from "./user-context";
 
@@ -52,10 +78,7 @@ export function isStaff(role: Role | string) {
 }
 
 async function enforce2fa(user: CurrentUser) {
-  if (!isStaffRole(user.role) || user.twoFactorEnabled) return;
-  if (process.env.DISABLE_STAFF_2FA === "true" && process.env.NODE_ENV !== "production") return;
-  const s = await getSettings();
-  if (s.flags.staff2fa) redirect("/account/security?setup=2fa");
+  if (!(await staffTwoFactorOk(user))) redirect("/account/security?setup=2fa");
 }
 
 /** Gate for admin pages AND server actions. Never rely on middleware alone. */

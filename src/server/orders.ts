@@ -724,13 +724,18 @@ export async function bumpPaymentRefund(tx: Tx, paymentId: string, amount: numbe
 
 /** Staff money adjustment on an order (compensating record, never a silent edit). */
 export async function adjustOrder(orderId: string, actorId: string, amount: number, reason: string) {
+  return db.$transaction((tx) => adjustOrderTx(tx, orderId, actorId, amount, reason));
+}
+
+/** adjustOrder inside a caller's transaction (maker-checker execution re-validates the order here). */
+export async function adjustOrderTx(tx: Tx, orderId: string, actorId: string, amount: number, reason: string) {
   if (!reason.trim()) throw new OrderError("Give a reason");
-  const order = await db.order.findUniqueOrThrow({ where: { id: orderId } });
-  return db.$transaction(async (tx) => {
-    const adj = await tx.orderAdjustment.create({ data: { orderId, amount, reason, actorId } });
-    if (amount < 0) await addCredit(tx, { userId: order.userId, amount: -amount, reason: "ADJUSTMENT", orderId, actorId, note: reason });
-    return adj;
-  });
+  if (!Number.isInteger(amount) || amount === 0) throw new OrderError("Enter a non-zero amount");
+  const order = await tx.order.findUnique({ where: { id: orderId } });
+  if (!order) throw new OrderError("Order not found");
+  const adj = await tx.orderAdjustment.create({ data: { orderId, amount, reason, actorId } });
+  if (amount < 0) await addCredit(tx, { userId: order.userId, amount: -amount, reason: "ADJUSTMENT", orderId, actorId, note: reason });
+  return adj;
 }
 
 // ───────────── daily lock ─────────────

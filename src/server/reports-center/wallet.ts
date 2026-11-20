@@ -41,6 +41,10 @@ export const walletTopupsReport: ReportDef = {
   columns: COLS,
   async run(ctx, paging) {
     const { f, choice } = ctx;
+    // Top-ups have no kitchen. Same rule as payments (paymentWhere): kitchen-scoped staff only see payments with an
+    // order in their kitchens, so they see no top-ups (Phase 2B scope review).
+    if (ctx.user.kitchenIds?.length || f.kitchenIds)
+      return { rows: [], count: 0, totals: { when: "Total", amount: 0, credited: 0, reversed: 0, net: 0 }, summary: [], notes: ["Wallet top-ups aren't tied to a kitchen, so they're only shown to staff without a kitchen scope."] };
     const show = (choice.show as keyof typeof SHOW) ?? "paid";
     const range = stampRange(f.from, f.to);
     const where: Prisma.PaymentWhereInput = { purpose: "WALLET_TOPUP", status: { in: [...SHOW[show]] }, ...(show === "paid" ? { paidAt: range } : { createdAt: range }) };

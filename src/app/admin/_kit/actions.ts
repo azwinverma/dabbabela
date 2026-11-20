@@ -1,6 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, staffTwoFactorOk } from "@/lib/auth";
 import { isStaffRole } from "@/lib/permissions";
 import { done, fail, type ActionResult } from "@/lib/action";
 import { globalSearch, type SearchHit } from "./search";
@@ -9,7 +9,8 @@ import { deleteView, listSavedViews, saveView, type SavedViewDTO } from "./saved
 /** Kit server actions: global search and saved views. Each re-checks the session; search filters by permission. */
 async function staff() {
   const user = await getCurrentUser();
-  return user && isStaffRole(user.role) ? user : null;
+  // Same staff 2FA rule as every admin page (a staff member who hasn't set up 2FA gets nothing back).
+  return user && isStaffRole(user.role) && (await staffTwoFactorOk(user)) ? user : null;
 }
 
 export async function adminSearchAction(q: string): Promise<SearchHit[]> {

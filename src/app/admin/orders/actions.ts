@@ -11,6 +11,7 @@ import { adjustOrder, cancelOrder, setOrderStatus, type CartLine, type Settlemen
 import { createCorporateBulkOrder, createManualOrder, editOrderLines, quoteManualOrder, reassignDelivery, reassignKitchen, substituteOrderItem } from "@/server/orders-admin";
 import { f } from "@/app/admin/_kit/form";
 import { requestRefund } from "@/server/payments";
+import { needsApproval, requestApproval } from "@/server/approvals";
 import { TRANSITIONS } from "@/server/transitions";
 import { assertKitchen, guard, reasonOf, kitchenWhere } from "@/components/admin/ops/scope";
 
@@ -58,6 +59,11 @@ export async function adjustAction(orderId: string, _p: ActionResult, fd: FormDa
     const reason = reasonOf(fd);
     const amount = parseRupees(String(fd.get("amount") ?? ""));
     if (!amount) return fail("Enter an amount, e.g. -50 for a Rs 50 credit or 30 for an extra charge");
+    if (await needsApproval(amount)) {
+      const { replayed } = await requestApproval(user, { kind: "ORDER_ADJUSTMENT", payload: { orderId, amount, reason }, reason });
+      revalidatePath(`/admin/orders/${orderId}`);
+      return done(replayed ? "Already waiting for approval" : `Adjustment of ${rs(Math.abs(amount))} needs a second person — sent for approval`);
+    }
     await adjustOrder(orderId, user.id, amount, reason);
     await audit({ actorId: user.id, action: "order.adjust", entity: "Order", entityId: orderId, summary: `${o.number}: adjustment ${rs(amount)}`, reason, after: { amount } });
     revalidatePath(`/admin/orders/${orderId}`);
@@ -74,6 +80,11 @@ export async function refundAction(orderId: string, _p: ActionResult, fd: FormDa
     const amount = parseRupees(String(fd.get("amount") ?? ""));
     if (!amount || amount <= 0) return fail("Enter the refund amount");
     const method = (["ORIGINAL", "BANK", "CASH", "WALLET_CREDIT"].includes(String(fd.get("method"))) ? String(fd.get("method")) : "WALLET_CREDIT") as RefundMethod;
+    if (await needsApproval(amount)) {
+      const { replayed } = await requestApproval(user, { kind: "REFUND", payload: { paymentId: o.paymentId, orderId, amount, method, reason }, reason });
+      revalidatePath(`/admin/orders/${orderId}`);
+      return done(replayed ? "Already waiting for approval" : `Refund of ${rs(amount)} needs a second person — sent for approval`);
+    }
     await requestRefund({ paymentId: o.paymentId, orderId, amount, reason, method, actorId: user.id });
     revalidatePath(`/admin/orders/${orderId}`);
     return done(`Refund of ${rs(amount)} requested — finance approves and processes it`);

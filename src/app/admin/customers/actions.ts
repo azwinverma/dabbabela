@@ -9,7 +9,7 @@ import {
   addCustomerNote,
   CrmError,
   decideCreditRequest,
-  issueCredit,
+  issueCreditOrRequest,
   logPrivacyRequest,
   processPrivacyRequest,
   requestCredit,
@@ -108,9 +108,9 @@ export async function creditAction(_: ActionResult, fd: FormData): Promise<Actio
   if (amount == null || amount <= 0) return fail("Enter the credit in rupees");
   try {
     if (can(actor, "refunds.approve")) {
-      await issueCredit(actor, id, amount, s(fd, "note"));
+      const r = await issueCreditOrRequest(actor, id, amount, s(fd, "note"), s(fd, "idempotencyKey") || null);
       refresh(id);
-      return done("Credit added to their wallet");
+      return done(r.issued ? "Credit added to their wallet" : "Credit this large needs a second person — sent for approval");
     }
     await requestCredit(actor, id, amount, s(fd, "note"));
     refresh(id);

@@ -4,9 +4,17 @@ import { isValidISODate } from "@/lib/dates";
 import { parseRupees } from "@/lib/money";
 import { fail, done, type ActionResult } from "@/lib/action";
 import { createCreditNote, recordInvoicePayment, voidInvoice } from "@/server/invoices";
-import { generateCompanyInvoice, issueCompanyInvoice } from "@/server/corporate";
+import { generateCompanyInvoice, inCompanyScope, issueCompanyInvoice } from "@/server/corporate";
+import { db } from "@/lib/db";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong");
+
+/** Company-scoped staff may only touch invoices of companies in their scope (same rule as generate / issue). */
+async function invoiceInScope(user: { role: string; scopes?: { companyId: string | null }[] }, id: string) {
+  const inv = await db.invoice.findUnique({ where: { id }, select: { companyId: true } });
+  if (!inv) throw new Error("Invoice not found");
+  if (inv.companyId && !inCompanyScope(user, inv.companyId)) throw new Error("That company isn't in your scope");
+}
 
 export async function generateInvoiceAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   const user = await requirePermission("invoices.edit");
@@ -39,6 +47,7 @@ export async function recordPaymentAction(_: ActionResult, fd: FormData): Promis
   const amount = parseRupees(String(fd.get("amount") ?? ""));
   if (amount == null) return fail("Enter the amount received");
   try {
+    await invoiceInScope(user, String(fd.get("id")));
     await recordInvoicePayment(String(fd.get("id")), user.id, amount, String(fd.get("reference") ?? ""), { method: String(fd.get("method") ?? "") || null, receivedOn: String(fd.get("receivedOn") ?? "") || null, note: String(fd.get("note") ?? "") || null });
     return done("Payment recorded");
   } catch (e) {
@@ -49,6 +58,7 @@ export async function recordPaymentAction(_: ActionResult, fd: FormData): Promis
 export async function voidInvoiceAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   const user = await requirePermission("invoices.edit");
   try {
+    await invoiceInScope(user, String(fd.get("id")));
     await voidInvoice(String(fd.get("id")), user.id, String(fd.get("reason") ?? ""));
     return done("Invoice voided — its meals can be billed again");
   } catch (e) {
@@ -61,6 +71,7 @@ export async function creditNoteAction(_: ActionResult, fd: FormData): Promise<A
   const amount = parseRupees(String(fd.get("amount") ?? ""));
   if (amount == null) return fail("Enter the amount to credit");
   try {
+    await invoiceInScope(user, String(fd.get("id")));
     const cn = await createCreditNote(String(fd.get("id")), user.id, amount, String(fd.get("reason") ?? ""));
     return done(`Credit note ${cn.number} issued`, `/admin/invoices/${cn.id}`);
   } catch (e) {
