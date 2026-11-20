@@ -14,6 +14,7 @@ import {
   subscriptionDims,
   type AnalyticsFilters,
 } from "./filters";
+import { COMPANY_SHARE_PREFIX, companyOutstanding } from "@/server/corporate";
 import { CASH_PAYMENT_STATUSES, DEFERRED_PAYMENT, DEFERRED_STATUSES, NON_CASH_METHODS, NON_CASH_REFUNDS, NOT_BOOKED, RECOGNISED_STATUSES, UPCOMING_STATUSES } from "./metrics";
 
 /** Revenue bases (definitions in metrics.ts). All values are integer paisa. */
@@ -66,9 +67,26 @@ export async function cash(f: AnalyticsFilters) {
   return { collected, payments: inn._count, refunds, refundCount: out?._count ?? 0, net: collected - refunds, walletSpend: n(wallet._sum.amount), walletCount: wallet._count };
 }
 
+/**
+ * Σ OrderAdjustment.amount (WP-03 staff edits: + charge / − credit, VAT-inclusive) on the orders matching `where`,
+ * split into the customer part and the company part (reason starts with "Company share"). Order totals/shares are
+ * never rewritten by edits, so these are the difference between what the order says and what is actually owed.
+ */
+export async function adjustmentsOf(where: Prisma.OrderWhereInput) {
+  const [all, company] = await Promise.all([
+    db.orderAdjustment.aggregate({ where: { order: where }, _sum: { amount: true }, _count: true }),
+    db.orderAdjustment.aggregate({ where: { order: where, reason: { startsWith: COMPANY_SHARE_PREFIX } }, _sum: { amount: true }, _count: true }),
+  ]);
+  const total = n(all._sum.amount);
+  const co = n(company._sum.amount);
+  return { total, customer: total - co, company: co, count: all._count };
+}
+
 export async function recognised(f: AnalyticsFilters) {
-  const r = await netOf(recognisedWhere(f));
-  return { ...r, aov: r.count ? Math.round(r.value / r.count) : null };
+  const [r, adj] = await Promise.all([netOf(recognisedWhere(f)), adjustmentsOf(recognisedWhere(f))]);
+  // `adjustments` (metric recognisedAdjustments) is reported next to — not inside — `value`: the VAT part of an
+  // adjustment isn't recorded, so folding it into the net-of-VAT figure would mix bases.
+  return { ...r, aov: r.count ? Math.round(r.value / r.count) : null, adjustments: adj.total, adjustmentsCustomer: adj.customer, adjustmentsCompany: adj.company };
 }
 
 export const upcoming = (f: AnalyticsFilters) => netOf(upcomingWhere(f));
@@ -98,11 +116,21 @@ export async function receivables(f: AnalyticsFilters) {
       ? null
       : db.invoice.findMany({ where: { kind: "INVOICE", status: { in: ["ISSUED", "PARTIALLY_PAID"] }, ...(f.companyId ? { companyId: f.companyId } : {}) }, select: { total: true, paidAmount: true } }),
   ]);
+  const invoicesOutstanding = inv ? inv.reduce((a, i) => a + i.total - i.paidAmount, 0) : null;
+  // Employer money not on an invoice yet: company share of live meals + unbilled company-share adjustments (WP-03 edits).
+  // Same figure as the company page's "Owes now" minus its invoice part (corporate.companyOutstanding).
+  let companyUnbilled: number | null = null;
+  if (inv) {
+    const companies = await db.company.findMany({ where: f.companyId ? { id: f.companyId } : {}, select: { id: true } });
+    const owed = await Promise.all(companies.map((c) => companyOutstanding(c.id)));
+    companyUnbilled = owed.reduce((a, x) => a + x, 0) - invoicesOutstanding!;
+  }
   return {
     pending: n(pending._sum.amount),
     pendingCount: pending._count,
-    invoicesOutstanding: inv ? inv.reduce((a, i) => a + i.total - i.paidAmount, 0) : null,
+    invoicesOutstanding,
     invoiceCount: inv?.length ?? null,
+    companyUnbilled,
   };
 }
 

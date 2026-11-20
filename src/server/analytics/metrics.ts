@@ -88,6 +88,20 @@ export const METRICS = M({
     definition: "Σ (subtotal + delivery fee) of orders Scheduled → Delivered by delivery date (the figure formerly labelled “gross sales”). Includes meals not yet delivered and VAT, so it is NOT revenue.",
   },
   receivablesPending: { label: "Awaiting payment", unit: "paisa", permission: "analytics.view", basis: "receivables", definition: "Σ amount of payments still Pending right now (online not completed, cash not yet collected, transfer not verified)." },
+  receivablesCompanyUnbilled: {
+    label: "Company share not yet invoiced",
+    unit: "paisa",
+    permission: "analytics.view",
+    definition:
+      "Right now: company share of live orders (not cancelled/skipped) not on an invoice + company-share adjustments from staff order edits not yet billed on a non-void invoice. Customer extra charges from edits are already pending payments (Awaiting payment).",
+  },
+  recognisedAdjustments: {
+    label: "Order adjustments on delivered orders",
+    unit: "paisa",
+    permission: "analytics.view",
+    basis: "recognised",
+    definition: "Σ adjustment rows (staff order edits: + charge / − credit, customer and company parts, VAT-inclusive) on orders Delivered in the range. Shown next to recognised revenue, not inside it (the VAT part of an adjustment isn't recorded).",
+  },
   receivablesInvoices: { label: "Company invoices outstanding", unit: "paisa", permission: "analytics.view", definition: "Σ (total − paid) of company invoices Issued or Partly paid, right now." },
   runRate: {
     label: "Plan run-rate (30 days)",

@@ -39,7 +39,7 @@ export const KPI_FORMULAS: Record<string, string> = {
   onTime: "Delivered orders whose delivery time (Kathmandu) was at or before the end of their slot ÷ delivered orders with a slot.",
   failed: "Orders that ended the range in Delivery failed.",
   tickets: "Support tickets Open or Pending right now.",
-  cac: "Marketing spend entered for the month ÷ customers whose first paid order was in that month.",
+  cac: "Σ campaign spend dated in the month (all campaigns, Marketing → Campaigns) ÷ customers whose first order (Scheduled → Delivered) was delivered in that month.",
 };
 
 const revenueWhere = (r: Range): Prisma.OrderWhereInput => ({
@@ -224,6 +224,7 @@ export async function alerts() {
   return { failedJobs, failedMessages, stuckPending, transfers, lowStock: low.length, openTickets };
 }
 
+/** Legacy per-month spend Setting. Read only by the one-off import into a campaign (marketing.importLegacySpend). */
 export const SPEND_KEY = "marketing.spend";
 
 export async function marketingSpend(): Promise<Record<string, number>> {
@@ -233,7 +234,9 @@ export async function marketingSpend(): Promise<Record<string, number>> {
 
 export async function cac(ym: string) {
   const { start, end } = monthRange(ym);
-  const spend = (await marketingSpend())[ym] ?? null;
+  // WP-15: spend lives in CampaignSpend rows (the old Setting months were imported into a campaign).
+  const agg = await db.campaignSpend.aggregate({ where: { date: { gte: dateOnly(start), lte: dateOnly(end) } }, _sum: { amount: true }, _count: true });
+  const spend = agg._count ? (agg._sum.amount ?? 0) : null;
   const rows = await db.$queryRaw<{ n: bigint }[]>`
     SELECT COUNT(*) AS n FROM (
       SELECT "userId", MIN("deliveryDate") AS first FROM "Order"

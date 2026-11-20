@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { requireStaff } from "@/lib/auth";
 import { can, type Permission } from "@/lib/permissions";
 import { db } from "@/lib/db";
@@ -8,6 +9,8 @@ import { audit } from "@/lib/audit";
 import { csv, money } from "@/server/reports";
 import { exportUserData } from "@/server/privacy";
 import { REVENUE_STATUSES } from "@/server/transitions";
+import { userScope } from "@/server/analytics/filters";
+import { COMPANY_SHARE_PREFIX } from "@/server/corporate";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +42,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ type: st
   const email = (e: string | null | undefined) => (pii ? (e ?? "") : maskEmail(e));
   const day = { gte: dateOnly(from), lte: dateOnly(to) };
   const stamp = { gte: dateOnly(from), lt: dateOnly(addDays(to, 1)) };
+  // Kitchen-scoped staff only export their kitchens' orders and stock (WP-10).
+  const scope = userScope(user);
+  const kw = scope ? { kitchenId: { in: scope } } : {};
 
   let rows: (string | number | boolean | null | undefined | Date)[][] = [];
 
@@ -52,12 +58,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ type: st
   }
 
   if (type === "orders") {
-    const os = await db.order.findMany({ where: { deliveryDate: day }, include: { user: { select: { name: true, email: true } }, zone: { select: { name: true } }, company: { select: { name: true } }, payment: { select: { method: true, reference: true } } }, orderBy: [{ deliveryDate: "asc" }, { number: "asc" }], take: 20000 });
-    rows = [["Order", "Delivery date", "Status", "Payment status", "Source", "Customer", "Email", "Phone", "Area", "Zone", "Company", "Slot", "Subtotal", "Delivery", "Discount", "VAT", "Total", "Company share", "Customer share", "Refunded", "Food cost", "Method", "Payment ref", "Placed at"]];
-    for (const o of os)
-      rows.push([o.number, isoDate(o.deliveryDate), o.status, o.paymentStatus, o.source, o.user.name, email(o.user.email), phone(o.contactPhone), o.area, o.zone?.name, o.company?.name, o.slotLabel, money(o.subtotal), money(o.deliveryFee), money(o.discount), money(o.tax), money(o.total), money(o.companyShare), money(o.customerShare), money(o.refundedAmount), money(o.costTotal), o.payment?.method, o.payment?.reference, o.createdAt]);
+    const os = await db.order.findMany({ where: { deliveryDate: day, ...kw }, include: { user: { select: { name: true, email: true } }, zone: { select: { name: true } }, company: { select: { name: true } }, payment: { select: { method: true, reference: true } }, adjustments: { select: { amount: true, reason: true } } }, orderBy: [{ deliveryDate: "asc" }, { number: "asc" }], take: 20000 });
+    rows = [["Order", "Delivery date", "Status", "Payment status", "Source", "Customer", "Email", "Phone", "Area", "Zone", "Company", "Slot", "Subtotal", "Delivery", "Discount", "VAT", "Total", "Company share", "Customer share", "Customer adjustments", "Company adjustments", "Refunded", "Food cost", "Method", "Payment ref", "Placed at"]];
+    for (const o of os) {
+      // Staff edits never rewrite the shares; they add OrderAdjustment rows (WP-03).
+      const coAdj = o.adjustments.filter((a) => a.reason.startsWith(COMPANY_SHARE_PREFIX)).reduce((a, x) => a + x.amount, 0);
+      const custAdj = o.adjustments.reduce((a, x) => a + x.amount, 0) - coAdj;
+      rows.push([o.number, isoDate(o.deliveryDate), o.status, o.paymentStatus, o.source, o.user.name, email(o.user.email), phone(o.contactPhone), o.area, o.zone?.name, o.company?.name, o.slotLabel, money(o.subtotal), money(o.deliveryFee), money(o.discount), money(o.tax), money(o.total), money(o.companyShare), money(o.customerShare), money(custAdj), money(coAdj), money(o.refundedAmount), money(o.costTotal), o.payment?.method, o.payment?.reference, o.createdAt]);
+    }
   } else if (type === "order-items") {
-    const items = await db.orderItem.findMany({ where: { order: { deliveryDate: day } }, include: { order: { select: { number: true, deliveryDate: true, status: true } }, customizations: true }, take: 50000 });
+    const items = await db.orderItem.findMany({ where: { order: { deliveryDate: day, ...kw } }, include: { order: { select: { number: true, deliveryDate: true, status: true } }, customizations: true }, take: 50000 });
     rows = [["Order", "Delivery date", "Status", "Item", "Details", "Diet", "Qty", "Unit price", "Line total", "Unit cost", "Swaps"]];
     for (const i of items) rows.push([i.order.number, isoDate(i.order.deliveryDate), i.order.status, i.name, i.details, i.diet, i.quantity, money(i.unitPrice), money(i.lineTotal), money(i.unitCost), i.customizations.map((c) => c.label).join("; ")]);
   } else if (type === "dish-sales") {
@@ -65,6 +75,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ type: st
       SELECT c->>'name' AS name, SUM((c->>'qty')::int * oi.quantity) AS n
       FROM "OrderItem" oi JOIN "Order" o ON o.id = oi."orderId" CROSS JOIN LATERAL jsonb_array_elements(oi.components) c
       WHERE o."deliveryDate" BETWEEN ${dateOnly(from)} AND ${dateOnly(to)} AND o.status::text = ANY(${REVENUE_STATUSES as string[]})
+        ${scope ? Prisma.sql`AND o."kitchenId" = ANY(${scope})` : Prisma.empty}
       GROUP BY 1 ORDER BY 2 DESC`;
     rows = [["Dish", "Portions"], ...r.map((x) => [x.name, Number(x.n)])];
   } else if (type === "subscriptions") {
@@ -92,7 +103,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ type: st
     rows = [["Name", "Email", "Phone", "Diet", "Allergies", "Company", "Orders", "Marketing opt-in", "Active", "Joined"]];
     for (const u of us) rows.push([u.name, email(u.email), phone(u.phoneNumber), u.diet, u.allergies.join(" "), u.membership?.company.name, u._count.orders, u.marketingOptIn, u.isActive, u.createdAt]);
   } else if (type === "stock") {
-    const ms = await db.stockMovement.findMany({ where: { createdAt: stamp }, include: { ingredient: { select: { name: true, unit: true, costPerUnit: true } }, kitchen: { select: { code: true } } }, orderBy: { createdAt: "asc" } });
+    const ms = await db.stockMovement.findMany({ where: { createdAt: stamp, ...kw }, include: { ingredient: { select: { name: true, unit: true, costPerUnit: true } }, kitchen: { select: { code: true } } }, orderBy: { createdAt: "asc" } });
     rows = [["When", "Kitchen", "Ingredient", "Type", "Quantity", "Unit", "Unit cost", "Value", "Reference", "Expires", "Note"]];
     for (const m of ms) rows.push([m.createdAt, m.kitchen.code, m.ingredient.name, m.type, m.quantity, m.ingredient.unit, money(m.unitCost ?? m.ingredient.costPerUnit), money(Math.round(m.quantity * (m.unitCost ?? m.ingredient.costPerUnit))), m.reference, m.expiresOn ? isoDate(m.expiresOn) : "", m.note]);
   }
