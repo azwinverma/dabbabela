@@ -30,7 +30,7 @@ export default async function ZonePage({ params }: { params: Promise<{ id: strin
               <Select name="kitchenId" label="Served by kitchen" defaultValue={z?.kitchenId ?? kitchens[0]?.id} options={kitchens.map((k) => ({ value: k.id, label: `${k.name}${k.isActive ? "" : " (closed)"}` }))} />
               <Input name="city" label="City" defaultValue={z?.city ?? "Kathmandu"} />
               <Input name="etaNote" label="Delivery window note" defaultValue={z?.etaNote ?? ""} placeholder="12:00 – 1:15 PM" />
-              <Textarea name="areas" label="Localities (one per line)" rows={7} defaultValue={z?.areas.join("\n") ?? ""} hint="Exactly as customers write them, e.g. New Baneshwor, Shantinagar" />
+              <Textarea name="areas" label="Localities (one per line)" rows={7} defaultValue={z?.areas.join("\n") ?? ""} hint="Exactly as customers write them, e.g. New Baneshwor, Shantinagar. A line with just * makes this the catch-all zone for every other address in the Kathmandu Valley." />
               <Textarea name="wards" label="Ward codes (optional)" rows={7} defaultValue={z?.wards.join("\n") ?? ""} hint="Municipality short name + ward: KMC-10, LMC-2" />
               <Input name="fee" label="Delivery fee per day (Rs)" inputMode="decimal" defaultValue={rupeesInput(z?.fee ?? 0)} />
               <Input name="freeAbove" label="Free delivery above (Rs)" inputMode="decimal" defaultValue={z?.freeAbove != null ? rupeesInput(z.freeAbove) : ""} hint="Blank = use the global setting" />

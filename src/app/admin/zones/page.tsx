@@ -74,7 +74,7 @@ export default async function ZonesPage() {
                 </div>
               </Td>
               <Td className="text-xs">{z.kitchen.name}</Td>
-              <Td className="max-w-sm text-xs text-ink-mute">{z.areas.join(", ")}</Td>
+              <Td className="max-w-sm text-xs text-ink-mute">{z.areas.map((a) => (a === "*" ? "Anywhere else in the Kathmandu Valley (*)" : a)).join(", ")}</Td>
               <Td className="text-right tabular-nums">{rs(z.fee)}</Td>
               <Td className="text-right tabular-nums text-ink-mute">{z.freeAbove != null ? rs(z.freeAbove) : "global"}</Td>
               <Td className="text-right tabular-nums text-ink-mute">{z.minOrder ? rs(z.minOrder) : "—"}</Td>

@@ -12,6 +12,8 @@ const db = new PrismaClient();
 async function main() {
   const r = await ensureFoundationData(db);
   console.log(`✓ foundation data: ${JSON.stringify(r)}`);
+  const { relinkUncoveredAddresses } = await import("../src/server/coverage");
+  console.log(`✓ saved addresses newly covered: ${await relinkUncoveredAddresses()}`);
   const { ensureCmsContent } = await import("../src/lib/cms/builtin");
   const c = await ensureCmsContent(db);
   console.log(`✓ built-in CMS content: ${JSON.stringify(c)}`);

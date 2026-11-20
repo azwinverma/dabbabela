@@ -5,7 +5,9 @@ import { getSection } from "@/lib/cms";
 import { getI18n } from "@/lib/i18n/server";
 import { getSettings } from "@/lib/settings";
 import { rs } from "@/lib/money";
-import { parseZoneRules, searchCoverage } from "@/server/coverage";
+import { parseZoneRules, searchCoverage, VALLEY_WILDCARD } from "@/server/coverage";
+
+const VALLEY_TEXT = "anywhere inside the Kathmandu Valley (Kathmandu, Lalitpur, Bhaktapur, Kirtipur)";
 import { format } from "@/lib/i18n";
 import { PageHero } from "@/components/site/Section";
 import { AreaRequestForm } from "./AreaRequestForm";
@@ -68,6 +70,7 @@ export default async function CoveragePage({ searchParams }: { searchParams: Pro
                     <li key={zone.id} className="text-saag-dark">
                       <span className="font-semibold">{zone.name}</span>
                       {matches.length > 0 && <span> — {matches.join(", ")}</span>}
+                      {zone.areas.includes(VALLEY_WILDCARD) && <span> — {VALLEY_TEXT}</span>}
                       <span className="block text-sm">
                         {t.site.fee}: {zone.fee ? rs(zone.fee) : t.common.free}
                         {zone.fee && (zone.freeAbove ?? s.freeDeliveryAbove) ? ` · ${t.site.freeAbove} ${rs(zone.freeAbove ?? s.freeDeliveryAbove)}` : ""}
@@ -109,7 +112,7 @@ export default async function CoveragePage({ searchParams }: { searchParams: Pro
               <h3 className="flex items-center gap-2 font-display text-lg font-bold">
                 <MapPin className="h-4 w-4 text-sindoor" aria-hidden /> {z.name}
               </h3>
-              <p className="mt-2 text-sm leading-relaxed text-ink-soft">{z.areas.join(" · ")}</p>
+              <p className="mt-2 text-sm leading-relaxed text-ink-soft">{z.areas.map((a) => (a === VALLEY_WILDCARD ? VALLEY_TEXT : a)).join(" · ")}</p>
               {pausedNote.get(z.id) && (
                 <p role="status" className="mt-3 rounded-lg border border-sindoor/30 bg-sindoor-light px-3 py-2 text-sm text-sindoor-dark">
                   {pausedNote.get(z.id)}

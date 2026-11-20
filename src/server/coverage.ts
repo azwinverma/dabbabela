@@ -7,9 +7,31 @@ const norm = (s: string) =>
     .replace(/[^a-z0-9ऀ-ॿ]+/g, " ")
     .trim();
 
+/** Area marker for a catch-all zone: it serves any address inside the Kathmandu Valley that no named zone lists. */
+export const VALLEY_WILDCARD = "*";
+
+/** Municipalities / city names inside the Kathmandu Valley (normalised, first words are enough to match). */
+const VALLEY_PLACES = [
+  "kathmandu", "ktm", "lalitpur", "patan", "bhaktapur", "kirtipur", "madhyapur thimi", "thimi", "budhanilkantha",
+  "tokha", "tarakeshwar", "nagarjun", "chandragiri", "dakshinkali", "kageshwori manohara", "kageshwori", "gokarneshwor",
+  "shankharapur", "godawari", "mahalaxmi", "changunarayan", "suryabinayak", "konjyosom", "bagmati",
+  "kmc", "lmc", "bmc", "काठमाडौं", "काठमाडौँ", "ललितपुर", "भक्तपुर", "कीर्तिपुर",
+];
+
+/** True when a city / municipality string names a place inside the Kathmandu Valley. */
+export function inValley(place?: string | null) {
+  const p = norm(place ?? "");
+  if (!p) return false;
+  return VALLEY_PLACES.some((v) => p === v || p.startsWith(`${v} `) || p.includes(` ${v} `) || p.endsWith(` ${v}`));
+}
+
+/** Two cities count as the same when equal, or both inside the valley (Sanepa may be typed as Kathmandu or Lalitpur). */
+const sameCity = (a: string, b: string) => norm(a) === norm(b) || (inValley(a) && inValley(b));
+
 /**
  * Coverage lookup by locality / ward text. No GPS promises: we match what the customer types
- * against the areas each zone lists. Returns null when the area isn't served yet.
+ * against the areas each zone lists. A zone whose areas include "*" catches every other address in
+ * the Kathmandu Valley. Returns null when the area isn't served yet.
  */
 export async function findZone(input: { area?: string | null; ward?: number | null; municipality?: string | null; city?: string | null }) {
   const zones = await db.deliveryZone.findMany({ where: { isActive: true, kitchen: { isActive: true } }, include: { kitchen: true }, orderBy: { sortOrder: "asc" } });
@@ -17,11 +39,19 @@ export async function findZone(input: { area?: string | null; ward?: number | nu
   const muni = norm(input.municipality ?? "");
   const wardKey = input.ward && muni ? `${muni.split(" ")[0]}-${input.ward}` : null;
   if (!area && !wardKey) return null;
-  // exact area match first, then prefix / contains, then ward code
-  for (const pass of [0, 1, 2]) {
+  // the address's place: city, else municipality; a blank city is the default (Kathmandu)
+  const place = input.city?.trim() || input.municipality?.trim() || "Kathmandu";
+  const addressInValley = inValley(input.city) || inValley(input.municipality) || (!input.city && !input.municipality);
+  // exact area match first, then prefix / contains, then ward code, then the valley catch-all
+  for (const pass of [0, 1, 2, 3]) {
     for (const z of zones) {
-      if (input.city && norm(z.city) !== norm(input.city)) continue;
-      const areas = z.areas.map(norm);
+      const areas = z.areas.map(norm).filter(Boolean);
+      const wildcard = z.areas.includes(VALLEY_WILDCARD);
+      if (pass === 3) {
+        if (wildcard && addressInValley && inValley(z.city)) return z;
+        continue;
+      }
+      if (input.city && !sameCity(z.city, place)) continue;
       if (pass === 0 && area && areas.includes(area)) return z;
       if (pass === 1 && area && areas.some((a) => a.length > 3 && (area.includes(a) || a.includes(area)))) return z;
       if (pass === 2 && wardKey && z.wards.map(norm).includes(norm(wardKey))) return z;
@@ -30,14 +60,34 @@ export async function findZone(input: { area?: string | null; ward?: number | nu
   return null;
 }
 
+/**
+ * Re-run the lookup for saved, non-archived addresses that have no zone yet (after a zone is added or widened).
+ * Returns how many were linked.
+ */
+export async function relinkUncoveredAddresses(client: { address: typeof db.address } = db) {
+  const waiting = await client.address.findMany({ where: { zoneId: null, archivedAt: null }, select: { id: true, area: true, ward: true, municipality: true, city: true } });
+  let linked = 0;
+  for (const a of waiting) {
+    const z = await findZone(a);
+    if (!z) continue;
+    await client.address.update({ where: { id: a.id }, data: { zoneId: z.id } });
+    linked++;
+  }
+  return linked;
+}
+
 /** Public search results for the coverage page. */
 export async function searchCoverage(q: string) {
   const term = norm(q);
   if (term.length < 2) return [];
   const zones = await db.deliveryZone.findMany({ where: { isActive: true }, include: { kitchen: { select: { name: true } }, }, orderBy: { sortOrder: "asc" } });
-  return zones
-    .map((z) => ({ zone: z, matches: z.areas.filter((a) => norm(a).includes(term) || term.includes(norm(a))) }))
+  const named = zones
+    .map((z) => ({ zone: z, matches: z.areas.filter((a) => a !== VALLEY_WILDCARD && (norm(a).includes(term) || term.includes(norm(a)))) }))
     .filter((r) => r.matches.length || norm(r.zone.name).includes(term));
+  if (named.length) return named;
+  // nothing named: the valley catch-all zone (if any) covers it, as long as the place is inside the valley
+  const valley = zones.find((z) => z.areas.includes(VALLEY_WILDCARD));
+  return valley ? [{ zone: valley, matches: [] as string[] }] : [];
 }
 
 // ───────────── WP-13: distance fee bands, zone time windows ─────────────

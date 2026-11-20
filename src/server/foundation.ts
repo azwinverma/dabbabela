@@ -9,6 +9,7 @@ import { isGranular, type GranularPermission } from "../lib/permissions/registry
  *   - one MealPlanPrice per plan that has none (+ links existing subscriptions sold at that price)
  *   - website NavItems mirroring the header/footer links — seeded once per menu (marker), so deletions stick
  *   - MealCategories from dabba tags, and each uncategorised dabba gets its first tag's category — once (marker)
+ *   - a "Rest of Kathmandu Valley" catch-all delivery zone (areas ["*"]) — once (marker)
  *
  * Triggered by: seedCatalog() (setup + `npm run db:seed`), `npm run db:foundation` (runs in `vercel-build` after
  * `prisma migrate deploy`), and the super-admin "Install foundation data" button on /admin/roles.
@@ -65,7 +66,7 @@ export const DEFAULT_NAV: { menu: string; href: string; label: string; labelNe: 
 ];
 
 const MARKER_KEY = "foundation.v1";
-type Marker = { nav?: string; categories?: string };
+type Marker = { nav?: string; categories?: string; valley?: string };
 
 function slugify(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -75,10 +76,10 @@ function dateOnlyUTC(d: Date) {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
-export type FoundationResult = { roles: number; expenseCategories: number; planPrices: number; subscriptionsLinked: number; navItems: number; categories: number; boxesCategorised: number };
+export type FoundationResult = { roles: number; expenseCategories: number; planPrices: number; subscriptionsLinked: number; navItems: number; categories: number; boxesCategorised: number; valleyZone: number };
 
 export async function ensureFoundationData(db: Db): Promise<FoundationResult> {
-  const out: FoundationResult = { roles: 0, expenseCategories: 0, planPrices: 0, subscriptionsLinked: 0, navItems: 0, categories: 0, boxesCategorised: 0 };
+  const out: FoundationResult = { roles: 0, expenseCategories: 0, planPrices: 0, subscriptionsLinked: 0, navItems: 0, categories: 0, boxesCategorised: 0, valleyZone: 0 };
   const markerRow = await db.setting.findUnique({ where: { key: MARKER_KEY } });
   const marker: Marker = (markerRow?.value as Marker | null) ?? {};
   const now = new Date().toISOString();
@@ -141,6 +142,20 @@ export async function ensureFoundationData(db: Db): Promise<FoundationResult> {
     }
     // Only mark done once there were dabbas to look at (a fresh deploy runs this before /setup loads the catalogue).
     if (boxes.length) marker.categories = now;
+  }
+
+  // 6. Kathmandu Valley catch-all delivery zone ("*" area): every valley address no named zone lists — once
+  //    (marker), so a super admin can deactivate or edit it and it stays that way. Needs a kitchen (after /setup).
+  if (!marker.valley) {
+    const exists = await db.deliveryZone.findFirst({ where: { areas: { has: "*" } } });
+    const kitchen = exists ? null : ((await db.kitchen.findFirst({ where: { code: "KTM-1" } })) ?? (await db.kitchen.findFirst({ where: { isActive: true }, orderBy: { createdAt: "asc" } })));
+    if (kitchen) {
+      await db.deliveryZone.create({
+        data: { name: "Rest of Kathmandu Valley", city: "Kathmandu", areas: ["*"], wards: [], fee: 6000, freeAbove: 100000, etaNote: "12:00 – 1:45 PM", sortOrder: 99, kitchenId: kitchen.id },
+      });
+      out.valleyZone++;
+    }
+    if (exists || kitchen) marker.valley = now;
   }
 
   await db.setting.upsert({ where: { key: MARKER_KEY }, create: { key: MARKER_KEY, value: marker }, update: { value: marker } });

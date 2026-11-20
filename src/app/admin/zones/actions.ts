@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { done, fail, type ActionResult } from "@/lib/action";
 import { rs } from "@/lib/money";
-import { CoverageError, parseBandLines, parseZoneRules, quoteCoverage, validateZoneRules, zoneRulesJson } from "@/server/coverage";
+import { CoverageError, parseBandLines, parseZoneRules, quoteCoverage, relinkUncoveredAddresses, validateZoneRules, zoneRulesJson } from "@/server/coverage";
 import { guarded } from "../_kit/guard";
 import { f, FieldError } from "../_kit/form";
 
@@ -62,7 +62,7 @@ export async function saveZone(id: string | null, _prev: ActionResult, fd: FormD
     if (clash && data.isActive) return fail(`${clash.areas.filter((a) => areas.includes(a)).join(", ")} already belong(s) to ${clash.name}`);
     const z = id ? await db.deliveryZone.update({ where: { id }, data }) : await db.deliveryZone.create({ data });
     // re-link saved addresses in these areas that had no zone yet
-    const relinked = await db.address.updateMany({ where: { zoneId: null, archivedAt: null, area: { in: areas, mode: "insensitive" } }, data: { zoneId: z.id } });
+    const relinked = { count: await relinkUncoveredAddresses() };
     const feeChanged = !!before && (before.fee !== data.fee || before.freeAbove !== data.freeAbove || before.minOrder !== data.minOrder || JSON.stringify(parseZoneRules(before.distanceRules)) !== JSON.stringify(rules));
     await audit({ actorId: user.id, action: id ? (feeChanged ? "zone.fee_change" : "zone.update") : "zone.create", entity: "DeliveryZone", entityId: z.id, summary: z.name, before, after: { ...data, distanceRules: rulesJson } });
     return done(`Zone saved${relinked.count ? ` · ${relinked.count} waiting customer address(es) now covered` : ""}`, id ? undefined : `/admin/zones/${z.id}`);

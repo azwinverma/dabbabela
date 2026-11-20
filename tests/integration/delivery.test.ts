@@ -25,7 +25,7 @@ import {
   startRoute,
   type DispatchActor,
 } from "@/server/dispatch";
-import { parseBandLines, parseZoneRules, quoteCoverage, validateZoneRules, zoneFee, zoneRulesJson, zoneSlots } from "@/server/coverage";
+import { findZone, inValley, parseBandLines, parseZoneRules, quoteCoverage, relinkUncoveredAddresses, validateZoneRules, VALLEY_WILDCARD, zoneFee, zoneRulesJson, zoneSlots } from "@/server/coverage";
 import { loadUser, primaryBoxOn, serviceDay } from "../helpers";
 
 const B = "customer.b@demo.dabbabela.local";
@@ -153,7 +153,36 @@ describe("zones: distance bands, kitchen mapping, windows", () => {
     const far = await quoteCoverage({ area, lat: 27.9, lng: 85.3 });
     expect(far.serviceable).toBe(false);
     expect(far.reason).toMatch(/radius/);
-    expect((await quoteCoverage({ area: `${tag} nowhere` })).serviceable).toBe(false);
+    expect((await quoteCoverage({ area: `${tag} nowhere`, city: "Pokhara" })).serviceable).toBe(false);
+  });
+
+  it("serves the whole Kathmandu Valley: Lalitpur/Bhaktapur cities match named zones, the rest falls to the catch-all", async () => {
+    const area = `${tag} Patan Tole`;
+    const named = await db.deliveryZone.create({ data: { name: `${tag} patan zone`, city: "Kathmandu", areas: [area], wards: [], kitchenId, fee: 3000 } });
+    created.zones.push(named.id);
+    // a named valley locality typed with city "Lalitpur" still finds its Kathmandu-listed zone
+    expect((await findZone({ area, city: "Lalitpur" }))?.id).toBe(named.id);
+    expect((await findZone({ area, city: "Lalitpur Metropolitan City" }))?.id).toBe(named.id);
+
+    // the foundation's catch-all zone ("*") covers any other valley address, never one outside it
+    const valley = await db.deliveryZone.findFirst({ where: { areas: { has: VALLEY_WILDCARD }, isActive: true } });
+    expect(valley).toBeTruthy();
+    expect((await findZone({ area: `${tag} Chabahil`, city: "Kathmandu" }))?.id).toBe(valley!.id);
+    expect((await findZone({ area: `${tag} Suryabinayak`, city: "Bhaktapur" }))?.id).toBe(valley!.id);
+    expect((await findZone({ area: `${tag} Imadol`, municipality: "Mahalaxmi Municipality", city: "Lalitpur" }))?.id).toBe(valley!.id);
+    expect(await findZone({ area: `${tag} Lakeside`, city: "Pokhara" })).toBeNull();
+    expect(inValley("Kageshwori Manohara")).toBe(true);
+    expect(inValley("Pokhara")).toBe(false);
+
+    // saved addresses waiting without a zone get linked
+    const u = await db.user.findFirstOrThrow({ where: { role: "CUSTOMER" } });
+    const addr = await db.address.create({ data: { userId: u.id, label: `${tag} home`, recipientName: "Test", phone: "9800000000", line1: "Lane 1", area: `${tag} Kalanki`, city: "Kathmandu" } });
+    try {
+      expect(await relinkUncoveredAddresses()).toBeGreaterThanOrEqual(1);
+      expect((await db.address.findUniqueOrThrow({ where: { id: addr.id } })).zoneId).toBe(valley!.id);
+    } finally {
+      await db.address.delete({ where: { id: addr.id } });
+    }
   });
 });
 
