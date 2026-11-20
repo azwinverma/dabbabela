@@ -136,7 +136,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             <Kpi label="Expected food cost" value={rs(expected)} formula={M.foodCostEst.definition} sub={rec.value ? `${pct(expected / rec.value)} of recognised` : undefined} />
             <Kpi label="Actual stock used" value={cost.movements ? rs(cost.total) : "—"} formula={F.actualCost} sub={cost.movements ? `${rs(cost.waste)} of it waste` : "No usage recorded yet"} />
             <Kpi label="Contribution (estimated)" value={rs(rec.value - expected)} formula="Recognised revenue − expected food cost. Before packaging, delivery, fees and overheads — see Analytics → Profitability." tone={rec.value - expected < 0 ? "bad" : "default"} sub={rec.value ? pct((rec.value - expected) / rec.value) : undefined} />
-            {acq && <Kpi label={`CAC · ${acq.ym}`} value={acq.cac != null ? rs(acq.cac) : "—"} formula={F.cac} sub={acq.spend == null ? <Link className="underline" href="/admin/reports#spend">Enter marketing spend</Link> : `${rs(acq.spend)} ÷ ${acq.newCustomers} new`} />}
+            {acq && <Kpi label={`CAC · ${acq.ym}`} value={acq.cac != null ? rs(acq.cac) : "—"} formula={F.cac} sub={acq.spend == null ? <Link className="underline" href="/admin/campaigns">Record campaign spend</Link> : `${rs(acq.spend)} ÷ ${acq.newCustomers} new`} />}
           </div>
           <div className="mb-5 flex flex-wrap gap-2 text-xs">
             {periods.map((p) => (
