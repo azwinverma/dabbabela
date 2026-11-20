@@ -523,7 +523,7 @@ export async function priceDelta(order: EditableOrder, before: Pick<ItemState, "
   const settings = await getSettings();
   const [tax, company] = await Promise.all([taxRuleFor(date), companySpecForOrder(order)]);
   // Same fee basis as checkout: distance band from the order's pin snapshot, else the flat zone fee.
-  const zone = zoneSpecFor(order.zone, { lat: order.lat, lng: order.lng }).spec;
+  const zone = zoneSpecFor(order.zone, { lat: order.lat, lng: order.lng }, settings.flags.freeDelivery).spec;
   const price = (items: typeof before) =>
     priceDays({ lines: items.filter((i) => i.quantity > 0).map((i) => ({ date, qty: i.quantity, unitPrice: i.unitPrice, unitCost: i.unitCost, boxId: i.boxId })), zone, company, tax, globalFreeAbove: settings.freeDeliveryAbove });
   const a = price(before);

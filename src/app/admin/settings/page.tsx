@@ -22,6 +22,7 @@ const FLAG_LABEL: Record<keyof FeatureFlags, [string, string]> = {
   corporatePortal: ["Team portal", "Company admins manage their staff lunches"],
   deliveryOtp: ["Delivery hand-off code", "Riders confirm delivery with the customer's 4-digit code"],
   deliveryPhoto: ["Delivery photo", "Riders can attach a photo as proof"],
+  freeDelivery: ["Free delivery", "Waive every zone's delivery fee at checkout (zone fees stay saved for when you switch this off)"],
   newsletter: ["Newsletter sign-up", "Shows the email sign-up form (with consent text)"],
   feedback: ["Feedback after delivery", "Ask customers to rate delivered lunches"],
   nepaliDates: ["Bikram Sambat dates", "Leave off until a tested BS calendar library is added"],

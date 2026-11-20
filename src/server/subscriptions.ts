@@ -280,7 +280,7 @@ export async function quoteSubscription(user: CurrentUser | null, input: PlanInp
   const spec: CompanySpec = split.spec;
   const tax = await taxRuleFor(dates[0]);
   // Distance band fee when the address has a pin (WP-13); a pin past the last band is outside the delivery radius.
-  const zq = zoneSpecFor(zone, address ? { lat: address.lat, lng: address.lng } : null);
+  const zq = zoneSpecFor(zone, address ? { lat: address.lat, lng: address.lng } : null, settings.flags.freeDelivery);
   const zoneSpec = plan.includesDelivery || !zq.spec ? null : { fee: zq.spec.fee, freeAbove: null, minOrder: 0 };
   const lines = meals.filter((m) => m.price > 0).map((m) => ({ date: m.date, unitPrice: m.price, unitCost: m.cost, qty: 1, boxId: m.boxId ?? null }));
   const pre = applyDayCompanyShares(priceDays({ lines, zone: zoneSpec, company: spec, tax, globalFreeAbove: 0 }), spec, split.eligible);
@@ -945,7 +945,7 @@ export async function quoteAddMeal(user: CurrentUser, subId: string, input: { da
   const f = boxFacts(pick.box);
   const unitPrice = planMealPrice(sub, pick.price);
   const sameDay = await db.order.count({ where: { subscriptionId: sub.id, deliveryDate: dateOnly(input.date), status: { in: LIVE_STATUSES } } });
-  const zq = zoneSpecFor(zone, { lat: address.lat, lng: address.lng });
+  const zq = zoneSpecFor(zone, { lat: address.lat, lng: address.lng }, settings.flags.freeDelivery);
   const zoneSpec = sub.plan.includesDelivery || sameDay > 0 || !zq.spec ? null : { fee: zq.spec.fee, freeAbove: null, minOrder: 0 };
   const tax = await taxRuleFor(input.date);
   const priced = priceDays({ lines: [{ date: input.date, unitPrice, unitCost: f.cost, qty: 1 }], zone: zoneSpec, company: null, tax, globalFreeAbove: 0 });

@@ -60,9 +60,11 @@ type ZoneRow = Pick<DeliveryZone, "fee" | "freeAbove" | "minOrder" | "kitchenId"
  * Pricing spec for a zone and an optional address pin: distance band fee when the zone has bands and the address has
  * a pin, else the flat `zone.fee`. `beyond` = the pin is past the zone's last band (outside the delivery radius).
  */
-export function zoneSpecFor(zone: ZoneRow | null | undefined, pin?: LatLng): { spec: ZoneSpec; quote: ZoneFeeQuote | null; problem: string | null } {
+export function zoneSpecFor(zone: ZoneRow | null | undefined, pin?: LatLng, waiveFee = false): { spec: ZoneSpec; quote: ZoneFeeQuote | null; problem: string | null } {
   if (!zone) return { spec: null, quote: null, problem: null };
-  const quote = zoneFee(zone, pin);
+  const raw = zoneFee(zone, pin);
+  // the "Free delivery" switch (Settings → feature flags) zeroes the fee; the radius check still applies
+  const quote = waiveFee ? { ...raw, fee: 0 } : raw;
   const problem = quote.beyond ? `That address is about ${quote.distanceKm} km away — beyond ${zone.name ? `the ${zone.name} zone's` : "our"} delivery radius` : null;
   return { spec: { fee: quote.fee, freeAbove: zone.freeAbove, minOrder: zone.minOrder }, quote, problem };
 }
@@ -224,7 +226,7 @@ export async function quoteCart(
   if (!lines.length) return { ...base, error: "Your dabba list is empty" };
   if (!kitchenId) return { ...base, error: "No kitchen is open yet" };
   if (address && !address.zoneId) base.addressProblem = `We don't deliver to ${address.area} yet. Pick another address, or ask us to add your area.`;
-  const zoneQuote = zoneSpecFor(zone, address ? { lat: address.lat, lng: address.lng } : null);
+  const zoneQuote = zoneSpecFor(zone, address ? { lat: address.lat, lng: address.lng } : null, settings.flags.freeDelivery);
   if (zoneQuote.problem) base.addressProblem = `${zoneQuote.problem}. Pick another address, or ask us to add your area.`;
 
   const dates = [...new Set(lines.map((l) => l.date))].sort();

@@ -12,6 +12,7 @@ export type FeatureFlags = {
   newsletter: boolean;
   feedback: boolean;
   nepaliDates: boolean; // show Bikram Sambat dates (off until a tested library is added)
+  freeDelivery: boolean; // waive every zone delivery fee (launch offer); zone fees stay configured for later
 };
 
 export type SiteSettings = {
@@ -63,6 +64,7 @@ export const DEFAULT_FLAGS: FeatureFlags = {
   newsletter: true,
   feedback: true,
   nepaliDates: false,
+  freeDelivery: true,
 };
 
 export const DEFAULT_SETTINGS: SiteSettings = {

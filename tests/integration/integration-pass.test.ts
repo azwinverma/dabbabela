@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Weekday } from "@prisma/client";
 import { db } from "@/lib/db";
-import { getSettings } from "@/lib/settings";
+import { getSettings, saveSettings } from "@/lib/settings";
 import { addDays, dateOnly, isoDate, todayKTM, weekdayOf } from "@/lib/dates";
 import { companySpecFor } from "@/server/corporate";
 import { getClosures, getLockedDates, orderableDates } from "@/server/calendar";
@@ -101,6 +101,12 @@ describe("distance fee bands at checkout (WP-13)", () => {
     const d = await nextDay();
     const lines = [{ kind: "box" as const, id: (await boxOn(d)).id, date: d, qty: 1 }];
 
+    // "Free delivery" switch on (the launch default): no fee, the radius check still applies
+    await saveSettings({ flags: { freeDelivery: true } as never });
+    expect((await quoteCart(user, { lines, addressId: near.id })).deliveryFee).toBe(0);
+    expect((await quoteCart(user, { lines, addressId: far.id })).ok).toBe(false);
+    await saveSettings({ flags: { freeDelivery: false } as never });
+
     const flat = await quoteCart(user, { lines, addressId: noPin.id });
     expect(flat.ok).toBe(true);
     expect(flat.deliveryFee).toBe(3000);
@@ -119,6 +125,7 @@ describe("distance fee bands at checkout (WP-13)", () => {
     const r = await placeCartOrder(user, { lines, addressId: near.id, slotId: inZone.id, method: "CASH" });
     expect(r.orders[0].deliveryFee).toBe(5000);
     expect(r.orders[0].slotId).toBe(inZone.id);
+    await saveSettings({ flags: { freeDelivery: true } as never });
   });
 });
 

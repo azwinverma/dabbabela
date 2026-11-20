@@ -72,11 +72,11 @@ export default async function CoveragePage({ searchParams }: { searchParams: Pro
                       {matches.length > 0 && <span> — {matches.join(", ")}</span>}
                       {zone.areas.includes(VALLEY_WILDCARD) && <span> — {VALLEY_TEXT}</span>}
                       <span className="block text-sm">
-                        {t.site.fee}: {zone.fee ? rs(zone.fee) : t.common.free}
-                        {zone.fee && (zone.freeAbove ?? s.freeDeliveryAbove) ? ` · ${t.site.freeAbove} ${rs(zone.freeAbove ?? s.freeDeliveryAbove)}` : ""}
+                        {t.site.fee}: {zone.fee && !s.flags.freeDelivery ? rs(zone.fee) : t.common.free}
+                        {zone.fee && !s.flags.freeDelivery && (zone.freeAbove ?? s.freeDeliveryAbove) ? ` · ${t.site.freeAbove} ${rs(zone.freeAbove ?? s.freeDeliveryAbove)}` : ""}
                         {zone.etaNote ? ` · ${t.site.lunchWindow}: ${zone.etaNote}` : ""}
                       </span>
-                      {bandsText(zone) && (
+                      {!s.flags.freeDelivery && bandsText(zone) && (
                         <span className="block text-sm">
                           {t.site.distanceBands}: {bandsText(zone)}
                         </span>
@@ -121,15 +121,15 @@ export default async function CoveragePage({ searchParams }: { searchParams: Pro
               <dl className="mt-4 grid grid-cols-2 gap-2 border-t border-ink/10 pt-3 text-sm">
                 <div>
                   <dt className="text-xs text-ink-mute">{t.site.fee}</dt>
-                  <dd className="font-semibold">{z.fee ? rs(z.fee) : t.common.free}</dd>
+                  <dd className="font-semibold">{z.fee && !s.flags.freeDelivery ? rs(z.fee) : t.common.free}</dd>
                 </div>
-                {bandsText(z) && (
+                {!s.flags.freeDelivery && bandsText(z) && (
                   <div className="col-span-2">
                     <dt className="text-xs text-ink-mute">{t.site.distanceBands}</dt>
                     <dd className="font-semibold">{bandsText(z)}</dd>
                   </div>
                 )}
-                {z.fee > 0 && freeAbove(z) ? (
+                {z.fee > 0 && !s.flags.freeDelivery && freeAbove(z) ? (
                   <div>
                     <dt className="text-xs text-ink-mute">{t.common.free}</dt>
                     <dd className="font-semibold">≥ {rs(freeAbove(z))}</dd>
