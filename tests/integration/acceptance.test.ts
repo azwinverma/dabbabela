@@ -225,7 +225,7 @@ describe("metric-to-record reconciliation (single day)", () => {
       const rows = await mealRevenueRows(f);
       expect(delivered.length).toBeGreaterThan(0);
       expect(kpi.value).toBe(records);
-      expect(rows.find((r) => r.name === placed.orders[0].items?.[0]?.name || r.name === box.name)?.qty).toBeGreaterThanOrEqual(2);
+      expect(rows.find((r) => r.name === box.name)?.qty).toBeGreaterThanOrEqual(2);
       expect(Math.abs(rows.reduce((s, r) => s + r.revenue, 0) - kpi.value)).toBeLessThanOrEqual(rows.length); // per-row rounding only
     } finally {
       await db.order.update({ where: { id }, data: { status: "SCHEDULED" } });
