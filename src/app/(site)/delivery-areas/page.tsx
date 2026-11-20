@@ -5,7 +5,7 @@ import { getSection } from "@/lib/cms";
 import { getI18n } from "@/lib/i18n/server";
 import { getSettings } from "@/lib/settings";
 import { rs } from "@/lib/money";
-import { parseZoneRules, searchCoverage, VALLEY_WILDCARD } from "@/server/coverage";
+import { parseZoneRules, searchCoverage, valleyZone, VALLEY_WILDCARD } from "@/server/coverage";
 
 const VALLEY_TEXT = "anywhere inside the Kathmandu Valley (Kathmandu, Lalitpur, Bhaktapur, Kirtipur)";
 import { format } from "@/lib/i18n";
@@ -30,6 +30,8 @@ export default async function CoveragePage({ searchParams }: { searchParams: Pro
     query.length >= 2 ? searchCoverage(query) : Promise.resolve(null),
   ]);
   const windows = [...new Set(slots.map((x) => x.label))];
+  // Not listed by name: the valley catch-all zone may still cover it — say so honestly, without claiming the place.
+  const valley = results && !results.length ? await valleyZone() : null;
   // Distance fee bands (read-only): they apply only when the zone has an origin and the customer's address has a map pin.
   const bandsText = (z: { distanceRules?: unknown }) => {
     const r = parseZoneRules(z.distanceRules);
@@ -89,7 +91,13 @@ export default async function CoveragePage({ searchParams }: { searchParams: Pro
             ) : (
               <div className="grid gap-8 rounded-2xl border-2 border-ink bg-paper-card p-6 md:grid-cols-2">
                 <div>
-                  <p className="font-display text-2xl font-extrabold">{t.site.notCovered}: “{query}”</p>
+                  <p className="font-display text-2xl font-extrabold">{valley ? `“${query}” isn't on our list by name` : `${t.site.notCovered}: “${query}”`}</p>
+                  {valley && (
+                    <p className="mt-2 font-semibold text-saag-dark">
+                      We deliver {VALLEY_TEXT}. If “{query}” is inside the valley, you're covered ({valley.name}
+                      {valley.etaNote ? ` · ${t.site.lunchWindow}: ${valley.etaNote}` : ""}) — add it as your address at checkout. Outside the valley we don&apos;t deliver yet.
+                    </p>
+                  )}
                   <p className="mt-2 text-ink-soft">
                     We only list areas our riders actually cover. Tell us where you are — when enough people ask for an area, it goes on the route. You can still have lunch delivered to an address inside the areas below (an office, a friend's shop, college).
                   </p>
