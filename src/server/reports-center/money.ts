@@ -153,7 +153,7 @@ export const outstandingPayments: ReportDef = {
     if (choice.side === "suppliers") {
       if (!can(ctx.user, "purchasing.view")) return { rows: [], count: 0, columns: SUPPLIER_COLS, notes: ["Supplier balances need the Supplier invoices & payables permission."] };
       const a = await payablesAgeing(ctx.today);
-      const all = a.suppliers.map((s) => ({ supplier: s.name, ...s.buckets, total: s.total }));
+      const all = a.suppliers.filter((s) => s.total !== 0).map((s) => ({ supplier: s.name, ...s.buckets, total: s.total }));
       return { rows: pageOf(all, paging), count: all.length, columns: SUPPLIER_COLS, totals: { supplier: "Total", ...a.totals, total: a.total } };
     }
     if (choice.side === "companies") {

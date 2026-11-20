@@ -39,7 +39,7 @@ export async function recordPaymentAction(_: ActionResult, fd: FormData): Promis
   const amount = parseRupees(String(fd.get("amount") ?? ""));
   if (amount == null) return fail("Enter the amount received");
   try {
-    await recordInvoicePayment(String(fd.get("id")), user.id, amount, String(fd.get("reference") ?? ""));
+    await recordInvoicePayment(String(fd.get("id")), user.id, amount, String(fd.get("reference") ?? ""), { method: String(fd.get("method") ?? "") || null, receivedOn: String(fd.get("receivedOn") ?? "") || null, note: String(fd.get("note") ?? "") || null });
     return done("Payment recorded");
   } catch (e) {
     return fail(msg(e));

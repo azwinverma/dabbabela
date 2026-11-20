@@ -9,7 +9,8 @@ import { PageHeader, Panel, KV, Table, Th, Td, EmptyRow, Callout } from "@/compo
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
 import { PAY_METHODS, threeWayMatch } from "@/server/finance/payables";
 import { FinBadge, label } from "../../expenses/_shared";
-import { recordSupplierPaymentAction, reverseSupplierPaymentAction, voidSupplierInvoiceAction } from "../actions";
+import { creditApplicationsForInvoice, listSupplierCredits } from "@/server/finance/supplier-credits";
+import { applySupplierCreditAction, recordSupplierPaymentAction, reverseSupplierPaymentAction, voidSupplierInvoiceAction } from "../actions";
 
 export const metadata = { title: "Supplier invoice" };
 
@@ -18,7 +19,8 @@ export default async function SupplierInvoicePage({ params }: { params: Promise<
   const { id } = await params;
   const inv = await db.supplierInvoice.findUnique({ where: { id }, include: { supplier: true, po: { select: { id: true, number: true } }, payments: { orderBy: { createdAt: "asc" } } } });
   if (!inv) notFound();
-  const match = await threeWayMatch(id);
+  const [match, applications, openCredits] = await Promise.all([threeWayMatch(id), creditApplicationsForInvoice(id), listSupplierCredits({ supplierId: inv.supplierId })]);
+  const credited = applications.reduce((a, x) => a + x.amount, 0);
   const reversed = new Set(inv.payments.filter((p) => p.reference.startsWith("REV:")).map((p) => p.reference.slice(4)));
   const canPay = can(user, "purchasing.approve");
   const outstanding = inv.total - inv.paidAmount;
@@ -38,7 +40,8 @@ export default async function SupplierInvoicePage({ params }: { params: Promise<
               ["Before tax", rs(inv.subtotal)],
               ["Tax", rs(inv.tax)],
               ["Total", rs(inv.total)],
-              ["Paid", rs(inv.paidAmount)],
+              ["Paid (cash)", rs(inv.paidAmount - credited)],
+              ["Supplier credit applied", credited ? rs(credited) : "—"],
               ["Outstanding", rs(outstanding)],
               ["Purchase order", inv.po ? <Link key="po" className="text-sindoor underline" href={`/admin/inventory/purchases/${inv.po.id}`}>{inv.po.number}</Link> : "—"],
             ]}
@@ -86,6 +89,53 @@ export default async function SupplierInvoicePage({ params }: { params: Promise<
                 </label>
                 <SubmitButton variant="dark">Record payment</SubmitButton>
               </ActionForm>
+            </Panel>
+          )}
+          {canPay && outstanding > 0 && inv.status !== "VOID" && openCredits.length > 0 && (
+            <Panel title="Apply supplier credit">
+              <ActionForm action={applySupplierCreditAction} resetOnSuccess className="flex flex-wrap items-end gap-2">
+                <input type="hidden" name="invoiceId" value={inv.id} />
+                <label className={label}>
+                  Credit
+                  <select name="creditId" required className="field mt-1 w-72">
+                    {openCredits.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {rs(c.amount - c.appliedAmount)} left{c.number ? ` · note ${c.number}` : ""}{c.po ? ` · ${c.po.number}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={label}>
+                  Amount (Rs)
+                  <input name="amount" required inputMode="decimal" defaultValue={(Math.min(outstanding, openCredits[0].amount - openCredits[0].appliedAmount) / 100).toFixed(2)} className="field mt-1 w-32" />
+                </label>
+                <SubmitButton variant="dark" confirm="Apply this credit to the invoice? Applications can't be undone.">Apply credit</SubmitButton>
+              </ActionForm>
+              <p className="mt-2 text-xs text-ink-mute">Settles the invoice without cash. Never more than the credit has left or the invoice owes.</p>
+            </Panel>
+          )}
+          {applications.length > 0 && (
+            <Panel title="Supplier credits applied" bodyClass="p-0">
+              <Table className="rounded-none border-0 shadow-none">
+                <thead>
+                  <tr>
+                    <Th>Applied</Th>
+                    <Th>Credit note</Th>
+                    <Th>From PO</Th>
+                    <Th className="text-right">Amount</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {applications.map((a) => (
+                    <tr key={a.id}>
+                      <Td className="whitespace-nowrap text-xs">{formatStamp(a.createdAt)}</Td>
+                      <Td className="font-mono text-xs">{a.credit.number ?? "—"}</Td>
+                      <Td className="font-mono text-xs">{a.credit.po?.number ?? "—"}</Td>
+                      <Td className="text-right tabular-nums">{rs(a.amount)}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
             </Panel>
           )}
           <Panel title="Payments" bodyClass="p-0">

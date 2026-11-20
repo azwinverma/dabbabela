@@ -1,10 +1,20 @@
 # Implementation status
 
-_Last updated: 2026-11-20 (WP-20 acceptance, security and performance pass)._ This is an honest status.
+_Last updated: 2026-11-20 (Phase 2C business gaps; earlier: WP-20 acceptance, security and performance pass)._ This is an honest status.
 "Done" means the flow works against a real Postgres database and the checks listed below cover it.
 **This is not a production-readiness claim.** The app is deployed to Vercel (https://dabbabela.vercel.app) in
 sandbox mode only. There is no production domain, no live payment merchant keys, and no SMS or email provider.
 The external blockers listed further down are still open.
+
+## Production readiness Phase 2C (2026-11-20)
+- **Swap "pay the difference":** a dearer swap of a paid plan meal can be paid from credit or online (eSewa/Khalti, `SWAP_DIFFERENCE` payment); the swap is applied once on verified payment, credited to the wallet if it can no longer be applied, and cancelled if unpaid at the cut-off. Cheaper swaps credit the wallet (paid) or reduce what's owed (unpaid). Integration-tested (4).
+- **Company menu:** applies to every company member on `/menu`, dabba pages, plan swaps/extra meals and checkout; Build-a-Dabba refused only on company-billed orders. Integration-tested.
+- **Address + window change:** the window is checked against the new address's zone (staff reassign and customer plan address change). Integration-tested.
+- **Company-invoice receipts** are dated records (`InvoiceReceipt`), shown on the invoice and in payment history (legacy audit-only payments still listed), and included in settlements cash flow and the journal. Billed adjustments tracked by `invoiceLineId`; referrals record hold/decision notes and reward time; single-order coupon redemptions record their order. Integration-tested (5) + E2E `company-invoices`.
+- **Purchase returns → supplier credit:** optional credit on return (credit-note no., idempotent), apply to supplier invoices with over-apply guards, void the unapplied remainder, net due after credits in ageing; credits are not cash. Integration-tested (6) + E2E `purchasing`.
+- **Analytics:** order adjustments and unbilled company share shown as separate KPIs (not folded into recognised revenue until a VAT split exists).
+- **E2E added:** `purchasing`, `company-invoices`, `disruption` (bandh wizard). Vitest: 401 tests / 39 files (with Phase 2A merged).
+- Not built: online payment of company invoices (purpose `INVOICE`).
 
 ## Verification snapshot (2026-11-20, local, dev database + throwaway test schemas)
 | Check | Result |

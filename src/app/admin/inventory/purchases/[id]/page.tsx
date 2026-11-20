@@ -11,7 +11,9 @@ import { Badge } from "@/components/ui/Badge";
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
 import { PrintButton } from "@/components/admin/ops/PrintButton";
 import { ReasonForm } from "@/components/admin/ops/ReasonForm";
-import { poStatusAction, receiveAction, returnAction } from "../../actions";
+import { randomCode } from "@/lib/utils";
+import { uncreditedReturnValue } from "@/server/finance/supplier-credits";
+import { creditReturnsAction, poStatusAction, receiveAction, returnAction } from "../../actions";
 
 export const metadata = { title: "Purchase order" };
 const TONE = { DRAFT: "neutral", SENT: "info", PARTIAL: "warn", RECEIVED: "good", CANCELLED: "bad" } as const;
@@ -24,12 +26,15 @@ export default async function POPage({ params }: { params: Promise<{ id: string 
   if (!po || !inScope(user, po.kitchenId)) notFound();
   const editable = can(user, "inventory.edit");
   const open = editable && ["DRAFT", "SENT", "PARTIAL"].includes(po.status);
-  const [receipts, returns, returned, invoices, locations] = await Promise.all([
+  const canCredit = can(user, "purchasing.create");
+  const [receipts, returns, returned, invoices, locations, credits, uncredited] = await Promise.all([
     db.stockMovement.findMany({ where: { reference: po.number, type: "RECEIPT" }, include: { ingredient: { select: { name: true } }, lot: { select: { code: true } } }, orderBy: { createdAt: "desc" } }),
     purchaseReturns(po.id),
     returnedByLine(po),
     supplierInvoicesForPO(po.id),
     db.inventoryLocation.findMany({ where: { kitchenId: po.kitchenId, isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    db.supplierCredit.findMany({ where: { poId: po.id }, orderBy: { createdAt: "desc" }, select: { id: true, number: true, amount: true, appliedAmount: true, status: true, createdAt: true } }),
+    uncreditedReturnValue(po.id),
   ]);
   const returnable = po.lines.filter((l) => l.receivedQty - (returned.get(l.id) ?? 0) > 1e-9);
   return (
@@ -99,6 +104,36 @@ export default async function POPage({ params }: { params: Promise<{ id: string 
               </ul>
             </Panel>
           )}
+          {(credits.length > 0 || uncredited.uncredited > 0) && (
+            <Panel title="Supplier credits">
+              {credits.length > 0 && (
+                <ul className="space-y-1 text-sm">
+                  {credits.map((c) => (
+                    <li key={c.id} className="flex justify-between gap-2">
+                      <span>
+                        {rs(c.amount)}
+                        {c.number ? <span className="font-mono"> · note {c.number}</span> : null}
+                        {c.appliedAmount > 0 && <span className="text-xs text-ink-mute"> · {rs(c.appliedAmount)} applied</span>}
+                      </span>
+                      <span className="text-xs text-ink-mute">{c.status.toLowerCase()} · {formatStamp(c.createdAt)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {uncredited.uncredited > 0 && (
+                <div className="mt-3 border-t border-ink-line/60 pt-3">
+                  <p className="text-xs text-ink-mute">Returns worth {rs(uncredited.uncredited)} have no supplier credit yet.</p>
+                  {canCredit && (
+                    <ActionForm action={creditReturnsAction.bind(null, po.id)} className="no-print mt-2 flex flex-wrap items-end gap-2">
+                      <input name="creditNumber" maxLength={60} placeholder="Supplier credit-note no. (optional)" className="field w-56 py-1" aria-label="Supplier credit-note number" />
+                      <SubmitButton size="sm" variant="outline">Record supplier credit</SubmitButton>
+                    </ActionForm>
+                  )}
+                </div>
+              )}
+              <p className="mt-2 text-xs text-ink-mute">Credits are applied to this supplier&apos;s invoices under supplier payables. They settle invoices but are not cash.</p>
+            </Panel>
+          )}
           {returns.rows.length > 0 && (
             <Panel title={`Returns · credit due ${rs(returns.credit)}`}>
               <ul className="space-y-1 text-sm">
@@ -147,6 +182,16 @@ export default async function POPage({ params }: { params: Promise<{ id: string 
                     </div>
                   ))}
                 </div>
+                {canCredit && (
+                  <div className="space-y-1.5 rounded-lg bg-paper/60 p-2 text-sm">
+                    <input type="hidden" name="creditKey" value={randomCode(12)} />
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" name="createCredit" defaultChecked />
+                      <span>Record a supplier credit for this return</span>
+                    </label>
+                    <input name="creditNumber" maxLength={60} placeholder="Supplier credit-note no. (optional)" className="field py-1" aria-label="Supplier credit-note number" />
+                  </div>
+                )}
               </ReasonForm>
             </Panel>
           )}

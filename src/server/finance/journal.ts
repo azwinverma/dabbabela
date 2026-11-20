@@ -15,7 +15,9 @@ import { ACCOUNT_KEYS, assertCan, day, FinanceError, getFinanceConfig, iso, type
  * export as "UNMAPPED <key>" so nothing is silently misposted. Every entry balances (Σ debit = Σ credit).
  *
  * Sources: payments received (cash methods), gateway fees (actual else estimate), refunds paid out, approved / paid
- * expenses (reversals post the opposite way), supplier invoices and supplier payments.
+ * expenses (reversals post the opposite way), supplier invoices and supplier payments, company-invoice receipts
+ * (`InvoiceReceipt` by received date; cash basis like customer payments, so they credit sales receipts — receipts
+ * linked to an online Payment are already posted through that Payment and are skipped).
  *
  * Wallet top-ups (Phase 2A) are customer credit, a liability — not sales: the receipt credits
  * `liability.customer_credit`, a refunded top-up debits it, and top-up credit spent on orders moves from the liability
@@ -28,6 +30,7 @@ export type JournalLine = { date: string; journal: string; entry: string; key: s
 const CASH_METHODS = ["ESEWA", "KHALTI", "BANK_TRANSFER", "CASH"] as const;
 const REFUND_ACCOUNT: Record<string, string> = { ORIGINAL: "cash.ESEWA", BANK: "cash.BANK_TRANSFER", CASH: "cash.CASH" };
 const EXPENSE_CASH: Record<string, string> = { CASH: "cash.CASH", BANK: "cash.BANK", ESEWA: "cash.ESEWA", KHALTI: "cash.KHALTI" };
+const RECEIPT_CASH: Record<string, string> = { BANK_TRANSFER: "cash.BANK_TRANSFER", CHEQUE: "cash.BANK_TRANSFER", CASH: "cash.CASH", ESEWA: "cash.ESEWA", KHALTI: "cash.KHALTI" };
 const SUPPLIER_CASH: Record<string, string> = { CASH: "cash.CASH", BANK: "cash.BANK", CHEQUE: "cash.BANK", ESEWA: "cash.ESEWA", KHALTI: "cash.KHALTI" };
 
 /** One balanced entry: a signed amount moves from `credit` to `debit`; a negative amount (reversal) swaps sides. */
@@ -41,12 +44,13 @@ function pair(out: JournalLine[], base: Omit<JournalLine, "key" | "debit" | "cre
 export async function buildJournal(from: string, to: string) {
   const stamp = { gte: new Date(`${from}T00:00:00+05:45`), lt: new Date(`${addDays(to, 1)}T00:00:00+05:45`) };
   const dates = { gte: day(from), lte: day(to) };
-  const [payments, refunds, expenses, invoices, supplierPays] = await Promise.all([
+  const [payments, refunds, expenses, invoices, supplierPays, receipts] = await Promise.all([
     db.payment.findMany({ where: { status: { in: ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"] }, paidAt: stamp, method: { in: [...CASH_METHODS] } }, orderBy: { paidAt: "asc" } }),
     db.refund.findMany({ where: { status: "PROCESSED", processedAt: stamp, method: { not: "WALLET_CREDIT" } }, include: { payment: { select: { reference: true, method: true, purpose: true } } }, orderBy: { processedAt: "asc" } }),
     db.expense.findMany({ where: { status: { in: ["APPROVED", "PAID"] }, date: dates }, include: { category: { select: { key: true } } }, orderBy: [{ date: "asc" }, { number: "asc" }] }),
     db.supplierInvoice.findMany({ where: { status: { not: "VOID" }, date: dates }, include: { supplier: { select: { name: true } } }, orderBy: { date: "asc" } }),
     db.supplierPayment.findMany({ where: { paidAt: stamp }, include: { invoice: { select: { number: true, supplier: { select: { name: true } } } } }, orderBy: { paidAt: "asc" } }),
+    db.invoiceReceipt.findMany({ where: { receivedAt: stamp, paymentId: null }, include: { invoice: { select: { number: true, billingName: true } } }, orderBy: { receivedAt: "asc" } }),
   ]);
   const out: JournalLine[] = [];
   for (const p of payments) {
@@ -76,6 +80,14 @@ export async function buildJournal(from: string, to: string) {
   }
   for (const s of supplierPays) {
     pair(out, { date: ktmNow(s.paidAt).date, journal: "SUPPLIER_PAYMENTS", entry: s.reference, memo: `${s.invoice.supplier.name} invoice ${s.invoice.number}` }, "payable.suppliers", SUPPLIER_CASH[s.method] ?? "cash.OTHER", s.amount);
+  }
+  for (const r of receipts) {
+    pair(out, { date: ktmNow(r.receivedAt).date, journal: "RECEIPTS", entry: r.reference, memo: `${r.invoice.billingName} invoice ${r.invoice.number} (${r.method})` }, RECEIPT_CASH[r.method] ?? "cash.OTHER", "revenue.sales", r.amount);
+  }
+  // Supplier credits applied to supplier invoices (purchase returns): settle the payable against purchases — not cash.
+  const creditApps = await db.supplierCreditApplication.findMany({ where: { createdAt: stamp }, include: { invoice: { select: { number: true, supplier: { select: { name: true } } } }, credit: { select: { number: true } } }, orderBy: { createdAt: "asc" } });
+  for (const c of creditApps) {
+    pair(out, { date: ktmNow(c.createdAt).date, journal: "SUPPLIER_CREDITS", entry: c.credit.number || c.id, memo: `${c.invoice.supplier.name} credit applied to invoice ${c.invoice.number}` }, "payable.suppliers", "inventory.purchases", c.amount);
   }
   out.sort((a, b) => a.date.localeCompare(b.date) || a.journal.localeCompare(b.journal) || a.entry.localeCompare(b.entry));
   const debit = out.reduce((a, l) => a + l.debit, 0);

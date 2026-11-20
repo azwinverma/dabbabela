@@ -1,10 +1,10 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { addDays, dateOnly, daysBetween, isoDate, todayKTM } from "@/lib/dates";
+import { addDays, dateOnly, daysBetween, isoDate, isValidISODate, todayKTM } from "@/lib/dates";
 import { audit } from "@/lib/audit";
 import { rs } from "@/lib/money";
 import { REVENUE_STATUSES } from "./transitions";
-import { COMPANY_SHARE_PREFIX, CorporateError, generateCompanyInvoice, issueCompanyInvoice, type StaffActor } from "./corporate";
+import { COMPANY_SHARE_PREFIX, CorporateError, UNBILLED_ADJUSTMENT, generateCompanyInvoice, issueCompanyInvoice, type StaffActor } from "./corporate";
 
 type Tx = Prisma.TransactionClient;
 
@@ -68,22 +68,52 @@ function outstanding(inv: { total: number; paidAmount: number }) {
   return inv.total - inv.paidAmount;
 }
 
-export async function recordInvoicePayment(id: string, actorId: string, amount: number, reference: string) {
+export const RECEIPT_METHODS = ["BANK_TRANSFER", "CHEQUE", "CASH", "ESEWA", "KHALTI", "OTHER"] as const;
+export type ReceiptMethod = (typeof RECEIPT_METHODS)[number];
+
+/**
+ * Record money received against an issued invoice. Writes a dated `InvoiceReceipt` (the cash record: method,
+ * reference, the day the money arrived) and moves `paidAmount` / status in the same transaction. `paidAmount` also
+ * includes credit-note settlements, so cash reports use Σ receipts, never `paidAmount`.
+ */
+export async function recordInvoicePayment(
+  id: string,
+  actorId: string,
+  amount: number,
+  reference: string,
+  opts: { method?: ReceiptMethod | string | null; receivedOn?: string | null; note?: string | null } = {},
+) {
   if (amount <= 0) throw new InvoiceError("Enter the amount received");
   if (!reference.trim()) throw new InvoiceError("Enter the bank / cheque reference");
-  const inv = await db.$transaction(async (tx) => {
+  const method = (opts.method || "BANK_TRANSFER") as ReceiptMethod;
+  if (!RECEIPT_METHODS.includes(method)) throw new InvoiceError("Choose how the money was received");
+  const today = todayKTM();
+  const receivedOn = opts.receivedOn || today;
+  if (!isValidISODate(receivedOn) || receivedOn > today) throw new InvoiceError("The received date can't be in the future");
+  // Money that arrived today is stamped now; an earlier day is stamped at noon Kathmandu time on that day.
+  const receivedAt = receivedOn === today ? new Date() : new Date(`${receivedOn}T12:00:00+05:45`);
+  const { inv, receipt } = await db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`invoice:${id}`}))`;
     const i = await tx.invoice.findUniqueOrThrow({ where: { id } });
     if (i.kind !== "INVOICE" || !["ISSUED", "PARTIALLY_PAID"].includes(i.status)) throw new InvoiceError("Issue the invoice before recording payment");
     if (amount > outstanding(i)) throw new InvoiceError(`Only ${rs(outstanding(i))} is outstanding`);
     const paid = i.paidAmount + amount;
-    return tx.invoice.update({
-      where: { id },
-      data: { paidAmount: paid, status: paid >= i.total ? "PAID" : "PARTIALLY_PAID", note: [i.note, `${todayKTM()} received ${rs(amount)} (${reference.trim()})`].filter(Boolean).join("\n") },
+    const receipt = await tx.invoiceReceipt.create({
+      data: { invoiceId: id, amount, method, reference: reference.trim().slice(0, 120), receivedAt, recordedById: actorId, note: opts.note?.trim().slice(0, 500) || null },
     });
+    const inv = await tx.invoice.update({
+      where: { id },
+      data: { paidAmount: paid, status: paid >= i.total ? "PAID" : "PARTIALLY_PAID", note: [i.note, `${receivedOn} received ${rs(amount)} (${reference.trim()})`].filter(Boolean).join("\n") },
+    });
+    return { inv, receipt };
   });
-  await audit({ actorId, action: "invoice.payment", entity: "Invoice", entityId: id, summary: `${rs(amount)} · ${reference}` });
+  await audit({ actorId, action: "invoice.payment", entity: "Invoice", entityId: id, summary: `${rs(amount)} · ${reference}`, after: { receiptId: receipt.id, method, receivedOn } });
   return inv;
+}
+
+/** Receipts recorded against one invoice (newest first). */
+export async function invoiceReceipts(invoiceId: string) {
+  return db.invoiceReceipt.findMany({ where: { invoiceId }, orderBy: { receivedAt: "desc" } });
 }
 
 /** Void an unpaid invoice: its orders become billable again. */
@@ -175,29 +205,22 @@ export async function ageing(companyId?: string): Promise<{ buckets: Ageing; row
   return { buckets, rows };
 }
 
-const ADJ_TAG = /\[adj:([a-z0-9]+)\]/;
-
 /**
  * Company-share `OrderAdjustment` rows (staff edits, WP-03) on due, billable orders that no non-void invoice has billed
- * yet (`[adj:<id>]` line tag, as written by `generateCompanyInvoice`), summed per company.
+ * yet (`OrderAdjustment.invoiceLineId`, set by `generateCompanyInvoice`), summed per company.
  */
 export async function unbilledAdjustmentsByCompany(companyId?: string) {
   const adjustments = await db.orderAdjustment.findMany({
     where: {
       reason: { startsWith: COMPANY_SHARE_PREFIX },
+      ...UNBILLED_ADJUSTMENT,
       order: { companyId: companyId ?? { not: null }, status: { in: REVENUE_STATUSES }, deliveryDate: { lte: dateOnly(todayKTM()) } },
     },
     select: { id: true, amount: true, order: { select: { companyId: true, deliveryDate: true } } },
   });
   const out = new Map<string, { amount: number; count: number; from: string; to: string }>();
-  if (!adjustments.length) return out;
-  const billedLines = await db.invoiceLine.findMany({
-    where: { invoice: { status: { not: "VOID" }, ...(companyId ? { companyId } : {}) }, description: { contains: "[adj:" } },
-    select: { description: true },
-  });
-  const billed = new Set(billedLines.map((l) => ADJ_TAG.exec(l.description)?.[1]).filter(Boolean));
   for (const a of adjustments) {
-    if (billed.has(a.id) || !a.order.companyId) continue;
+    if (!a.order.companyId) continue;
     const d = isoDate(a.order.deliveryDate);
     const cur = out.get(a.order.companyId) ?? { amount: 0, count: 0, from: d, to: d };
     out.set(a.order.companyId, { amount: cur.amount + a.amount, count: cur.count + 1, from: d < cur.from ? d : cur.from, to: d > cur.to ? d : cur.to });

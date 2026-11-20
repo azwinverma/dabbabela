@@ -153,31 +153,39 @@ export async function periodStatuses(months: string[]) {
 
 // ───────────── cash flow ─────────────
 
-export type CashFlowDay = { date: string; inflow: number; refunds: number; expenses: number; suppliers: number; fees: number; outflow: number; net: number };
+export type CashFlowDay = { date: string; inflow: number; companyReceipts: number; refunds: number; expenses: number; suppliers: number; fees: number; outflow: number; net: number };
 
 /**
- * Cash in / out by Kathmandu day (company-wide). In = eSewa, Khalti, bank and cash payments marked paid.
+ * Cash in / out by Kathmandu day (company-wide). In = eSewa, Khalti, bank and cash payments marked paid, plus
+ * company-invoice receipts (`InvoiceReceipt`, by the day the money arrived; `companyReceipts` is that part — receipts
+ * linked to an online Payment are already counted through the Payment, so they are skipped).
  * Out = refunds paid out (not wallet credit), expenses marked PAID (by expense date, reversals net out),
  * supplier payments, gateway fees (statement actual when imported, else the estimate).
- * Company-invoice receipts aren't dated per payment yet, so they aren't included.
  */
 export async function cashFlow(from: string, to: string) {
   if (daysBetween(from, to) > 366) throw new FinanceError("Pick at most a year");
   const stamp = { gte: new Date(`${from}T00:00:00+05:45`), lt: new Date(`${addDays(to, 1)}T00:00:00+05:45`) };
-  const [payments, refunds, expenses, supplierPays] = await Promise.all([
+  const [payments, refunds, expenses, supplierPays, receipts] = await Promise.all([
     db.payment.findMany({ where: { status: PAID, paidAt: stamp, method: { in: ["ESEWA", "KHALTI", "BANK_TRANSFER", "CASH"] } }, select: { paidAt: true, amount: true, gatewayFee: true, feeActual: true } }),
     db.refund.findMany({ where: { status: "PROCESSED", processedAt: stamp, method: { not: "WALLET_CREDIT" } }, select: { processedAt: true, amount: true } }),
     db.expense.findMany({ where: { status: "PAID", date: { gte: day(from), lte: day(to) } }, select: { date: true, amount: true, tax: true } }),
     db.supplierPayment.findMany({ where: { paidAt: stamp }, select: { paidAt: true, amount: true } }),
+    db.invoiceReceipt.findMany({ where: { receivedAt: stamp, paymentId: null }, select: { receivedAt: true, amount: true } }),
   ]);
   const days = new Map<string, CashFlowDay>();
-  for (let d = from; d <= to; d = addDays(d, 1)) days.set(d, { date: d, inflow: 0, refunds: 0, expenses: 0, suppliers: 0, fees: 0, outflow: 0, net: 0 });
+  for (let d = from; d <= to; d = addDays(d, 1)) days.set(d, { date: d, inflow: 0, companyReceipts: 0, refunds: 0, expenses: 0, suppliers: 0, fees: 0, outflow: 0, net: 0 });
   const at = (d: Date) => days.get(ktmNow(d).date);
   for (const p of payments) {
     const r = at(p.paidAt!);
     if (!r) continue;
     r.inflow += p.amount;
     r.fees += p.feeActual ?? p.gatewayFee;
+  }
+  for (const x of receipts) {
+    const r = at(x.receivedAt);
+    if (!r) continue;
+    r.inflow += x.amount;
+    r.companyReceipts += x.amount;
   }
   for (const x of refunds) {
     const r = x.processedAt && at(x.processedAt);
@@ -196,5 +204,5 @@ export async function cashFlow(from: string, to: string) {
     return { ...r, outflow, net: r.inflow - outflow };
   });
   const sum = (k: keyof Omit<CashFlowDay, "date">) => rows.reduce((a, r) => a + r[k], 0);
-  return { rows, totals: { inflow: sum("inflow"), refunds: sum("refunds"), expenses: sum("expenses"), suppliers: sum("suppliers"), fees: sum("fees"), outflow: sum("outflow"), net: sum("net") } };
+  return { rows, totals: { inflow: sum("inflow"), companyReceipts: sum("companyReceipts"), refunds: sum("refunds"), expenses: sum("expenses"), suppliers: sum("suppliers"), fees: sum("fees"), outflow: sum("outflow"), net: sum("net") } };
 }

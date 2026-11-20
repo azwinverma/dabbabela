@@ -377,7 +377,7 @@ export async function createCorporateBulkOrder(actor: Actor, input: BulkOrderInp
   const members = await db.companyMember.findMany({ where: { id: { in: [...byMember.keys()] }, companyId: company.id }, include: { user: { select: { name: true } } } });
   const day = weekdayOf(input.date);
   const paying = company.billingMode !== "EMPLOYEE_PAID";
-  const allowed = paying ? await companyMenuBoxIds(company.id) : null;
+  const allowed = await companyMenuBoxIds(company.id); // company menu applies whoever pays (decision 2026-11-20)
   const ym = input.date.slice(0, 7);
 
   const results: BulkResult[] = [];
@@ -893,20 +893,10 @@ export async function reassignDelivery(actor: Actor, orderId: string, input: { v
   const before: Record<string, unknown> = { version: order.version };
   const after: Record<string, unknown> = {};
 
-  if (input.slotId !== undefined && input.slotId !== order.slotId) {
-    if (input.slotId) {
-      const slot = await zoneSlot(order.zone, input.slotId, order.kitchenId);
-      if (!slot) throw new OrderAdminError("That delivery window isn't available for this order's kitchen and zone");
-      const n = await slotBooked(slot.id, date);
-      if (n + 1 > slot.capacity) throw new OrderAdminError(`The ${slot.label} window is full on ${date}`);
-      Object.assign(data, { slotId: slot.id, slotLabel: slot.label });
-      after.slot = slot.label;
-    } else {
-      Object.assign(data, { slotId: null, slotLabel: null });
-      after.slot = null;
-    }
-    before.slot = order.slotLabel;
-  }
+  // Address first: when address and window change together, the window is checked against the NEW address's zone
+  // (decision 2026-11-20). A new address alone must still be served by the order's current window.
+  let zone = order.zone;
+  let addressChanged = false;
   if (input.addressId && input.addressId !== order.addressId) {
     const customer = await loadCustomer(order.userId);
     const a = customer.addresses.find((x) => x.id === input.addressId);
@@ -919,6 +909,24 @@ export async function reassignDelivery(actor: Actor, orderId: string, input: { v
     Object.assign(data, snap);
     before.address = { addressId: order.addressId, area: order.area, addressLine: order.addressLine, zoneId: order.zoneId };
     after.address = { addressId: a.id, area: a.area, addressLine: a.line1, zoneId: a.zoneId };
+    zone = a.zone;
+    addressChanged = true;
+  }
+  const slotChanged = input.slotId !== undefined && input.slotId !== order.slotId;
+  if (slotChanged && input.slotId) {
+    const slot = await zoneSlot(zone, input.slotId, order.kitchenId);
+    if (!slot) throw new OrderAdminError(addressChanged ? "That delivery window doesn't serve the new address's zone" : "That delivery window isn't available for this order's kitchen and zone");
+    const n = await slotBooked(slot.id, date);
+    if (n + 1 > slot.capacity) throw new OrderAdminError(`The ${slot.label} window is full on ${date}`);
+    Object.assign(data, { slotId: slot.id, slotLabel: slot.label });
+    after.slot = slot.label;
+    before.slot = order.slotLabel;
+  } else if (slotChanged) {
+    Object.assign(data, { slotId: null, slotLabel: null });
+    after.slot = null;
+    before.slot = order.slotLabel;
+  } else if (addressChanged && order.slotId && !(await zoneSlot(zone, order.slotId, order.kitchenId))) {
+    throw new OrderAdminError(`The ${order.slotLabel ?? "current"} window doesn't serve the new address's zone — pick another window too`);
   }
   if (!Object.keys(after).length) throw new OrderAdminError("Nothing changed");
   const u = await db.order.updateMany({ where: { id: order.id, version: order.version, status: order.status }, data: { ...data, version: { increment: 1 } } });

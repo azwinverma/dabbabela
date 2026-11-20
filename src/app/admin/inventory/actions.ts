@@ -21,6 +21,7 @@ import {
   setPurchaseStatus,
   transferStock,
 } from "@/server/inventory";
+import { creditUncreditedReturns } from "@/server/finance/supplier-credits";
 import { assertKitchen, guard, reasonOf } from "@/components/admin/ops/scope";
 
 const s = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
@@ -152,9 +153,27 @@ export async function returnAction(poId: string, _p: ActionResult, fd: FormData)
     const user = await requirePermission("inventory.edit");
     const po = await db.purchaseOrder.findUniqueOrThrow({ where: { id: poId }, include: { lines: true } });
     const lines = po.lines.map((l) => ({ lineId: l.id, quantity: parseFloat(s(fd, `ret_${l.id}`)) || 0, unit: unitOf(s(fd, `retunit_${l.id}`)) }));
-    const r = await returnToSupplier(user, { poId, reason: reasonOf(fd), lines });
+    const wantCredit = s(fd, "createCredit") === "on";
+    const credit = wantCredit ? { key: s(fd, "creditKey"), number: s(fd, "creditNumber").slice(0, 60) || null } : null;
+    const r = await returnToSupplier(user, { poId, reason: reasonOf(fd), lines, credit });
     revalidatePath(`/admin/inventory/purchases/${poId}`);
-    return done(`Returned ${r.lines.length} line(s) — supplier credit ${(r.credit / 100).toFixed(2)} Rs`);
+    revalidatePath("/admin/payables");
+    if (r.replayed) return done("This return was already posted");
+    const value = `Rs ${(r.credit / 100).toFixed(2)}`;
+    return done(r.supplierCredit ? `Returned ${r.lines.length} line(s) — supplier credit ${value} recorded under payables` : `Returned ${r.lines.length} line(s) — credit due ${value} (no supplier credit recorded)`);
+  });
+}
+
+/** Raise a supplier credit for returns on this PO that were posted without one. */
+export async function creditReturnsAction(poId: string, _p: ActionResult, fd: FormData): Promise<ActionResult> {
+  return guard(async () => {
+    const user = await requirePermission("purchasing.create");
+    const po = await db.purchaseOrder.findUniqueOrThrow({ where: { id: poId }, select: { kitchenId: true } });
+    assertKitchen(user, po.kitchenId);
+    const c = await creditUncreditedReturns(user, { poId, number: s(fd, "creditNumber").slice(0, 60) || null });
+    revalidatePath(`/admin/inventory/purchases/${poId}`);
+    revalidatePath("/admin/payables");
+    return done(`Supplier credit Rs ${(c.amount / 100).toFixed(2)} recorded`);
   });
 }
 

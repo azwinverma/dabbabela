@@ -15,6 +15,7 @@ import { decodeEsewa, esewaFormFields, esewaSignatureValid, esewaStatus, toPaisa
 import { khaltiInitiate, khaltiLookup } from "./khalti";
 import { creditTopupPayment, isTopupMethod, topupEnabled, topupRefundable } from "../wallet-topup";
 import { lockUser } from "../capacity";
+import { applySwapDifference } from "../subscriptions";
 
 type Tx = Prisma.TransactionClient;
 
@@ -97,11 +98,27 @@ async function fulfil(tx: Tx, p: PayingPayment, opts: PaidOpts, settings: SiteSe
     case "WALLET_TOPUP":
       await creditTopupPayment(tx, p, opts.actorId);
       return 0;
+    case "SWAP_DIFFERENCE":
+      return fulfilSwapDifference(tx, p, opts);
     case "ORDER":
     case "SUBSCRIPTION":
     default:
       return fulfilOrders(tx, p, opts, settings);
   }
+}
+
+/**
+ * Phase 2C: apply the pending plan swap a SWAP_DIFFERENCE payment was for (subscriptions.applySwapDifference). If it
+ * can't be applied any more (meal changed, cut-off passed, sold out, price moved) the money becomes wallet credit.
+ */
+async function fulfilSwapDifference(tx: Tx, p: PayingPayment, opts: PaidOpts): Promise<number> {
+  let credited = (await applySwapDifference(tx, p, { actorId: opts.actorId })).credited;
+  if (opts.amount != null && opts.amount > p.amount) {
+    await addCredit(tx, { userId: p.userId, amount: opts.amount - p.amount, reason: "REFUND", paymentId: p.id, note: "Paid more than the swap difference" });
+    credited += opts.amount - p.amount;
+  }
+  if (credited > 0) await tx.payment.update({ where: { id: p.id }, data: { refundedAmount: { increment: credited }, status: credited >= p.amount ? "REFUNDED" : "PARTIALLY_REFUNDED" } });
+  return credited;
 }
 
 /** Release the payment's orders (and plan). Late money (orders already cancelled, or the day closed) becomes wallet credit. */
@@ -320,6 +337,7 @@ export async function switchPaymentMethod(paymentId: string, userId: string, met
   if (!p || !["PENDING", "FAILED"].includes(p.status)) throw new PaymentError("Nothing to pay here");
   const methods = await availableMethods(settings, { hasCompany: Boolean(p.companyId), customerShare: p.amount });
   if (!methods.includes(method)) throw new PaymentError("That payment method isn't available");
+  if (p.purpose === "SWAP_DIFFERENCE" && !["ESEWA", "KHALTI", "WALLET"].includes(method)) throw new PaymentError("Pay a swap difference with eSewa, Khalti or credit");
   if (p.purpose === "WALLET_TOPUP") {
     // Credit is bought with eSewa / Khalti / bank only (never with credit or cash at the door).
     if (!topupEnabled(settings)) throw new PaymentError("Adding credit isn't available right now");

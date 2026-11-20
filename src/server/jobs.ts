@@ -9,7 +9,7 @@ import { log } from "@/lib/logger";
 import { publishDuePages } from "@/lib/cms/pages";
 import { expireUnpaidOrders, lockDay } from "./orders";
 import { reconcileGatewayAttempts } from "./payments";
-import { completeAndRemind, syncPlanPriceMirrors } from "./subscriptions";
+import { completeAndRemind, expireSwapPayments, syncPlanPriceMirrors } from "./subscriptions";
 import { processOutbox } from "./notify";
 import { publishDueMenus } from "./menu";
 import { settleReferralRewards } from "./marketing";
@@ -107,6 +107,7 @@ export async function cutoffJob(opts: { now?: Date; actorId?: string | null } = 
   const kitchens = await db.kitchen.findMany({ where: { isActive: true }, select: { id: true, code: true } });
   for (const k of kitchens) out[k.code] = (await runOnce("lock-day", `lock-day:${now.date}:${k.id}`, () => lockDay(k.id, now.date, opts.actorId ?? null))).result;
   out.expired = await expireUnpaidOrders(now);
+  out.swapPaymentsExpired = await expireSwapPayments();
   const step = STEPS["cutoff-detectors"];
   try {
     out.alerts = (await runOnce("cutoff.cutoff-detectors", `cutoff.cutoff-detectors:${now.date}`, () => step.run({ now: opts.now ?? new Date() }))).result;

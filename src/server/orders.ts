@@ -230,7 +230,9 @@ export async function quoteCart(
   if (zoneQuote.problem) base.addressProblem = `${zoneQuote.problem}. Pick another address, or ask us to add your area.`;
 
   const dates = [...new Set(lines.map((l) => l.date))].sort();
-  const allowedBoxes = company && company.billingMode !== "EMPLOYEE_PAID" ? await companyMenuBoxIds(company.id) : null;
+  // Company menu applies to every member (company-billed or employee-paid); Build-a-Dabba only to employee-paid orders.
+  const allowedBoxes = company ? await companyMenuBoxIds(company.id) : null;
+  const buildBlocked = Boolean(allowedBoxes && company && company.billingMode !== "EMPLOYEE_PAID");
   const [offers, closures, locked, gated] = await Promise.all([
     getOffersForDates(dates, kitchenId),
     getClosures(dates[0], dates[dates.length - 1], kitchenId),
@@ -300,7 +302,7 @@ export async function quoteCart(
         customBoxId: c.id,
         capacity: null,
         dishes: priced.dishes,
-        problem: problem ?? priced.problem,
+        problem: problem ?? (buildBlocked ? `Build-a-Dabba isn't part of ${company!.name}'s company-billed lunches — pick from the company menu` : null) ?? priced.problem,
         warning: hit.length ? `Contains ${hit.join(", ").toLowerCase()} — on your avoid list` : null,
       });
     }
@@ -520,7 +522,6 @@ export async function placeCartOrder(
             paidAt: state.payment === "PAID" ? new Date() : null,
           },
         });
-        if (q.couponId) await redeemCoupon(tx, { couponId: q.couponId, userId: user.id, amount: q.couponDiscount, paymentId: payment.id });
         if (method === "WALLET") await spendCredit(tx, { userId: user.id, amount: q.customerShare, paymentId: payment.id, note: `Order payment ${payment.reference}` });
 
         const orders = [];
@@ -579,6 +580,9 @@ export async function placeCartOrder(
           });
           orders.push(order);
         }
+        // Coupon redemption after the orders exist: `orderId` is set when the checkout made exactly one order (same rule
+        // as the Phase 1 backfill); a multi-day checkout links through `paymentId` only, since one discount spans days.
+        if (q.couponId) await redeemCoupon(tx, { couponId: q.couponId, userId: user.id, amount: q.couponDiscount, paymentId: payment.id, orderId: orders.length === 1 ? orders[0].id : undefined });
         return { payment, orders };
       },
       { timeout: 20_000 },

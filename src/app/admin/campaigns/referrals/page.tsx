@@ -101,6 +101,7 @@ export default async function ReferralsPage({ searchParams }: { searchParams: Pr
                   <Td>
                     <Badge tone={TONE[r.status as ReferralStatus] ?? "neutral"}>{LABEL[r.status as ReferralStatus] ?? r.status}</Badge>
                     {r.signals.length > 0 && <div className="mt-1 text-xs text-besar-dark">{r.signals.join(", ")}</div>}
+                    {r.note && <div className="mt-1 text-xs text-ink-mute">{r.note}</div>}
                     {r.qualifiedOrderId && (
                       <div className="text-xs">
                         <Link href={`/admin/orders/${r.qualifiedOrderId}`} className="text-ink-mute hover:text-sindoor">
@@ -109,7 +110,7 @@ export default async function ReferralsPage({ searchParams }: { searchParams: Pr
                       </div>
                     )}
                   </Td>
-                  <Td className="text-right tabular-nums">{r.reward ? <>{rs(r.reward.amount)}<div className="text-xs text-ink-mute">{formatStamp(r.reward.createdAt)}</div></> : "—"}</Td>
+                  <Td className="text-right tabular-nums">{r.reward ? <>{rs(r.reward.amount)}<div className="text-xs text-ink-mute">{formatStamp(r.rewardedAt ?? r.reward.createdAt)}</div></> : "—"}</Td>
                   <Td className="text-right">
                     {canEdit && !["REWARDED", "REJECTED"].includes(r.status) && (
                       <ActionForm action={decideReferralAction.bind(null, r.id)} className="flex flex-col items-end gap-1">

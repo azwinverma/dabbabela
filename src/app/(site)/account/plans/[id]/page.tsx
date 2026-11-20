@@ -13,7 +13,10 @@ import { Badge } from "@/components/ui/Badge";
 import { orderableDates } from "@/server/calendar";
 import { boxFacts, getOffersForDates } from "@/server/menu";
 import { availableMethods } from "@/server/payments/methods";
-import { cancelPolicyFor, earliestCutoff, extraMeals, planMealPrice, POLICY_TEXT, quoteRenewal, skipPolicyFor, swapOptions, weeksRange } from "@/server/subscriptions";
+import { cancelPolicyFor, earliestCutoff, extraMeals, pendingSwapPayments, planMealPrice, POLICY_TEXT, quoteRenewal, skipPolicyFor, swapOptions, weeksRange } from "@/server/subscriptions";
+import { walletBalance } from "@/server/ledger";
+import { companyMenuBoxIds, narrowOffers } from "@/server/corporate";
+import { METHOD_LABEL } from "@/lib/labels";
 import { OrderRow } from "../../OrderRow";
 import { MealActions } from "../../MealActions";
 import { changeable } from "../../_lib/meals";
@@ -36,11 +39,12 @@ export default async function PlanDetail({ params }: { params: Promise<{ id: str
     },
   });
   if (!sub) notFound();
-  const [settings, locale, extras] = await Promise.all([getSettings(), getLocale(), extraMeals(sub.id)]);
+  const [settings, locale, extras, swapPayments, wallet] = await Promise.all([getSettings(), getLocale(), extraMeals(sub.id), pendingSwapPayments(sub.id), walletBalance(user.id)]);
   const t = accountDict(locale).account;
   const now = ktmNow();
   const company = activeCompany(user);
 
+  const companyMenu = await companyMenuBoxIds(sub.companyId);
   // Change window: lock + global cut-off (shared helper), then the per-day menu cut-off and company override.
   const baseOpen = await changeable(sub.orders, settings);
   const upcoming = sub.orders.filter((o) => baseOpen.get(o.id));
@@ -64,7 +68,7 @@ export default async function PlanDetail({ params }: { params: Promise<{ id: str
   let addDays: AddMealDay[] = [];
   if (sub.status === "ACTIVE" && kitchenId) {
     const dates = await orderableDates(settings, 10, kitchenId);
-    const offers = await getOffersForDates(dates, kitchenId);
+    const offers = narrowOffers(await getOffersForDates(dates, kitchenId), companyMenu);
     addDays = dates
       .map((date) => ({
         date,
@@ -73,6 +77,7 @@ export default async function PlanDetail({ params }: { params: Promise<{ id: str
       .filter((d) => d.options.length);
   }
   const methods = await availableMethods(settings, { hasCompany: false, customerShare: 1, forPlan: true });
+  const gateways = methods.filter((m): m is "ESEWA" | "KHALTI" => m === "ESEWA" || m === "KHALTI");
 
   // Renewal (once per plan).
   const renewal = sub.renewals.find((r) => r.status !== "CANCELLED") ?? null;
@@ -106,7 +111,7 @@ export default async function PlanDetail({ params }: { params: Promise<{ id: str
         </p>
       )}
       {sub.plan.policyNote && <p className="rounded-lg bg-besar-light px-3 py-2 text-sm">{sub.plan.policyNote}</p>}
-      <p className="text-xs text-ink-mute">{POLICY_TEXT.skip[skipPolicyFor(sub.plan, settings)]} {POLICY_TEXT.cancel[cancelPolicyFor(sub.plan)]} Swaps are priced at your plan&apos;s per-meal price.</p>
+      <p className="text-xs text-ink-mute">{POLICY_TEXT.skip[skipPolicyFor(sub.plan, settings)]} {POLICY_TEXT.cancel[cancelPolicyFor(sub.plan)]} Swaps are priced at your plan&apos;s per-meal price.{companyMenu ? " Swaps and extra meals come from your company's lunch menu." : ""}</p>
       <PlanActions id={sub.id} status={sub.status} addresses={user.addresses.map((a) => ({ id: a.id, label: `${a.label} — ${a.area}`, covered: Boolean(a.zoneId) }))} currentAddressId={sub.addressId} cancelPolicy={cancelPolicyFor(sub.plan)} />
 
       {canRenew && (
@@ -114,6 +119,23 @@ export default async function PlanDetail({ params }: { params: Promise<{ id: str
           <h3 className="text-lg font-extrabold">Renew</h3>
           <p className="mb-3 text-sm text-ink-soft">One click sets up the next plan. You pay on the next page — nothing is charged automatically.</p>
           <RenewPlan id={sub.id} methods={methods} weeks={weeks} defaultWeeks={range.default} idempotencyKey={randomUUID()} summary={renewSummary} />
+        </section>
+      )}
+
+      {swapPayments.length > 0 && (
+        <section className="rounded-2xl border-2 border-besar bg-besar-light p-4">
+          <h3 className="font-extrabold">Swaps waiting for payment</h3>
+          <p className="text-sm text-ink-soft">These swaps happen once the difference is paid. Unpaid swaps are cancelled at the day&apos;s cut-off.</p>
+          <ul className="mt-2 space-y-1 text-sm">
+            {swapPayments.map((p) => (
+              <li key={p.id} className="flex flex-wrap items-center gap-x-3">
+                <span>{p.note}</span>
+                <span className="font-semibold tabular-nums">{rs(p.amount)}</span>
+                <span className="text-xs text-ink-mute">{METHOD_LABEL[p.method]} · {p.reference}</span>
+                <Link href={`/pay/${p.id}`} className="font-semibold text-sindoor underline">Pay now</Link>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 
@@ -130,7 +152,7 @@ export default async function PlanDetail({ params }: { params: Promise<{ id: str
                   open.get(o.id) ? (
                     <div className="flex flex-wrap items-start gap-2">
                       <MealActions orderId={o.id} kind="plan" status={o.status} open credited={o.paymentStatus === "REFUNDED"} labels={t} />
-                      {swap && <SwapMeal orderId={o.id} options={swap.options} cutoff={swap.cutoff} paid={o.paymentStatus === "PAID"} />}
+                      {swap && <SwapMeal orderId={o.id} options={swap.options} cutoff={swap.cutoff} paid={o.paymentStatus === "PAID"} wallet={wallet} gateways={gateways} />}
                     </div>
                   ) : null
                 }

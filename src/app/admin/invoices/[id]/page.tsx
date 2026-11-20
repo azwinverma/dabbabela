@@ -6,16 +6,22 @@ import { PrintButton } from "@/components/admin/finance/PrintButton";
 import { PageHeader, Panel } from "@/components/admin/ui";
 import { IssueButton, PaymentForm, VoidForm, CreditNoteForm } from "../InvoiceForms";
 import Link from "next/link";
+import { rs } from "@/lib/money";
+import { ktmNow, todayKTM } from "@/lib/dates";
+import { invoiceReceipts } from "@/server/invoices";
+import { RECEIPT_METHOD_LABEL } from "@/server/corporate";
 
 export default async function InvoicePage({ params }: { params: Promise<{ id: string }> }) {
   await requirePermission("invoices.view");
   const { id } = await params;
   const inv = await db.invoice.findUnique({ where: { id }, include: { lines: true, company: true } });
   if (!inv) notFound();
-  const [notes, related] = await Promise.all([
+  const [notes, related, receipts] = await Promise.all([
     db.invoice.findMany({ where: { relatedId: inv.id }, select: { id: true, number: true, total: true } }),
     inv.relatedId ? db.invoice.findUnique({ where: { id: inv.relatedId }, select: { id: true, number: true } }) : null,
+    invoiceReceipts(inv.id),
   ]);
+  const received = receipts.reduce((a, r) => a + r.amount, 0);
   const open = inv.kind === "INVOICE" && ["ISSUED", "PARTIALLY_PAID"].includes(inv.status);
 
   return (
@@ -30,7 +36,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
                 <span className="text-xs text-ink-mute">Check the lines first. Issuing sets the due date from the company&apos;s terms.</span>
               </div>
             )}
-            {open && <PaymentForm id={inv.id} />}
+            {open && <PaymentForm id={inv.id} today={todayKTM()} />}
             {inv.kind === "INVOICE" && ["ISSUED", "PARTIALLY_PAID", "PAID"].includes(inv.status) && <CreditNoteForm id={inv.id} />}
             {inv.kind === "INVOICE" && inv.status !== "VOID" && inv.paidAmount === 0 && <VoidForm id={inv.id} />}
             {(notes.length > 0 || related) && (
@@ -46,6 +52,21 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
                   </Link>
                 ))}
               </p>
+            )}
+            {receipts.length > 0 && (
+              <div>
+                <p className="text-sm font-semibold">
+                  Receipts · {rs(received)} received{received !== inv.paidAmount ? ` (settled ${rs(inv.paidAmount)} incl. credit notes / earlier payments)` : ""}
+                </p>
+                <ul className="mt-1 space-y-0.5 text-xs text-ink-soft" aria-label="Receipts">
+                  {receipts.map((r) => (
+                    <li key={r.id}>
+                      {ktmNow(r.receivedAt).date} · {rs(r.amount)} · {RECEIPT_METHOD_LABEL[r.method] ?? r.method} · {r.reference}
+                      {r.note ? ` — ${r.note}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
             {inv.note && <pre className="whitespace-pre-wrap rounded-lg bg-paper p-2 text-xs text-ink-soft">{inv.note}</pre>}
           </div>

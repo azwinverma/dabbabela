@@ -3,7 +3,8 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { getI18n } from "@/lib/i18n/server";
 import { getSection } from "@/lib/cms";
-import { getCurrentUser } from "@/lib/auth";
+import { activeCompany, getCurrentUser } from "@/lib/auth";
+import { filterCompanyMenu, memberCompanyMenu } from "@/server/corporate";
 import { addDays, formatDay, todayKTM, weekStartOf } from "@/lib/dates";
 import { getPublicWeek, resolveWeek, weekCategories, type PublicDay } from "@/lib/public";
 import { PageHero, EmptyState } from "@/components/site/Section";
@@ -38,7 +39,9 @@ export default async function MenuPage({ searchParams }: { searchParams: SP }) {
   const [intro, user] = await Promise.all([getSection("menu.intro", locale), getCurrentUser()]);
   const week = resolveWeek(sp.week);
   const current = weekStartOf(todayKTM());
-  const data = await getPublicWeek(week, locale);
+  const [week0, companyMenu] = await Promise.all([getPublicWeek(week, locale), memberCompanyMenu(activeCompany(user))]);
+  // Signed-in company members see only their company's lunch menu (checkout enforces the same list).
+  const data = companyMenu ? { ...week0, days: week0.days.map((d) => ({ ...d, items: filterCompanyMenu(d.items, companyMenu.allowed) })) } : week0;
   const diet = DIETS.includes(sp.diet as (typeof DIETS)[number]) ? sp.diet : undefined;
   const mild = sp.mild === "1";
   const avoidOn = sp.avoid === "1" && Boolean(user?.allergies.length);
@@ -121,6 +124,12 @@ export default async function MenuPage({ searchParams }: { searchParams: SP }) {
         </div>
       )}
       <div className="container py-10">
+        {companyMenu && (
+          <p className="mb-6 max-w-3xl rounded-xl border-2 border-akash bg-akash-light px-4 py-3 text-sm" data-testid="company-menu-note">
+            <strong>{companyMenu.companyName}&apos;s lunch menu.</strong> Your company has chosen the dabbas below for its team, so that&apos;s all we show you
+            here and at checkout.{companyMenu.buildBlocked ? " Build-a-Dabba isn't available on company-billed lunches." : ""}
+          </p>
+        )}
         {!data.hasMenu ? (
           <EmptyState title={t.site.noMenuTitle} text={t.site.noMenuText}>
             <LinkButton href="/build" variant="outline">{t.nav.build}</LinkButton>

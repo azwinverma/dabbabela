@@ -3,7 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { getI18n } from "@/lib/i18n/server";
-import { getCurrentUser } from "@/lib/auth";
+import { activeCompany, getCurrentUser } from "@/lib/auth";
+import { memberCompanyMenu } from "@/server/corporate";
 import { rs } from "@/lib/money";
 import { boxInclude } from "@/server/menu";
 import { datesForBox, toPublicBox } from "@/lib/public";
@@ -34,7 +35,10 @@ export default async function BoxPage({ params }: { params: Params }) {
   const raw = await load((await params).slug);
   if (!raw) notFound();
   const { locale, t } = await getI18n();
-  const [box, dates, user] = await Promise.all([Promise.resolve(toPublicBox(raw, locale)), datesForBox(raw.id), getCurrentUser()]);
+  const [box, allDates, user] = await Promise.all([Promise.resolve(toPublicBox(raw, locale)), datesForBox(raw.id), getCurrentUser()]);
+  const companyMenu = await memberCompanyMenu(activeCompany(user));
+  const offCompanyMenu = Boolean(companyMenu && !companyMenu.allowed.has(raw.id));
+  const dates = offCompanyMenu ? [] : allDates;
   const hit = box.allergens.filter((a) => user?.allergies.includes(a.code));
 
   return (
@@ -86,6 +90,11 @@ export default async function BoxPage({ params }: { params: Params }) {
           )}
 
           <div className="mt-6 rounded-2xl border-2 border-ink bg-paper-card p-5">
+            {offCompanyMenu && (
+              <p className="mb-3 rounded-lg bg-akash-light px-3 py-2 text-sm" data-testid="company-menu-note">
+                {box.name} isn&apos;t on {companyMenu!.companyName}&apos;s lunch menu. <Link href="/menu" className="font-semibold underline">See your company menu</Link>.
+              </p>
+            )}
             <AddToBox
               box={{ id: box.id, name: box.name, price: box.price, accent: box.accent, image: box.image }}
               dates={dates}
@@ -100,7 +109,7 @@ export default async function BoxPage({ params }: { params: Params }) {
                 </p>
               ) : null;
             })()}
-            {dates.length === 0 && (
+            {dates.length === 0 && !companyMenu?.buildBlocked && (
               <p className="mt-3 text-sm">
                 <Link href="/build" className="font-semibold text-sindoor underline underline-offset-2">{t.nav.build}</Link>
               </p>
