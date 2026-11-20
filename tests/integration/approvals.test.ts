@@ -6,7 +6,8 @@ import type { Role } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getSettings, saveSettings } from "@/lib/settings";
 import { placeCartOrder } from "@/server/orders";
-import { approveRefund, markPaymentPaid, requestRefund } from "@/server/payments";
+import { approveRefund, markPaymentPaid, processRefund, requestRefund } from "@/server/payments";
+import { creditTopupPayment } from "@/server/wallet-topup";
 import { walletBalance } from "@/server/ledger";
 import {
   approveRequest,
@@ -227,6 +228,41 @@ describe("wallet and order adjustments", () => {
     await expect(requestApproval(ops, { kind: "REFUND", payload: { paymentId, amount: -5, method: "CASH", reason: "neg" }, reason: "neg" })).rejects.toThrow(/positive/);
     await expect(requestApproval(ops, { kind: "WALLET_ADJUSTMENT", payload: { userId: customerId, amount: 0, note: "zero" }, reason: "zero" })).rejects.toThrow(/non-zero/);
     await expect(requestApproval({ id: customerId, role: "CUSTOMER" }, { kind: "WALLET_ADJUSTMENT", payload: { userId: customerId, amount: 100, note: "self" }, reason: "self" })).rejects.toThrow(/Only staff/);
+  });
+});
+
+describe("wallet top-up refunds (Phase 2A × 2B)", () => {
+  it("need approval at/above the threshold and the approved execution keeps 2A's unspent cap and source-only rule", async () => {
+    const u = await db.user.create({ data: { name: "Topup approvals", email: `topup.appr.${Date.now()}@test.local` } });
+    created.push(u.id);
+    const amount = THRESHOLD * 3;
+    const p = await db.payment.create({ data: { reference: `PAY-TAPPR-${Date.now()}`, userId: u.id, method: "ESEWA", purpose: "WALLET_TOPUP", status: "PAID", amount, paidAt: new Date() } });
+    await db.$transaction((tx) => creditTopupPayment(tx, p));
+    expect(await walletBalance(u.id)).toBe(amount);
+
+    // source only, whole payment — refused already at request time
+    await expect(requestApproval(finance, { kind: "REFUND", payload: { paymentId: p.id, amount, method: "WALLET_CREDIT", reason: "Back to credit" }, reason: "Back to credit" })).rejects.toThrow(/not to credit/);
+
+    // full refund requested, then the customer spends part of the credit before the decision → execution FAILS on the cap
+    const full = await requestApproval(finance, { kind: "REFUND", payload: { paymentId: p.id, amount, method: "ORIGINAL", reason: "Changed mind" }, reason: "Changed mind" });
+    expect(full.request.status).toBe("PENDING");
+    await db.creditLedger.create({ data: { userId: u.id, amount: -THRESHOLD, reason: "SPEND", note: "lunch" } });
+    const failed = await approveRequest(finance2, full.request.id);
+    expect(failed.status).toBe("FAILED");
+    expect(failed.error).toMatch(/unspent/);
+    expect(await db.refund.count({ where: { paymentId: p.id } })).toBe(0);
+
+    // the unspent part goes through; processing it writes the TOPUP_REVERSAL row
+    const part = await requestApproval(finance, { kind: "REFUND", payload: { paymentId: p.id, amount: amount - THRESHOLD, method: "ORIGINAL", reason: "Refund the unspent part" }, reason: "Refund the unspent part" });
+    expect((await approveRequest(finance2, part.request.id)).status).toBe("EXECUTED");
+    const refund = await db.refund.findFirstOrThrow({ where: { paymentId: p.id } });
+    expect(refund.status).toBe("APPROVED");
+    expect(refund.approvedById).toBe(finance2.id);
+    await processRefund(refund.id, finance2.id, { providerRef: `ESW-RF-${Date.now()}` });
+    const reversal = await db.creditLedger.findFirstOrThrow({ where: { paymentId: p.id, reason: "TOPUP_REVERSAL" } });
+    expect(reversal.amount).toBe(-(amount - THRESHOLD));
+    expect(reversal.refundId).toBe(refund.id);
+    expect(await walletBalance(u.id)).toBe(0);
   });
 });
 

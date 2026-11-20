@@ -73,7 +73,13 @@ export async function staffSwapAction(subId: string, orderId: string, _p: Action
     const boxId = String(fd.get("boxId") ?? "");
     const order = await db.order.findFirst({ where: { id: orderId, subscriptionId: subId }, include: { items: { select: { name: true, boxId: true } } } });
     if (!order) return fail("Meal not found");
-    const r = await swapMeal(orderId, boxId, { id: user.id, isStaff: true }, null, { reason });
+    const m = String(fd.get("method") ?? "");
+    const method = m === "ESEWA" || m === "KHALTI" || m === "WALLET" ? m : null;
+    const r = await swapMeal(orderId, boxId, { id: user.id, isStaff: true }, null, { reason, method });
+    if (r.settlement === "PAY_ONLINE") {
+      revalidatePath(`/admin/subscriptions/${subId}`);
+      return done(`Waiting for the customer to pay ${rs(r.delta)} — the swap is applied once it's verified (customer pays from their plan page)`);
+    }
     if (r.changed) {
       await audit({ actorId: user.id, action: "plan.swap", entity: "Subscription", entityId: subId, summary: `Meal ${order.number} swapped (${r.delta ? rs(r.delta) : "same price"}, ${r.settlement})`, reason, before: { boxId: order.items[0]?.boxId, name: order.items[0]?.name }, after: { boxId, ...r } });
     }

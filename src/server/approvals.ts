@@ -126,8 +126,11 @@ const json = (v: unknown) => JSON.parse(JSON.stringify(v ?? {})) as Prisma.Input
 async function targetOf(kind: ExecutableKind, payload: RefundPayload | WalletPayload | OrderAdjustmentPayload) {
   if (kind === "REFUND") {
     const p = payload as RefundPayload;
-    const pay = await db.payment.findUnique({ where: { id: p.paymentId }, select: { id: true, orders: { select: { id: true, kitchenId: true }, take: 50 } } });
+    const pay = await db.payment.findUnique({ where: { id: p.paymentId }, select: { id: true, purpose: true, orders: { select: { id: true, kitchenId: true }, take: 50 } } });
     if (!pay) deny("Payment not found");
+    // Wallet top-ups (Phase 2A): refund to source only, whole payment; the unspent cap is re-checked at execution.
+    if (pay!.purpose === "WALLET_TOPUP" && p.method === "WALLET_CREDIT") deny("A top-up is refunded to the customer's eSewa / Khalti / bank, not to credit");
+    if (pay!.purpose === "WALLET_TOPUP" && p.orderId) deny("A top-up has no orders — refund the whole payment");
     if (p.orderId && !pay!.orders.some((o) => o.id === p.orderId)) deny("That order wasn't paid with this payment");
     const kitchenId = (p.orderId ? pay!.orders.find((o) => o.id === p.orderId)?.kitchenId : pay!.orders[0]?.kitchenId) ?? null;
     return { entity: "Payment", entityId: pay!.id, kitchenId };

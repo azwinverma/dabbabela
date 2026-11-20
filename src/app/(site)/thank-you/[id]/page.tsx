@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
@@ -24,8 +24,10 @@ export default async function ThankYou({ params }: { params: Promise<{ id: strin
     },
   });
   if (!payment) notFound();
+  if (payment.purpose === "WALLET_TOPUP") redirect(`/account/wallet/topup/${payment.id}`);
   const [t, settings] = [accountDict(await getLocale()).thanks, await getSettings()];
-  const settled = payment.status === "PAID" || payment.method === "CASH" || payment.method === "COMPANY_INVOICE";
+  const swap = payment.purpose === "SWAP_DIFFERENCE";
+  const settled = payment.status === "PAID" || payment.method === "CASH" || payment.method === "COMPANY_INVOICE" || (swap && ["PARTIALLY_REFUNDED", "REFUNDED"].includes(payment.status));
   const waiting = !settled;
   return (
     <section className="container max-w-3xl py-10 md:py-14">
@@ -34,7 +36,14 @@ export default async function ThankYou({ params }: { params: Promise<{ id: strin
       <p className="mt-2 text-ink-soft">
         {waiting ? t.pending : payment.method === "CASH" ? `${t.cash} Amount: ${rs(payment.amount)}.` : payment.method === "COMPANY_INVOICE" ? "Billed to your company — nothing to pay now." : `Payment of ${rs(payment.amount)} received (${METHOD_LABEL[payment.method]}).`}
       </p>
-      {payment.subscription && (
+      {swap && settled && (
+        <p className="mt-3 rounded-xl bg-besar-light px-4 py-3 text-sm" data-testid="swap-result">
+          {payment.status === "PAID"
+            ? <>Swap confirmed — {payment.note?.replace(/^Swap /, "")}.</>
+            : <>We couldn&apos;t make this swap (the meal changed or the day closed before the payment arrived), so {rs(payment.refundedAmount)} was added to your Dabba Bela credit.</>}
+        </p>
+      )}
+      {payment.subscription && !swap && (
         <p className="mt-3 rounded-xl bg-besar-light px-4 py-3 text-sm">
           <strong>{payment.subscription.plan.name}</strong> · {payment.subscription.mealsTotal} lunches from {formatDay(isoDate(payment.subscription.startDate))} to {formatDay(isoDate(payment.subscription.endDate))}. Skip or pause from your account before {settings.orderCutoff} on any day.
         </p>

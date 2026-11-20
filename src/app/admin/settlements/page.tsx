@@ -249,12 +249,12 @@ async function CashFlow({ sp }: { sp: SP }) {
         <input type="hidden" name="tab" value="cashflow" />
       </RangeForm>
       <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Kpi label="Cash in" value={rs(cf.totals.inflow)} formula="eSewa, Khalti, bank-transfer and cash payments marked paid in the range (wallet and company invoice excluded)." />
+        <Kpi label="Cash in" value={rs(cf.totals.inflow)} formula="eSewa, Khalti, bank-transfer and cash payments marked paid in the range (wallet excluded) + company-invoice receipts by the day the money arrived." sub={cf.totals.companyReceipts ? `incl. ${rs(cf.totals.companyReceipts)} company invoices` : undefined} />
         <Kpi label="Cash out" value={rs(cf.totals.outflow)} formula="Refunds paid out (not wallet credit) + expenses marked paid (by expense date, incl. VAT) + supplier payments + gateway fees (statement actual, else estimate)." />
         <Kpi label="Net cash flow" value={rs(cf.totals.net)} tone={cf.totals.net < 0 ? "bad" : "good"} formula="Cash in − cash out." />
         <Kpi label="Gateway fees" value={rs(cf.totals.fees)} formula="Payment.feeActual when a statement was imported, otherwise the estimated gatewayFee." />
       </div>
-      <p className="mb-3 text-xs text-ink-mute">Company invoice receipts aren&apos;t dated per payment yet, so they aren&apos;t included.</p>
+      <p className="mb-3 text-xs text-ink-mute">Company invoice receipts are included by the date the money arrived (as recorded on the invoice).</p>
       <Table>
         <thead>
           <tr>

@@ -1,14 +1,15 @@
 import Link from "next/link";
-import type { PaymentMethod, PaymentStatus, Prisma } from "@prisma/client";
+import type { PaymentMethod, PaymentPurpose, PaymentStatus, Prisma } from "@prisma/client";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { db } from "@/lib/db";
 import { rs } from "@/lib/money";
 import { addDays, dateOnly, formatDay, formatStamp, isoDate, ktmNow } from "@/lib/dates";
-import { METHOD_LABEL, PAYMENT_STATUS } from "@/lib/labels";
+import { METHOD_LABEL, PAYMENT_STATUS, PURPOSE_LABEL } from "@/lib/labels";
 import { PageHeader, Table, Th, Td, EmptyRow, PaymentBadge, Tabs, Pagination, Panel } from "@/components/admin/ui";
 import { readRange, RangeForm, Empty } from "@/components/admin/finance/kit";
 import { duplicatePaymentSuspects, statementDuplicates } from "@/server/finance/statements";
+import { ktmDayRange, topupReconciliation } from "@/server/wallet-topup";
 import { VerifyForms } from "./VerifyForms";
 import { paymentWhere } from "@/components/admin/ops/scope";
 
@@ -42,6 +43,7 @@ async function List({ sp, scope }: { sp: Record<string, string | undefined>; sco
     ...scope,
     ...(sp.status && sp.status in PAYMENT_STATUS ? { status: sp.status as PaymentStatus } : {}),
     ...(sp.method && sp.method in METHOD_LABEL ? { method: sp.method as PaymentMethod } : {}),
+    ...(sp.purpose && sp.purpose in PURPOSE_LABEL ? { purpose: sp.purpose as PaymentPurpose } : {}),
     ...(sp.from ? { createdAt: { gte: dateOnly(sp.from), ...(sp.to ? { lt: dateOnly(addDays(sp.to, 1)) } : {}) } } : {}),
     ...(sp.q ? { OR: [{ reference: { contains: sp.q, mode: "insensitive" } }, { user: { name: { contains: sp.q, mode: "insensitive" } } }, { orders: { some: { number: { contains: sp.q, mode: "insensitive" } } } }] } : {}),
   };
@@ -69,6 +71,14 @@ async function List({ sp, scope }: { sp: Record<string, string | undefined>; sco
             </option>
           ))}
         </select>
+        <select name="purpose" defaultValue={sp.purpose ?? ""} className="field w-44" aria-label="Purpose">
+          <option value="">Any purpose</option>
+          {Object.entries(PURPOSE_LABEL).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
+        </select>
         <input type="date" name="from" defaultValue={sp.from} className="field w-40" aria-label="Created from" />
         <input type="date" name="to" defaultValue={sp.to} className="field w-40" aria-label="Created to" />
         <button className="h-[38px] rounded-lg bg-ink px-4 text-sm font-semibold text-paper">Filter</button>
@@ -79,6 +89,7 @@ async function List({ sp, scope }: { sp: Record<string, string | undefined>; sco
             <Th>Reference</Th>
             <Th>Customer</Th>
             <Th>Method</Th>
+            <Th>Purpose</Th>
             <Th>Status</Th>
             <Th className="text-right">Amount</Th>
             <Th className="text-right">Refunded</Th>
@@ -97,6 +108,7 @@ async function List({ sp, scope }: { sp: Record<string, string | undefined>; sco
                 </Td>
                 <Td>{p.user.name}</Td>
                 <Td>{METHOD_LABEL[p.method]}</Td>
+                <Td className="text-xs">{PURPOSE_LABEL[p.purpose]}</Td>
                 <Td>
                   <PaymentBadge status={p.status} />
                 </Td>
@@ -107,7 +119,7 @@ async function List({ sp, scope }: { sp: Record<string, string | undefined>; sco
               </tr>
             ))
           ) : (
-            <EmptyRow colSpan={8}>No payments match.</EmptyRow>
+            <EmptyRow colSpan={9}>No payments match.</EmptyRow>
           )}
         </tbody>
       </Table>
@@ -149,9 +161,15 @@ async function VerifyQueue({ canVerify, scope }: { canVerify: boolean; scope: Pr
               <p>
                 <span className="text-ink-mute">Customer:</span> {p.user.name} · <span className="text-ink-mute">Their note/ref:</span> {p.note || "—"}
               </p>
-              <p>
-                <span className="text-ink-mute">First delivery:</span> {p.orders[0] ? formatDay(isoDate(p.orders[0].deliveryDate)) : "—"} · {p.orders.map((o) => o.number).join(", ")}
-              </p>
+              {p.purpose === "WALLET_TOPUP" ? (
+                <p>
+                  <span className="font-semibold">Wallet top-up</span> <span className="text-ink-mute">— verifying adds {rs(p.amount)} to the customer&apos;s credit (no orders).</span>
+                </p>
+              ) : (
+                <p>
+                  <span className="text-ink-mute">First delivery:</span> {p.orders[0] ? formatDay(isoDate(p.orders[0].deliveryDate)) : "—"} · {p.orders.map((o) => o.number).join(", ")}
+                </p>
+              )}
               <p className="text-xs text-ink-mute">Created {formatStamp(p.createdAt)}</p>
               {canVerify ? <VerifyForms id={p.id} /> : <p className="text-xs text-ink-mute">Finance verifies these.</p>}
             </div>
@@ -165,7 +183,7 @@ async function VerifyQueue({ canVerify, scope }: { canVerify: boolean; scope: Pr
 async function Reconcile({ sp }: { sp: Record<string, string | undefined> }) {
   const { from, to } = readRange(sp, 7);
   const stamp = { gte: dateOnly(from), lt: dateOnly(addDays(to, 1)) };
-  const [dupes, statementDupes, unmatched] = await Promise.all([duplicatePaymentSuspects(dateOnly(from), dateOnly(addDays(to, 1))), statementDuplicates(), db.gatewayStatementLine.count({ where: { matchedPaymentId: null } })]);
+  const [dupes, statementDupes, unmatched, topups] = await Promise.all([duplicatePaymentSuspects(dateOnly(from), dateOnly(addDays(to, 1))), statementDuplicates(), db.gatewayStatementLine.count({ where: { matchedPaymentId: null } }), topupReconciliation(ktmDayRange(from).gte, ktmDayRange(to).lt)]);
   const [payments, attempts, mismatches, stale] = await Promise.all([
     db.payment.findMany({ where: { createdAt: stamp }, select: { method: true, status: true, amount: true, createdAt: true } }),
     db.paymentAttempt.findMany({ where: { createdAt: stamp, method: { in: ["ESEWA", "KHALTI"] } }, select: { method: true, status: true, amount: true } }),
@@ -208,6 +226,32 @@ async function Reconcile({ sp }: { sp: Record<string, string | undefined> }) {
           );
         })}
       </div>
+      <Panel
+        title="Wallet top-ups: money in vs credit written"
+        actions={
+          <Link href={`/admin/reports/wallet-topups?from=${from}&to=${to}`} className="text-sm font-semibold text-sindoor underline">
+            Top-up report
+          </Link>
+        }
+      >
+        <p className="text-sm">
+          {topups.paidCount} paid top-up{topups.paidCount === 1 ? "" : "s"} · received <b>{rs(topups.paidAmount)}</b> · credited to wallets <b>{rs(topups.credited)}</b> ·{" "}
+          <span className={topups.gap ? "font-semibold text-sindoor" : "text-saag"}>{topups.gap ? `gap ${rs(topups.gap)}` : "matches"}</span> · refunded to source {rs(topups.reversed)}
+        </p>
+        {topups.uncredited.length > 0 && (
+          <ul className="mt-2 text-sm">
+            {topups.uncredited.map((p) => (
+              <li key={p.id}>
+                <Link href={`/admin/payments/${p.id}`} className="font-mono text-xs text-sindoor underline">
+                  {p.reference}
+                </Link>{" "}
+                paid {rs(p.amount)} but has no credit row — investigate
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-1 text-xs text-ink-mute">Top-ups are customer credit (a liability), not sales. They appear in the method rows below as money in; revenue is recognised when the credit pays for delivered orders.</p>
+      </Panel>
       <Table>
         <thead>
           <tr>

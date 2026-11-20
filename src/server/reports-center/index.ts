@@ -14,11 +14,12 @@ import { customerLifetimeValue, popularMeals, retention, subscriptionRenewals } 
 import { deliveryPerformanceReport, ingredientConsumption, inventoryValuation, kitchenProduction, recipeCosting, stockWastage, supplierPurchases } from "./operations";
 import { corporateBilling, outstandingPayments } from "./money";
 import { campaignPerformanceReport, complaintsFeedback, employeeActivity } from "./people";
+import { walletTopupsReport } from "./wallet";
 import type { Cell, Col, Ctx, Paging, ReportDef, ReportGroup, ReportResult, ReportUser, Row, SP } from "./types";
 
 export type { Col, ReportDef, ReportResult, Row, SP } from "./types";
 
-/** The 27 reports of brief §16, in catalogue order. */
+/** The 27 reports of brief §16 plus wallet top-ups (Phase 2A), in catalogue order. */
 export const REPORT_LIST: ReportDef[] = [
   dailySales,
   weeklySales,
@@ -44,6 +45,7 @@ export const REPORT_LIST: ReportDef[] = [
   deliveryPerformanceReport,
   corporateBilling,
   outstandingPayments,
+  walletTopupsReport,
   employeeActivity,
   campaignPerformanceReport,
   complaintsFeedback,

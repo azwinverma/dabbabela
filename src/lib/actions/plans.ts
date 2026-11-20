@@ -124,12 +124,17 @@ export async function subscribePlanAction(
 export async function swapMealAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   const user = await getCurrentUser();
   if (!user) return fail("Log in first");
+  // A swap can start a SWAP_DIFFERENCE payment: same per-user limit as checkout.
+  if (!(await rateLimit("checkout", user.id, LIMITS.checkout.max, LIMITS.checkout.windowMs))) return fail("Too many attempts — wait a minute and try again");
   const orderId = str(fd.get("orderId"));
   const boxId = str(fd.get("boxId"));
   if (!orderId || !boxId) return fail("Pick a dabba");
   try {
-    const r = await swapMeal(orderId, boxId, { id: user.id, isStaff: false }, user.id);
+    const m = str(fd.get("method"));
+    const method = m === "WALLET" || m === "ESEWA" || m === "KHALTI" ? m : null;
+    const r = await swapMeal(orderId, boxId, { id: user.id, isStaff: false }, user.id, { method });
     revalidatePath("/account", "layout");
+    if (r.settlement === "PAY_ONLINE" && r.paymentId) return done(`Pay Rs ${(r.delta / 100).toFixed(0)} to confirm the swap`, `/pay/${r.paymentId}`);
     if (!r.changed) return done("That's already your dabba for the day");
     const money = r.delta > 0 ? (r.settlement === "WALLET_CHARGE" ? ` — Rs ${(r.delta / 100).toFixed(0)} taken from your credit` : ` — Rs ${(r.delta / 100).toFixed(0)} more, paid with the rest of your plan`) : r.delta < 0 ? (r.settlement === "WALLET_CREDIT" ? ` — Rs ${(-r.delta / 100).toFixed(0)} added to your credit` : ` — Rs ${(-r.delta / 100).toFixed(0)} less to pay`) : "";
     return done(`Swapped${money}`);

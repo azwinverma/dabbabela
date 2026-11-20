@@ -4,13 +4,17 @@ import { audit } from "@/lib/audit";
 import { rs } from "@/lib/money";
 import { daysBetween, isValidISODate, todayKTM } from "@/lib/dates";
 import { assertCan, assertPeriodOpen, day, FinanceError, iso, type Actor } from "./common";
+import { openCreditBySupplier } from "./supplier-credits";
 
 /**
  * Supplier payables (WP-09): supplier invoices, payments against them, ageing and a three-way match hint
  * (purchase order ↔ goods received ↔ invoice).
  *
  * Payments are immutable; a wrong payment is cancelled by a negative reversing payment (`reverseSupplierPayment`).
- * An invoice with money paid can't be voided.
+ * An invoice with money paid (or credit applied) can't be voided.
+ *
+ * `SupplierInvoice.paidAmount` = settled = sum of payments + supplier-credit applications (see `supplier-credits.ts`), so
+ * `total - paidAmount` is the net due after credits. Cash reports read `SupplierPayment` only.
  */
 
 export const INVOICE_STATUSES = ["OPEN", "PARTIAL", "PAID", "VOID"] as const;
@@ -65,7 +69,7 @@ export async function voidSupplierInvoice(actor: Actor, id: string, reason: stri
   if (!reason.trim()) throw new FinanceError("Give a reason");
   const inv = await db.supplierInvoice.findUniqueOrThrow({ where: { id } });
   if (inv.status === "VOID") throw new FinanceError("Already void");
-  if (inv.paidAmount !== 0) throw new FinanceError("Money has been paid on this invoice — reverse the payments first");
+  if (inv.paidAmount !== 0) throw new FinanceError("Money has been paid or credit applied on this invoice — reverse the payments first");
   await assertPeriodOpen(iso(inv.date));
   const r = await db.supplierInvoice.updateMany({ where: { id, paidAmount: 0, status: { not: "VOID" } }, data: { status: "VOID" } });
   if (!r.count) throw new FinanceError("This invoice changed — reload");
@@ -135,28 +139,46 @@ export function ageingBucket(dueIso: string, asOf: string): AgeingKey {
   return "d90plus";
 }
 
-/** Outstanding supplier balances by supplier and age (due date, or invoice date when there's no due date). */
+/**
+ * Outstanding supplier balances by supplier and age (due date, or invoice date when there's no due date).
+ * Outstanding is already net of credits applied to each invoice (they count in paidAmount); `unappliedCredit` per
+ * supplier is credit not yet applied to any invoice, and `net` = outstanding - unapplied credit (what we'd really pay
+ * if every open credit were used). Unapplied credit of suppliers with nothing outstanding is listed too.
+ */
 export async function payablesAgeing(asOf = todayKTM()) {
-  const open = await db.supplierInvoice.findMany({
-    where: { status: { in: ["OPEN", "PARTIAL"] }, date: { lte: day(asOf) } },
-    include: { supplier: { select: { id: true, name: true } } },
-    orderBy: [{ dueDate: "asc" }, { date: "asc" }],
-  });
+  const [open, credits] = await Promise.all([
+    db.supplierInvoice.findMany({
+      where: { status: { in: ["OPEN", "PARTIAL"] }, date: { lte: day(asOf) } },
+      include: { supplier: { select: { id: true, name: true } } },
+      orderBy: [{ dueDate: "asc" }, { date: "asc" }],
+    }),
+    openCreditBySupplier(),
+  ]);
   const zero = (): Record<AgeingKey, number> => ({ current: 0, d30: 0, d60: 0, d90: 0, d90plus: 0 });
   const totals = zero();
-  const bySupplier = new Map<string, { supplierId: string; name: string; buckets: Record<AgeingKey, number>; total: number }>();
+  const bySupplier = new Map<string, { supplierId: string; name: string; buckets: Record<AgeingKey, number>; total: number; unappliedCredit: number; net: number }>();
   const invoices = open.map((i) => {
     const outstanding = i.total - i.paidAmount;
     const due = iso(i.dueDate ?? i.date);
     const bucket = ageingBucket(due, asOf);
     totals[bucket] += outstanding;
-    const s = bySupplier.get(i.supplierId) ?? { supplierId: i.supplierId, name: i.supplier.name, buckets: zero(), total: 0 };
+    const s = bySupplier.get(i.supplierId) ?? { supplierId: i.supplierId, name: i.supplier.name, buckets: zero(), total: 0, unappliedCredit: 0, net: 0 };
     s.buckets[bucket] += outstanding;
     s.total += outstanding;
     bySupplier.set(i.supplierId, s);
     return { id: i.id, number: i.number, supplier: i.supplier.name, due, outstanding, bucket, daysOverdue: Math.max(0, daysBetween(due, asOf)) };
   });
-  return { asOf, totals, total: Object.values(totals).reduce((a, b) => a + b, 0), suppliers: [...bySupplier.values()].sort((a, b) => b.total - a.total), invoices };
+  const missing = [...credits.keys()].filter((id) => !bySupplier.has(id));
+  if (missing.length) {
+    for (const sup of await db.supplier.findMany({ where: { id: { in: missing } }, select: { id: true, name: true } })) bySupplier.set(sup.id, { supplierId: sup.id, name: sup.name, buckets: zero(), total: 0, unappliedCredit: 0, net: 0 });
+  }
+  for (const s of bySupplier.values()) {
+    s.unappliedCredit = credits.get(s.supplierId) ?? 0;
+    s.net = s.total - s.unappliedCredit;
+  }
+  const total = Object.values(totals).reduce((a, b) => a + b, 0);
+  const unappliedCredit = [...credits.values()].reduce((a, b) => a + b, 0);
+  return { asOf, totals, total, unappliedCredit, net: total - unappliedCredit, suppliers: [...bySupplier.values()].sort((a, b) => b.total - a.total), invoices };
 }
 
 /**

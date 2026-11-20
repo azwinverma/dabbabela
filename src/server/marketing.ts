@@ -506,7 +506,7 @@ export async function claimReferral(userId: string, rawCode: string): Promise<Cl
   const signals = await fraudSignals(rc.userId, userId);
   const status: ReferralStatus = signals.length ? "HELD" : "PENDING";
   try {
-    const r = await db.referral.create({ data: { codeId: rc.id, refereeId: userId, status } });
+    const r = await db.referral.create({ data: { codeId: rc.id, refereeId: userId, status, note: signals.length ? `Held at sign-up: ${signals.join(", ")}`.slice(0, 500) : null } });
     await audit({ actorId: userId, action: "referral.claim", entity: "Referral", entityId: r.id, summary: `Code ${rc.code}${signals.length ? ` — held: ${signals.join(", ")}` : ""}`, after: { codeId: rc.id, referrerId: rc.userId, status, signals } });
     return { ok: true, referralId: r.id, status };
   } catch (e) {
@@ -577,7 +577,7 @@ export async function settleReferral(referralId: string): Promise<SettleResult> 
       if (r.status === "PENDING") {
         const signals = await fraudSignals(pre.code.userId, r.refereeId, tx);
         if (signals.length) {
-          await tx.referral.update({ where: { id: r.id }, data: { status: "HELD", qualifiedOrderId: order.id } });
+          await tx.referral.update({ where: { id: r.id }, data: { status: "HELD", qualifiedOrderId: order.id, note: `Held at reward: ${signals.join(", ")}`.slice(0, 500) } });
           await audit({ action: "referral.hold", entity: "Referral", entityId: r.id, summary: `Held at reward: ${signals.join(", ")}`, after: { signals, orderId: order.id } });
           return { referralId, outcome: "HELD" as const };
         }
@@ -596,7 +596,7 @@ export async function settleReferral(referralId: string): Promise<SettleResult> 
       });
       const n = await tx.referral.updateMany({
         where: { id: r.id, status: { in: SETTLEABLE }, rewardLedgerId: null },
-        data: { status: "REWARDED", rewardLedgerId: ledger.id, qualifiedOrderId: order.id },
+        data: { status: "REWARDED", rewardLedgerId: ledger.id, qualifiedOrderId: order.id, rewardedAt: ledger.createdAt },
       });
       if (n.count !== 1) throw new Abort();
       await audit({ action: "referral.reward", entity: "Referral", entityId: r.id, summary: `${rs(s.referrerReward)} to the referrer (code ${pre.code.code})`, after: { ledgerId: ledger.id, amount: s.referrerReward, orderId: order.id, referrerId: pre.code.userId } });
@@ -654,7 +654,7 @@ export async function decideReferral(actor: Actor, referralId: string, approve: 
   if (r.status === "REWARDED" || r.status === "REJECTED") throw new MarketingError(`Already ${r.status.toLowerCase()}`);
   if (approve && r.status !== "HELD") throw new MarketingError("Only held referrals need approval");
   const to: ReferralStatus = approve ? "APPROVED" : "REJECTED";
-  const n = await db.referral.updateMany({ where: { id: r.id, status: r.status }, data: { status: to } });
+  const n = await db.referral.updateMany({ where: { id: r.id, status: r.status }, data: { status: to, note: `${approve ? "Approved" : "Rejected"}: ${note.trim()}`.slice(0, 500) } });
   if (n.count !== 1) throw new MarketingError("It changed meanwhile — reload and try again");
   await audit({ actorId: actor.id, action: approve ? "referral.approve" : "referral.reject", entity: "Referral", entityId: r.id, summary: note.trim().slice(0, 200), before: { status: r.status }, after: { status: to }, reason: note.trim() });
   const settled = approve ? await settleReferral(r.id) : null;

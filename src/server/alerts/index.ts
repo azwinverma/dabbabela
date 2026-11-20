@@ -18,6 +18,7 @@ import { corporateAccounts, corporateInvoices, corporateShortfall } from "./dete
 import { integrations, paymentMismatch } from "./detectors/integrations";
 import { security } from "./detectors/security";
 import { approvals } from "./detectors/approvals";
+import { walletTopups, walletTopupVelocity } from "./detectors/wallet";
 
 export * from "./types";
 
@@ -40,6 +41,8 @@ export const DETECTORS: Detector[] = [
   reconciliation,
   integrations,
   paymentMismatch,
+  walletTopups,
+  walletTopupVelocity,
   security,
   approvals,
 ];

@@ -43,12 +43,22 @@ export function IssueButton({ id }: { id: string }) {
   return <ConfirmAction action={issueInvoiceAction.bind(null, id)} label="Issue invoice" variant="primary" confirm="Issue this invoice? Its number and lines are then final." />;
 }
 
-export function PaymentForm({ id }: { id: string }) {
+export function PaymentForm({ id, today }: { id: string; today: string }) {
   return (
     <ActionForm action={recordPaymentAction} className="flex flex-wrap items-start gap-2" resetOnSuccess>
       <input type="hidden" name="id" value={id} />
       <input name="amount" inputMode="decimal" placeholder="Amount received (Rs)" className="field h-9 w-44 py-1" required aria-label="Amount" />
+      <select name="method" defaultValue="BANK_TRANSFER" className="field h-9 w-36 py-1" aria-label="Received by">
+        <option value="BANK_TRANSFER">Bank transfer</option>
+        <option value="CHEQUE">Cheque</option>
+        <option value="CASH">Cash</option>
+        <option value="ESEWA">eSewa</option>
+        <option value="KHALTI">Khalti</option>
+        <option value="OTHER">Other</option>
+      </select>
       <input name="reference" placeholder="Bank / cheque ref" className="field h-9 w-40 py-1" required aria-label="Reference" />
+      <input type="date" name="receivedOn" defaultValue={today} max={today} className="field h-9 w-40 py-1" required aria-label="Received on" />
+      <input name="note" placeholder="Note (optional)" className="field h-9 w-44 py-1" aria-label="Receipt note" />
       <SubmitButton size="sm" variant="dark" pendingText="…">
         Record payment
       </SubmitButton>

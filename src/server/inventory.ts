@@ -4,6 +4,7 @@ import { audit } from "@/lib/audit";
 import { can } from "@/lib/permissions";
 import { addDays, dateOnly, isoDate, todayKTM } from "@/lib/dates";
 import { randomCode } from "@/lib/utils";
+import { createReturnCredit } from "./finance/supplier-credits";
 
 /**
  * Inventory (WP-08). The stock ledger (`StockMovement`) is append-only: quantity on hand is always the SUM of
@@ -663,16 +664,36 @@ export async function returnedByLine(po: { number: string; lines: { id: string }
  * lot), never more than was received minus already returned, never more than is in stock. Audited with on-hand
  * before/after, the reason and the credit value (Σ qty × lot cost) for the supplier invoice (WP-09).
  */
-export async function returnToSupplier(actor: InvActor, input: { poId: string; reason: string; lines: { lineId: string; quantity: number; unit?: StockUnit | null; lotId?: string | null }[] }) {
+export async function returnToSupplier(
+  actor: InvActor,
+  input: {
+    poId: string;
+    reason: string;
+    lines: { lineId: string; quantity: number; unit?: StockUnit | null; lotId?: string | null }[];
+    /**
+     * Phase 2C: also record a SupplierCredit for the return's value. `key` is the submit's idempotency token: the credit's
+     * returnKey is `<PO>#return:<key>`, and a retried submit with the same key returns the first result without posting
+     * the stock movements again. `number` = the supplier's credit-note number, when they sent one.
+     */
+    credit?: { key: string; number?: string | null } | null;
+  },
+) {
   requireInventory(actor);
   const reason = input.reason?.trim();
   if (!reason || reason.length < 3) throw new InventoryError("Give a reason for the return");
   const po0 = await db.purchaseOrder.findUnique({ where: { id: input.poId }, select: { kitchenId: true } });
   if (!po0) throw new InventoryError("Purchase order not found");
   requireKitchenScope(actor, po0.kitchenId);
+  const creditKey = input.credit?.key?.trim().slice(0, 80) || null;
+  if (input.credit && !creditKey) throw new InventoryError("Please refresh and try again");
   const result = await db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`po:${input.poId}`}))`;
     const po = await tx.purchaseOrder.findUniqueOrThrow({ where: { id: input.poId }, include: { lines: { include: { ingredient: { select: { name: true } } } } } });
+    const returnKey = creditKey ? `${po.number}#return:${creditKey}` : null;
+    if (returnKey) {
+      const prior = await tx.supplierCredit.findUnique({ where: { returnKey } });
+      if (prior) return { po, credit: prior.amount, lines: [], before: {}, after: {}, supplierCredit: prior, replayed: true };
+    }
     const returned = await returnedByLine(po, tx);
     const ids = po.lines.map((l) => l.ingredientId);
     const before = await stockOnHand(po.kitchenId, ids, tx);
@@ -696,13 +717,17 @@ export async function returnToSupplier(actor: InvActor, input: { poId: string; r
     if (!done.length) throw new InventoryError("Enter what goes back");
     const after = await stockOnHand(po.kitchenId, ids, tx);
     const snap = (m: Map<string, number>) => Object.fromEntries(ids.map((i) => [i, m.get(i) ?? 0]));
-    return { po, credit, lines: done, before: snap(before), after: snap(after) };
+    const supplierCredit = returnKey && credit > 0 ? (await createReturnCredit(tx, { supplierId: po.supplierId, poId: po.id, returnKey, amount: credit, number: input.credit?.number, reason, actorId: actor.id })).credit : null;
+    return { po, credit, lines: done, before: snap(before), after: snap(after), supplierCredit, replayed: false };
   });
-  await audit({ actorId: actor.id, action: "po.return", entity: "PurchaseOrder", entityId: result.po.id, summary: `${result.po.number}: ${result.lines.length} line(s) returned, credit ${result.credit} paisa`, reason, before: { onHand: result.before }, after: { onHand: result.after, lines: result.lines, credit: result.credit } });
-  return { credit: result.credit, lines: result.lines };
+  if (result.replayed) return { credit: result.credit, lines: result.lines, supplierCredit: result.supplierCredit, replayed: true };
+  await audit({ actorId: actor.id, action: "po.return", entity: "PurchaseOrder", entityId: result.po.id, summary: `${result.po.number}: ${result.lines.length} line(s) returned, credit ${result.credit} paisa`, reason, before: { onHand: result.before }, after: { onHand: result.after, lines: result.lines, credit: result.credit, supplierCreditId: result.supplierCredit?.id ?? null } });
+  if (result.supplierCredit)
+    await audit({ actorId: actor.id, action: "supplier_credit.create", entity: "SupplierCredit", entityId: result.supplierCredit.id, summary: `${result.po.number}: credit ${result.supplierCredit.amount} paisa${result.supplierCredit.number ? ` (note ${result.supplierCredit.number})` : ""}`, reason, after: result.supplierCredit });
+  return { credit: result.credit, lines: result.lines, supplierCredit: result.supplierCredit, replayed: false };
 }
 
-/** Returns posted against a PO (for the PO page and for WP-09 supplier credit). */
+/** Returns posted against a PO (for the PO page; supplier credits are `SupplierCredit` rows, see finance/supplier-credits.ts). */
 export async function purchaseReturns(poId: string) {
   const po = await db.purchaseOrder.findUniqueOrThrow({ where: { id: poId }, include: { lines: true } });
   const rows = await db.stockMovement.findMany({ where: { type: "RETURN", reference: { startsWith: `${po.number}#return:` } }, include: { ingredient: { select: { name: true, unit: true } } }, orderBy: { createdAt: "desc" } });

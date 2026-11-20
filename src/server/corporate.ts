@@ -198,6 +198,24 @@ export function filterCompanyMenu<T extends { box: { id: string } }>(items: T[],
   return allowed ? items.filter((i) => allowed.has(i.box.id)) : items;
 }
 
+/** A day-offer map narrowed to a company's menu (unchanged when the company has none). */
+export function narrowOffers<T extends { items: { box: { id: string } }[] }>(offers: Map<string, T>, allowed: Set<string> | null): Map<string, T> {
+  if (!allowed) return offers;
+  return new Map([...offers].map(([date, o]) => [date, { ...o, items: filterCompanyMenu(o.items, allowed) }]));
+}
+
+/**
+ * Company menu as it applies to one signed-in member (decision 2026-11-20): when the company has a menu it applies to
+ * every member on the public menu, account pages and checkout, whoever pays; Build-a-Dabba is blocked only when the
+ * company is billed (COMPANY_PAID / SPLIT). Null when the member's company has no menu (full menu).
+ */
+export async function memberCompanyMenu(company: Pick<Company, "id" | "name" | "billingMode"> | null | undefined) {
+  if (!company) return null;
+  const allowed = await companyMenuBoxIds(company.id);
+  if (!allowed) return null;
+  return { companyId: company.id, companyName: company.name, allowed, buildBlocked: company.billingMode !== "EMPLOYEE_PAID" };
+}
+
 export async function setCompanyMenu(actor: StaffActor, companyId: string, boxIds: string[]) {
   assertCompanyAccess(actor, companyId, "corporate.edit");
   const ids = [...new Set(boxIds.filter(Boolean))];
@@ -423,22 +441,20 @@ export async function upcomingDeliveries(companyId: string, from = todayKTM(), d
 // ───────────── money owed ─────────────
 
 export const COMPANY_SHARE_PREFIX = "Company share";
-const ADJ_TAG = /\[adj:([a-z0-9]+)\]/;
+/**
+ * An adjustment counts as billed while it is linked to a line of a non-void invoice (`OrderAdjustment.invoiceLineId`).
+ * Regenerating a draft deletes its lines (SetNull frees the adjustment); voiding keeps the link for history but the
+ * adjustment becomes billable again.
+ */
+export const UNBILLED_ADJUSTMENT = { OR: [{ invoiceLineId: null }, { invoiceLine: { invoice: { status: "VOID" as const } } }] } satisfies Prisma.OrderAdjustmentWhereInput;
 
 /** Company-share adjustments (WP-03 staff edits) not yet billed on a non-void invoice. */
 async function unbilledCompanyAdjustments(client: Tx | typeof db, companyId: string, upTo?: string) {
-  const adjustments = await client.orderAdjustment.findMany({
-    where: { reason: { startsWith: COMPANY_SHARE_PREFIX }, order: { companyId, ...(upTo ? { deliveryDate: { lte: dateOnly(upTo) } } : {}) } },
+  return client.orderAdjustment.findMany({
+    where: { reason: { startsWith: COMPANY_SHARE_PREFIX }, ...UNBILLED_ADJUSTMENT, order: { companyId, ...(upTo ? { deliveryDate: { lte: dateOnly(upTo) } } : {}) } },
     include: { order: { select: { id: true, number: true, deliveryDate: true, tax: true, total: true, invoiceId: true, status: true } } },
     orderBy: { createdAt: "asc" },
   });
-  if (!adjustments.length) return [];
-  const billedLines = await client.invoiceLine.findMany({
-    where: { invoice: { companyId, status: { not: "VOID" } }, description: { contains: "[adj:" } },
-    select: { description: true },
-  });
-  const billed = new Set(billedLines.map((l) => ADJ_TAG.exec(l.description)?.[1]).filter(Boolean));
-  return adjustments.filter((a) => !billed.has(a.id));
 }
 
 /** Employer money owed: company share of live orders not yet invoiced (+ unbilled company adjustments) + unpaid invoice balances. */
@@ -468,7 +484,7 @@ const shareTaxOf = (o: { tax: number; total: number }, amount: number) => (o.tax
  * - every not-yet-invoiced, due (delivery ≤ today), live order with a company share (its share already
  *   reflects the negotiated per-dabba price, company discount and split at checkout);
  * - company-share `OrderAdjustment` rows (staff edits) not billed before — on these orders or on
- *   orders already invoiced — each as its own line tagged `[adj:<id>]` so it is billed exactly once;
+ *   orders already invoiced — each as its own line linked through `OrderAdjustment.invoiceLineId` so it is billed exactly once;
  * - the due date preview = period end + credit terms of the contract in force (re-set on issue).
  * Running it twice never double-bills.
  */
@@ -514,10 +530,12 @@ export async function generateCompanyInvoice(actor: StaffActor, input: { company
           };
         });
       }
-      for (const a of adjustments) {
+      // Adjustment lines are created one by one after the invoice so each adjustment can point at its line
+      // (`invoiceLineId` — the "already billed" marker). The `[adj:<id>]` tag stays in the text for older readers.
+      const adjustmentLines = adjustments.map((a) => {
         const reason = a.reason.slice(COMPANY_SHARE_PREFIX.length).replace(/^[\s:—–-]+/, "") || "change";
-        lines.push({ order: { connect: { id: a.order.id } }, description: `Adjustment · ${a.order.number} · ${formatDay(isoDate(a.order.deliveryDate))} · ${reason}`.slice(0, 270) + ` [adj:${a.id}]`, quantity: 1, unitPrice: a.amount, amount: a.amount });
-      }
+        return { adjustmentId: a.id, orderId: a.order.id, description: `Adjustment · ${a.order.number} · ${formatDay(isoDate(a.order.deliveryDate))} · ${reason}`.slice(0, 270) + ` [adj:${a.id}]`, amount: a.amount };
+      });
       const total = orders.reduce((s, o) => s + o.companyShare, 0) + adjustments.reduce((s, a) => s + a.amount, 0);
       if (total <= 0) throw new CorporateError("The adjustments cancel out the meals — nothing to invoice; issue a credit note instead if money is owed back.");
       const tax = orders.reduce((s, o) => s + shareTaxOf(o, o.companyShare), 0) + adjustments.reduce((s, a) => s + shareTaxOf(a.order, a.amount), 0);
@@ -542,6 +560,11 @@ export async function generateCompanyInvoice(actor: StaffActor, input: { company
           lines: { create: lines },
         },
       });
+      for (const l of adjustmentLines) {
+        const line = await tx.invoiceLine.create({ data: { invoiceId: created.id, orderId: l.orderId, description: l.description, quantity: 1, unitPrice: l.amount, amount: l.amount } });
+        const tagged = await tx.orderAdjustment.updateMany({ where: { id: l.adjustmentId, ...UNBILLED_ADJUSTMENT }, data: { invoiceLineId: line.id } });
+        if (tagged.count !== 1) throw new CorporateError("Some adjustments were invoiced at the same time — try again");
+      }
       if (orders.length) {
         const linked = await tx.order.updateMany({ where: { id: { in: orders.map((o) => o.id) }, invoiceId: null }, data: { invoiceId: created.id } });
         if (linked.count !== orders.length) throw new CorporateError("Some orders were invoiced at the same time — try again");
@@ -568,18 +591,52 @@ export async function issueCompanyInvoice(actor: StaffActor, invoiceId: string) 
   return db.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
 }
 
-export type InvoicePaymentRecord = { invoiceId: string; number: string; at: Date; summary: string };
+export type InvoicePaymentRecord = {
+  invoiceId: string;
+  number: string;
+  /** When the money arrived (receipt) — for legacy rows, when the payment was keyed in. */
+  at: Date;
+  summary: string;
+  /** Paisa; null for legacy rows. */
+  amount: number | null;
+  method: string | null;
+  reference: string | null;
+  source: "receipt" | "legacy";
+};
 
 /**
- * Dated payment history for a company's invoices. There is no receipt table (schema), so the dated
- * record is the `invoice.payment` / `invoice.credit_note` audit entry written by `invoices.ts`.
+ * Dated payment history for a company's invoices: `InvoiceReceipt` rows (written by `recordInvoicePayment` since
+ * Phase 2C) plus the legacy `invoice.payment` audit rows from before receipts existed. Dedupe rule: an audit row that
+ * carries `after.receiptId` belongs to a receipt and is skipped; audit rows without it are legacy and shown as-is
+ * (their amount lives only in the formatted summary, so `amount` is null).
  */
 export async function invoicePaymentHistory(companyId: string): Promise<InvoicePaymentRecord[]> {
   const invoices = await db.invoice.findMany({ where: { companyId }, select: { id: true, number: true } });
   if (!invoices.length) return [];
-  const rows = await db.auditLog.findMany({ where: { entity: "Invoice", action: "invoice.payment", entityId: { in: invoices.map((i) => i.id) } }, orderBy: { createdAt: "desc" }, take: 200 });
-  return rows.map((r) => ({ invoiceId: r.entityId!, number: invoices.find((i) => i.id === r.entityId)?.number ?? "", at: r.createdAt, summary: r.summary ?? "" }));
+  const ids = invoices.map((i) => i.id);
+  const numberOf = (id: string) => invoices.find((i) => i.id === id)?.number ?? "";
+  const [receipts, audits] = await Promise.all([
+    db.invoiceReceipt.findMany({ where: { invoiceId: { in: ids } }, orderBy: { receivedAt: "desc" }, take: 200 }),
+    db.auditLog.findMany({ where: { entity: "Invoice", action: "invoice.payment", entityId: { in: ids } }, orderBy: { createdAt: "desc" }, take: 200 }),
+  ]);
+  const fromReceipts: InvoicePaymentRecord[] = receipts.map((r) => ({
+    invoiceId: r.invoiceId,
+    number: numberOf(r.invoiceId),
+    at: r.receivedAt,
+    summary: `${rs(r.amount)} · ${RECEIPT_METHOD_LABEL[r.method] ?? r.method} · ${r.reference}${r.note ? ` — ${r.note}` : ""}`,
+    amount: r.amount,
+    method: r.method,
+    reference: r.reference,
+    source: "receipt",
+  }));
+  const hasReceipt = (after: Prisma.JsonValue | null) => Boolean(after && typeof after === "object" && !Array.isArray(after) && "receiptId" in after);
+  const legacy: InvoicePaymentRecord[] = audits
+    .filter((a) => !hasReceipt(a.after))
+    .map((a) => ({ invoiceId: a.entityId!, number: numberOf(a.entityId!), at: a.createdAt, summary: a.summary ?? "", amount: null, method: null, reference: null, source: "legacy" }));
+  return [...fromReceipts, ...legacy].sort((x, y) => y.at.getTime() - x.at.getTime()).slice(0, 200);
 }
+
+export const RECEIPT_METHOD_LABEL: Record<string, string> = { BANK_TRANSFER: "Bank transfer", CHEQUE: "Cheque", CASH: "Cash", ESEWA: "eSewa", KHALTI: "Khalti", OTHER: "Other" };
 
 /** Unpaid invoices with days overdue. */
 export async function unpaidInvoices(companyId: string) {

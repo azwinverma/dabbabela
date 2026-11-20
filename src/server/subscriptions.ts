@@ -32,6 +32,7 @@ import {
   type OrderAttribution,
 } from "./orders";
 import { LIVE_STATUSES } from "./transitions";
+import { companyMenuBoxIds, memberCompanyMenu, narrowOffers } from "./corporate";
 import { notify } from "./notify";
 
 type Tx = Prisma.TransactionClient;
@@ -171,6 +172,12 @@ export function earliestCutoff(...cutoffs: (string | null | undefined)[]) {
   return set.length ? set.sort()[0] : null;
 }
 
+/** Day offers for a plan meal, narrowed to the company's menu when the plan belongs to a company that has one. */
+async function planOffers(dates: string[], kitchenId: string, companyId: string | null | undefined) {
+  const [offers, allowed] = await Promise.all([getOffersForDates(dates, kitchenId), companyMenuBoxIds(companyId)]);
+  return narrowOffers(offers, allowed);
+}
+
 /** Effective cut-off for one meal: per-day menu cut-off (DayOffer.cutoff), company override, else the global one. */
 async function mealCutoff(date: string, kitchenId: string, companyId: string | null, settings: { orderCutoff: string }, offer?: DayOffer) {
   const o = offer ?? (await getOffersForDates([date], kitchenId)).get(date);
@@ -273,7 +280,14 @@ export async function quoteSubscription(user: CurrentUser | null, input: PlanInp
   const dates = allDates.filter((d) => !locked.has(d) && !dateProblem(d, settings, closures, { cutoff: earliestCutoff(offers.get(d)?.cutoff, company?.cutoffOverride), now, ignoreHorizon: true }));
   if (!dates.length) throw new OrderError("No delivery days fall in that range — try a later start date");
 
-  const meals = await resolveMeals(dates, input, plan, user?.id ?? null, kitchenId, offers);
+  // Company menu (decision 2026-11-20): picks and the chef's rotation come from the company's menu for every member;
+  // Build-a-Dabba picks are refused only when the company is billed (they fall back to the chef's choice).
+  const companyMenu = await memberCompanyMenu(company);
+  const blockedCustom = new Set(companyMenu?.buildBlocked ? Object.entries(input.picks ?? {}).filter(([, p]) => p?.customBoxId).map(([d]) => d) : []);
+  const mealInput = blockedCustom.size ? { ...input, picks: Object.fromEntries(Object.entries(input.picks ?? {}).filter(([d]) => !blockedCustom.has(d))) } : input;
+  const meals = (await resolveMeals(dates, mealInput, plan, user?.id ?? null, kitchenId, narrowOffers(offers, companyMenu?.allowed ?? null))).map((m) =>
+    blockedCustom.has(m.date) && m.price > 0 ? { ...m, problem: `Build-a-Dabba isn't part of ${companyMenu!.companyName}'s company-billed lunches — chef's choice from the company menu instead` } : m,
+  );
   const blocking = meals.find((m) => m.price === 0);
 
   const split = user && company ? await companySplitFor(user.id, company, dates) : { spec: null, eligible: null };
@@ -768,6 +782,9 @@ export async function changePlanAddress(subId: string, user: CurrentUser, addres
   for (const o of orders) {
     if (!(await changeWindowOpen(isoDate(o.deliveryDate), o.kitchenId, settings))) continue;
     const kitchenChanged = address.zone.kitchenId !== o.kitchenId;
+    // The delivery window is checked against the NEW address's zone (decision 2026-11-20): a window the new zone
+    // doesn't serve is cleared (the meal goes in the zone's normal lunch round) rather than kept by mistake.
+    const keepSlot = !kitchenChanged && Boolean(o.slotId) && Boolean(await zoneSlot(address.zone, o.slotId!, o.kitchenId));
     await db.$transaction(async (tx) => {
       if (kitchenChanged) {
         await lockKitchenDay(tx, address.zone!.kitchenId, isoDate(o.deliveryDate));
@@ -788,15 +805,16 @@ export async function changePlanAddress(subId: string, user: CurrentUser, addres
           instructions: address.instructions,
           zoneId: address.zoneId,
           kitchenId: address.zone!.kitchenId,
-          slotId: kitchenChanged ? null : o.slotId,
-          slotLabel: kitchenChanged ? null : o.slotLabel,
+          slotId: keepSlot ? o.slotId : null,
+          slotLabel: keepSlot ? o.slotLabel : null,
           version: { increment: 1 },
         },
       });
     });
     moved++;
   }
-  await db.subscription.update({ where: { id: subId }, data: { addressId } });
+  const subSlotOk = sub.slotId ? Boolean(await zoneSlot(address.zone, sub.slotId, address.zone.kitchenId)) : true;
+  await db.subscription.update({ where: { id: subId }, data: { addressId, ...(subSlotOk ? {} : { slotId: null }) } });
   await db.subscriptionChange.create({ data: { subscriptionId: subId, type: "ADDRESS", detail: `${moved} meals → ${address.label} (${address.area})`, actorId: user.id } });
   return moved;
 }
@@ -835,7 +853,7 @@ export type SwapOption = { boxId: string; name: string; isVeg: boolean; price: n
 export async function swapOptions(orderId: string, userId: string | null) {
   const order = await ownMeal(orderId, userId);
   const date = isoDate(order.deliveryDate);
-  const offer = (await getOffersForDates([date], order.kitchenId)).get(date);
+  const offer = (await planOffers([date], order.kitchenId, order.companyId ?? order.subscription.companyId)).get(date);
   const item = order.items[0];
   const out: SwapOption[] = [];
   for (const i of offer?.items ?? []) {
@@ -849,13 +867,93 @@ export async function swapOptions(orderId: string, userId: string | null) {
 }
 
 /**
- * Swap one plan meal to another dabba on that day's menu, before the day's cut-off (per-day menu cut-off and company
- * override respected). The order is re-priced; the difference settles once:
- * paid meals → extra from wallet credit (refused if short) / saving back to wallet credit;
- * meals paid later (cash on delivery) → the pending payment's amount moves with it.
- * Idempotent: swapping to the dabba the meal already has changes nothing; concurrent swaps are version-checked.
+ * Swap policy (Phase 2C — explicit):
+ * * Same price → nothing to settle.
+ * * Cheaper dabba → the saving is never lost: a paid meal gets it back as wallet credit (ledger ADJUSTMENT, the
+ *   payment's refundedAmount moves with it); a meal paid later (cash on delivery) owes less (the pending payment shrinks).
+ * * Dearer dabba on a meal paid later → the pending payment grows (paid at the door with the rest of the plan).
+ * * Dearer dabba on a paid meal → the customer pays the difference: from wallet credit (immediate), or online with
+ *   eSewa/Khalti through a Payment with purpose SWAP_DIFFERENCE. That swap stays *pending* until the gateway payment
+ *   is verified; `applySwapDifference` (called from `markPaymentPaid`) applies it exactly once. If the meal changed
+ *   meanwhile, the day's cut-off passed, or the dabba sold out, the money goes to wallet credit instead. Unpaid swap
+ *   payments are cancelled by the cut-off job (`expireSwapPayments`) and superseded by any later swap of the meal.
  */
-export async function swapMeal(orderId: string, boxId: string, actor: { id: string; isStaff: boolean }, userId: string | null, opts: { reason?: string | null } = {}) {
+export type SwapSettlement = "NONE" | "WALLET_CHARGE" | "WALLET_CREDIT" | "DUE_LATER" | "PAY_ONLINE" | "PAID_ONLINE";
+export type SwapPayMethod = "WALLET" | "ESEWA" | "KHALTI";
+
+/** Idempotency key of a pending swap-difference payment: identifies the meal, the target dabba and the meal version. */
+export const swapPaymentKey = (orderId: string, boxId: string, version: number) => `swap:${orderId}:${boxId}:${version}`;
+export function parseSwapPaymentKey(key: string | null | undefined) {
+  const m = /^swap:([^:]+):([^:]+):(\d+)$/.exec(key ?? "");
+  return m ? { orderId: m[1], boxId: m[2], version: Number(m[3]) } : null;
+}
+
+type OwnMeal = Awaited<ReturnType<typeof ownMeal>>;
+type SwapPick = DayOffer["items"][number];
+
+/** Writes one swap (order money, item, events, adjustment, plan choices). Caller holds the kitchen-day lock. */
+async function writeSwap(
+  tx: Tx,
+  order: OwnMeal,
+  pick: SwapPick,
+  r: Awaited<ReturnType<typeof repriceMeal>>,
+  custDelta: number,
+  settlement: SwapSettlement,
+  actorId: string | null,
+  extra: { reason?: string | null; paymentId?: string | null } = {},
+) {
+  const item = order.items[0];
+  const sub = order.subscription;
+  const date = isoDate(order.deliveryDate);
+  const f = boxFacts(pick.box);
+  const newUnit = planMealPrice(sub, pick.price);
+  const compDelta = r.delta - custDelta;
+  const note = `Swapped: ${item.name} → ${pick.box.name}${custDelta ? ` (${custDelta > 0 ? "+" : "−"}${rs(Math.abs(custDelta))})` : ""}${settlement === "PAID_ONLINE" ? " — difference paid online" : ""}`;
+  await assertDayCapacity(tx, { kitchenId: order.kitchenId, date, meals: 0, boxes: new Map([[pick.box.id, { qty: item.quantity, capacity: pick.capacity, name: pick.box.name }]]) });
+  const upd = await tx.order.updateMany({
+    where: { id: order.id, version: order.version, status: "SCHEDULED" },
+    data: { subtotal: r.subtotal, tax: r.tax, total: r.total, customerShare: order.customerShare + custDelta, companyShare: order.companyShare + compDelta, costTotal: f.cost * item.quantity, followsRotation: false, version: { increment: 1 } },
+  });
+  if (!upd.count) throw new OrderError("This meal was just changed — refresh and try again");
+  await tx.orderItem.update({
+    where: { id: item.id },
+    data: { boxId: pick.box.id, customBoxId: null, name: pick.box.name, details: pick.box.tagline, components: boxComponents(pick.box) as unknown as Prisma.InputJsonValue, diet: f.diet, unitPrice: newUnit, unitCost: f.cost, lineTotal: newUnit * item.quantity },
+  });
+  await tx.orderStatusEvent.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: order.status, note, actorId } });
+  if (custDelta !== 0) await tx.orderAdjustment.create({ data: { orderId: order.id, amount: custDelta, reason: note, actorId } });
+  if (settlement === "WALLET_CHARGE") await spendCredit(tx, { userId: order.userId, amount: custDelta, orderId: order.id, actorId, note });
+  if (settlement === "WALLET_CREDIT") {
+    await addCredit(tx, { userId: order.userId, amount: -custDelta, reason: "ADJUSTMENT", orderId: order.id, paymentId: order.paymentId, actorId, note });
+    if (order.paymentId) await bumpPaymentRefund(tx, order.paymentId, -custDelta);
+  }
+  if (settlement === "DUE_LATER" && order.paymentId) await tx.payment.updateMany({ where: { id: order.paymentId, status: "PENDING" }, data: { amount: { increment: custDelta } } });
+  const choices = { ...((sub.dayChoices as Record<string, DayPick> | null) ?? {}), [date]: { boxId: pick.box.id } };
+  await tx.subscription.update({ where: { id: sub.id }, data: { dayChoices: choices as Prisma.InputJsonValue, boxChoice: "CUSTOM" } });
+  await tx.subscriptionChange.create({
+    data: { subscriptionId: sub.id, type: "SWAP", date: order.deliveryDate, detail: `${item.name} → ${pick.box.name}${extra.reason ? ` — ${extra.reason}` : ""}${extra.paymentId ? " (paid online)" : ""}`, amount: custDelta || null, actorId },
+  });
+  // Any other unpaid swap payment for this meal is now stale.
+  await tx.payment.updateMany({
+    where: { purpose: "SWAP_DIFFERENCE", status: { in: ["PENDING", "FAILED"] }, idempotencyKey: { startsWith: `swap:${order.id}:` }, ...(extra.paymentId ? { id: { not: extra.paymentId } } : {}) },
+    data: { status: "CANCELLED" },
+  });
+}
+
+/**
+ * Swap one plan meal to another dabba on that day's menu, before the day's cut-off (per-day menu cut-off and company
+ * override respected). The order is re-priced and the difference settles once (see the swap policy above).
+ * `opts.method` chooses how a paid meal's up-charge is paid: WALLET (default when credit covers it) or ESEWA/KHALTI
+ * (returns `settlement: "PAY_ONLINE"` with the pending payment; the swap happens when it is verified).
+ * Idempotent: swapping to the dabba the meal already has changes nothing; a retried pay-online request returns the
+ * same pending payment; concurrent swaps are version-checked.
+ */
+export async function swapMeal(
+  orderId: string,
+  boxId: string,
+  actor: { id: string; isStaff: boolean },
+  userId: string | null,
+  opts: { reason?: string | null; method?: SwapPayMethod | null } = {},
+): Promise<{ changed: boolean; delta: number; settlement: SwapSettlement; paymentId?: string }> {
   const settings = await getSettings();
   const order = await ownMeal(orderId, userId);
   const sub = order.subscription;
@@ -863,12 +961,12 @@ export async function swapMeal(orderId: string, boxId: string, actor: { id: stri
   if (order.status !== "SCHEDULED") throw new OrderError("This meal can't be changed any more");
   if (sub.status !== "ACTIVE") throw new OrderError("Only meals of an active plan can be swapped");
   const date = isoDate(order.deliveryDate);
-  const offer = (await getOffersForDates([date], order.kitchenId)).get(date);
+  const offer = (await planOffers([date], order.kitchenId, order.companyId ?? sub.companyId)).get(date);
   const cutoff = await mealCutoff(date, order.kitchenId, order.companyId, settings, offer);
   if (!actor.isStaff && !(await changeWindowOpen(date, order.kitchenId, settings, cutoff))) throw new OrderError(`Changes for ${date} closed at ${cutoff}`);
   const item = order.items[0];
   if (!item) throw new OrderError("Meal not found");
-  if (item.boxId === boxId) return { changed: false, delta: 0, settlement: "NONE" as const };
+  if (item.boxId === boxId) return { changed: false, delta: 0, settlement: "NONE" };
   const pick = offer?.items.find((i) => i.box.id === boxId);
   if (!pick) throw new OrderError(`That dabba isn't on the menu for ${date}`);
   if (pick.soldOut) throw new OrderError(`${pick.box.name} is sold out on ${date}`);
@@ -877,42 +975,130 @@ export async function swapMeal(orderId: string, boxId: string, actor: { id: stri
   const newUnit = planMealPrice(sub, pick.price);
   const r = await repriceMeal(order, item, newUnit);
   const custDelta = Math.max(r.delta, -order.customerShare);
-  const compDelta = r.delta - custDelta;
   const paid = order.paymentStatus === "PAID";
-  if (paid && custDelta > 0 && (await walletBalance(order.userId)) < custDelta)
-    throw new OrderError(`${pick.box.name} costs ${rs(custDelta)} more than your current meal — add credit to your wallet or pick a dabba at your plan price`);
-  const settlement = custDelta === 0 ? "NONE" : paid ? (custDelta > 0 ? "WALLET_CHARGE" : "WALLET_CREDIT") : "DUE_LATER";
-  const note = `Swapped: ${item.name} → ${pick.box.name}${custDelta ? ` (${custDelta > 0 ? "+" : "−"}${rs(Math.abs(custDelta))})` : ""}`;
+
+  if (paid && custDelta > 0) {
+    const wallet = await walletBalance(order.userId);
+    const method: SwapPayMethod = opts.method ?? "WALLET";
+    if (method === "WALLET" && wallet < custDelta)
+      throw new OrderError(`${pick.box.name} costs ${rs(custDelta)} more than your current meal and your credit is ${rs(wallet)} — pay the difference with eSewa or Khalti, or pick a dabba at your plan price`);
+    if (method !== "WALLET") return startSwapPayment(order, pick, custDelta, method, actor, opts.reason ?? null);
+  }
+
+  const settlement: SwapSettlement = custDelta === 0 ? "NONE" : paid ? (custDelta > 0 ? "WALLET_CHARGE" : "WALLET_CREDIT") : "DUE_LATER";
   try {
     await db.$transaction(async (tx) => {
       await lockKitchenDay(tx, order.kitchenId, date);
-      await assertDayCapacity(tx, { kitchenId: order.kitchenId, date, meals: 0, boxes: new Map([[boxId, { qty: item.quantity, capacity: pick.capacity, name: pick.box.name }]]) });
-      const upd = await tx.order.updateMany({
-        where: { id: order.id, version: order.version, status: "SCHEDULED" },
-        data: { subtotal: r.subtotal, tax: r.tax, total: r.total, customerShare: order.customerShare + custDelta, companyShare: order.companyShare + compDelta, costTotal: f.cost * item.quantity, followsRotation: false, version: { increment: 1 } },
-      });
-      if (!upd.count) throw new OrderError("This meal was just changed — refresh and try again");
-      await tx.orderItem.update({
-        where: { id: item.id },
-        data: { boxId, customBoxId: null, name: pick.box.name, details: pick.box.tagline, components: boxComponents(pick.box) as unknown as Prisma.InputJsonValue, diet: f.diet, unitPrice: newUnit, unitCost: f.cost, lineTotal: newUnit * item.quantity },
-      });
-      await tx.orderStatusEvent.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: order.status, note, actorId: actor.id } });
-      if (custDelta !== 0) await tx.orderAdjustment.create({ data: { orderId: order.id, amount: custDelta, reason: note, actorId: actor.id } });
-      if (settlement === "WALLET_CHARGE") await spendCredit(tx, { userId: order.userId, amount: custDelta, orderId: order.id, actorId: actor.id, note });
-      if (settlement === "WALLET_CREDIT") {
-        await addCredit(tx, { userId: order.userId, amount: -custDelta, reason: "ADJUSTMENT", orderId: order.id, paymentId: order.paymentId, actorId: actor.id, note });
-        if (order.paymentId) await bumpPaymentRefund(tx, order.paymentId, -custDelta);
-      }
-      if (settlement === "DUE_LATER" && order.paymentId) await tx.payment.updateMany({ where: { id: order.paymentId, status: "PENDING" }, data: { amount: { increment: custDelta } } });
-      const choices = { ...((sub.dayChoices as Record<string, DayPick> | null) ?? {}), [date]: { boxId } };
-      await tx.subscription.update({ where: { id: sub.id }, data: { dayChoices: choices as Prisma.InputJsonValue, boxChoice: "CUSTOM" } });
-      await tx.subscriptionChange.create({ data: { subscriptionId: sub.id, type: "SWAP", date: order.deliveryDate, detail: `${item.name} → ${pick.box.name}${opts.reason ? ` — ${opts.reason}` : ""}`, amount: custDelta || null, actorId: actor.id } });
+      await writeSwap(tx, order, pick, r, custDelta, settlement, actor.id, { reason: opts.reason });
     });
   } catch (e) {
     if (e instanceof CapacityError) throw new OrderError(e.message);
     throw e;
   }
   return { changed: true, delta: custDelta, settlement };
+}
+
+/** Create (or return) the pending SWAP_DIFFERENCE payment for a dearer swap of a paid meal. Nothing changes on the meal yet. */
+async function startSwapPayment(order: OwnMeal, pick: SwapPick, amount: number, method: "ESEWA" | "KHALTI", actor: { id: string; isStaff: boolean }, reason: string | null) {
+  const settings = await getSettings();
+  const methods = await availableMethods(settings, { hasCompany: false, customerShare: amount });
+  if (!methods.includes(method)) throw new OrderError(`${method === "ESEWA" ? "eSewa" : "Khalti"} isn't available right now — add credit to your wallet or pick a dabba at your plan price`);
+  const key = swapPaymentKey(order.id, pick.box.id, order.version);
+  const existing = await db.payment.findUnique({ where: { idempotencyKey: key } });
+  if (existing && existing.userId === order.userId && existing.amount === amount && ["PENDING", "FAILED"].includes(existing.status)) {
+    if (existing.method !== method) await db.payment.update({ where: { id: existing.id }, data: { method, status: "PENDING" } });
+    return { changed: false, delta: amount, settlement: "PAY_ONLINE" as const, paymentId: existing.id };
+  }
+  if (existing && existing.status === "PAID") throw new OrderError("This swap is already paid — refresh the page");
+  const item = order.items[0];
+  const date = isoDate(order.deliveryDate);
+  const payment = await db.$transaction(async (tx) => {
+    // A newer choice supersedes any other unpaid swap payment for this meal.
+    await tx.payment.updateMany({ where: { purpose: "SWAP_DIFFERENCE", status: { in: ["PENDING", "FAILED"] }, idempotencyKey: { startsWith: `swap:${order.id}:` } }, data: { status: "CANCELLED" } });
+    // A stale key (price changed, or an old cancelled payment) is released so the new payment can use it.
+    if (existing) await tx.payment.update({ where: { id: existing.id }, data: { idempotencyKey: null } });
+    const p = await tx.payment.create({
+      data: { reference: paymentRef(), userId: order.userId, method, status: "PENDING", amount, subscriptionId: order.subscription.id, purpose: "SWAP_DIFFERENCE", idempotencyKey: key, note: `Swap ${date}: ${item.name} → ${pick.box.name}` },
+    });
+    await tx.subscriptionChange.create({
+      data: { subscriptionId: order.subscription.id, type: "SWAP_PENDING", date: order.deliveryDate, detail: `${item.name} → ${pick.box.name} — waiting for ${rs(amount)} (${p.reference})${reason ? ` — ${reason}` : ""}`, amount, actorId: actor.id },
+    });
+    return p;
+  });
+  if (actor.isStaff) await audit({ actorId: actor.id, action: "subscription.swap_payment", entity: "Payment", entityId: payment.id, summary: `Pay-the-difference ${rs(amount)} for ${item.name} → ${pick.box.name} (${date})`, reason });
+  return { changed: false, delta: amount, settlement: "PAY_ONLINE" as const, paymentId: payment.id };
+}
+
+/**
+ * Apply the swap a SWAP_DIFFERENCE payment was for. Runs inside `markPaymentPaid`'s transaction right after the
+ * guarded PAID flip, so it runs once per payment (and is a no-op if the meal already has the dabba). Returns the
+ * amount credited to the wallet instead (0 when applied): the meal changed since (version), it is past the day's
+ * cut-off, the dabba is off the menu / sold out, or the price moved. Never throws for those — verified money is
+ * never lost.
+ */
+export async function applySwapDifference(
+  tx: Tx,
+  payment: { id: string; userId: string; amount: number; idempotencyKey: string | null; reference: string },
+  opts: { amount?: number | null; actorId?: string | null } = {},
+): Promise<{ applied: boolean; credited: number; why: string | null }> {
+  const paidAmount = opts.amount ?? payment.amount;
+  const credit = async (why: string) => {
+    if (paidAmount > 0) await addCredit(tx, { userId: payment.userId, amount: paidAmount, reason: "REFUND", paymentId: payment.id, actorId: opts.actorId ?? null, note: `Swap not applied (${why}) — ${payment.reference} credited` });
+    return { applied: false, credited: paidAmount, why };
+  };
+  const key = parseSwapPaymentKey(payment.idempotencyKey);
+  if (!key) return credit("no swap on this payment");
+  const order = await tx.order.findFirst({ where: { id: key.orderId, userId: payment.userId, source: "SUBSCRIPTION" }, include: { subscription: { include: { plan: true, price: true } }, items: true, payment: true } });
+  if (!order?.subscription || !order.items[0]) return credit("meal not found");
+  const meal = order as OwnMeal;
+  if (meal.status !== "SCHEDULED" || meal.version !== key.version || meal.subscription.status !== "ACTIVE") return credit("the meal changed before the payment arrived");
+  if (meal.items[0].boxId === key.boxId) return { applied: true, credited: 0, why: null };
+  const settings = await getSettings();
+  const date = isoDate(meal.deliveryDate);
+  const offer = (await planOffers([date], meal.kitchenId, meal.companyId ?? meal.subscription.companyId)).get(date);
+  const cutoff = await mealCutoff(date, meal.kitchenId, meal.companyId, settings, offer);
+  if (!(await changeWindowOpen(date, meal.kitchenId, settings, cutoff))) return credit(`changes for ${date} closed at ${cutoff}`);
+  const pick = offer?.items.find((i) => i.box.id === key.boxId);
+  if (!pick || pick.soldOut) return credit("the dabba is no longer available");
+  const r = await repriceMeal(meal, meal.items[0], planMealPrice(meal.subscription, pick.price));
+  const custDelta = Math.max(r.delta, -meal.customerShare);
+  if (custDelta !== paidAmount) return credit("the price changed");
+  await lockKitchenDay(tx, meal.kitchenId, date);
+  try {
+    await writeSwap(tx, meal, pick, r, custDelta, "PAID_ONLINE", opts.actorId ?? null, { paymentId: payment.id });
+  } catch (e) {
+    // Both are raised before any write in writeSwap (capacity check / guarded version update), so the tx is clean.
+    if (e instanceof CapacityError || e instanceof OrderError) return credit(e.message);
+    throw e;
+  }
+  return { applied: true, credited: 0, why: null };
+}
+
+/** Cut-off job: cancel unpaid swap-difference payments whose meal day has closed (or whose meal changed). */
+export async function expireSwapPayments() {
+  const settings = await getSettings();
+  const pending = await db.payment.findMany({ where: { purpose: "SWAP_DIFFERENCE", status: { in: ["PENDING", "FAILED"] } }, select: { id: true, idempotencyKey: true } });
+  let n = 0;
+  for (const p of pending) {
+    const key = parseSwapPaymentKey(p.idempotencyKey);
+    const order = key ? await db.order.findUnique({ where: { id: key.orderId }, select: { deliveryDate: true, kitchenId: true, companyId: true, version: true, status: true } }) : null;
+    let stale = !key || !order || order.version !== key.version || order.status !== "SCHEDULED";
+    if (!stale && order) {
+      const date = isoDate(order.deliveryDate);
+      stale = !(await changeWindowOpen(date, order.kitchenId, settings, await mealCutoff(date, order.kitchenId, order.companyId, settings)));
+    }
+    if (!stale) continue;
+    // If a gateway payment still lands later, markPaymentPaid → applySwapDifference credits it to the wallet.
+    const u = await db.payment.updateMany({ where: { id: p.id, status: { in: ["PENDING", "FAILED"] } }, data: { status: "CANCELLED", note: "Swap not paid before the cut-off" } });
+    n += u.count;
+  }
+  return n;
+}
+
+/** Unpaid swap-difference payments of a plan (customer plan page / admin). */
+export async function pendingSwapPayments(subId: string) {
+  const rows = await db.payment.findMany({ where: { subscriptionId: subId, purpose: "SWAP_DIFFERENCE", status: { in: ["PENDING", "FAILED"] } }, orderBy: { createdAt: "desc" } });
+  return rows.map((p) => ({ id: p.id, reference: p.reference, amount: p.amount, method: p.method, note: p.note, orderId: parseSwapPaymentKey(p.idempotencyKey)?.orderId ?? null }));
 }
 
 async function planKitchen(sub: { id: string; addressId: string | null }) {
@@ -933,7 +1119,7 @@ export async function quoteAddMeal(user: CurrentUser, subId: string, input: { da
   if (sub.status !== "ACTIVE") throw new OrderError("Extra meals can be added to an active plan");
   const { kitchenId, address, zone } = await planKitchen(sub);
   if (!kitchenId || !address) throw new OrderError("Set a delivery address for this plan first");
-  const offer = (await getOffersForDates([input.date], kitchenId)).get(input.date);
+  const offer = (await planOffers([input.date], kitchenId, sub.companyId)).get(input.date);
   const closures = await getClosures(input.date, input.date, kitchenId);
   const cutoff = earliestCutoff(offer?.cutoff, sub.companyId ? (await db.company.findUnique({ where: { id: sub.companyId }, select: { cutoffOverride: true } }))?.cutoffOverride : null);
   const problem = dateProblem(input.date, settings, closures, { cutoff });

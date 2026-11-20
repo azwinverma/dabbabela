@@ -1,4 +1,4 @@
-import type { ItemCategory, LeadStatus, OrderPaymentStatus, OrderStatus, PaymentMethod, PaymentStatus, RefundStatus, SubscriptionStatus, InvoiceStatus, Diet, AddressType } from "@prisma/client";
+import type { ItemCategory, LeadStatus, OrderPaymentStatus, OrderStatus, PaymentMethod, PaymentPurpose, PaymentStatus, RefundStatus, SubscriptionStatus, InvoiceStatus, Diet, AddressType } from "@prisma/client";
 
 export type Tone = "neutral" | "info" | "warn" | "good" | "bad" | "brand";
 
@@ -40,6 +40,14 @@ export const METHOD_LABEL: Record<PaymentMethod, string> = {
   CASH: "Cash",
   COMPANY_INVOICE: "Company invoice",
   WALLET: "Credit",
+};
+
+export const PURPOSE_LABEL: Record<PaymentPurpose, string> = {
+  ORDER: "Order",
+  SUBSCRIPTION: "Meal plan",
+  WALLET_TOPUP: "Wallet top-up",
+  INVOICE: "Company invoice",
+  SWAP_DIFFERENCE: "Plan swap difference",
 };
 
 export const REFUND_STATUS: Record<RefundStatus, { label: string; tone: Tone }> = {

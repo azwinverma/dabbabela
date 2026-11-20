@@ -16,6 +16,8 @@ import * as subs from "@/server/analytics/subscriptions";
 import * as cust from "@/server/analytics/customers";
 import { AnalyticsFilterBar, filterOptions } from "./_components/FilterBar";
 
+const signedRs = (n: number) => `${n < 0 ? "−" : ""}${rs(Math.abs(n))}`;
+
 export const metadata = { title: "Analytics" };
 
 type SP = Record<string, string | undefined>;
@@ -149,6 +151,22 @@ async function RevenueTab({ f, bucket: b, series }: { f: AnalyticsFilters; bucke
           href={drill(f, "receivables")}
           sub={<>{rs(recv.pending)} awaiting ({recv.pendingCount}) · {recv.invoicesOutstanding == null ? "invoices n/a with filters" : `${rs(recv.invoicesOutstanding)} invoices`}</>}
           tone={recv.pendingCount ? "warn" : "default"}
+        />
+      </div>
+      <div className={grid4}>
+        <Kpi
+          label="Order adjustments (delivered)"
+          value={signedRs(rec.adjustments)}
+          formula={M.recognisedAdjustments.definition}
+          sub={`${signedRs(rec.adjustmentsCustomer)} customer · ${signedRs(rec.adjustmentsCompany)} company — not included in recognised revenue`}
+          tone={rec.adjustments ? "warn" : "default"}
+        />
+        <Kpi
+          label="Company share not yet invoiced"
+          value={recv.companyUnbilled == null ? "n/a" : rs(recv.companyUnbilled)}
+          formula={`${M.receivablesCompanyUnbilled.definition} Not part of the receivables total above (no invoice exists yet).`}
+          href="/admin/invoices"
+          sub={recv.companyUnbilled == null ? "not available with these filters" : "employer money for meals + adjustments, before invoicing"}
         />
       </div>
       {cash.walletCount > 0 && (

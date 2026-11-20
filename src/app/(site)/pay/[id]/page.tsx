@@ -28,11 +28,16 @@ export default async function PayPage({ params, searchParams }: { params: Promis
     },
   });
   if (!payment) notFound();
+  // Wallet top-ups have no orders; their own page shows the result and the ways to pay.
+  if (payment.purpose === "WALLET_TOPUP") redirect(`/account/wallet/topup/${payment.id}${sp.status ? `?status=${encodeURIComponent(sp.status)}${sp.reason ? `&reason=${encodeURIComponent(sp.reason)}` : ""}` : ""}`);
   if (payment.status === "PAID") redirect(`/thank-you/${payment.id}`);
   const [settings, locale, balance] = await Promise.all([getSettings(), getLocale(), walletBalance(user.id)]);
   const t = accountDict(locale).pay;
   const methods = (await availableMethods(settings, { hasCompany: Boolean(payment.companyId), customerShare: payment.amount })).filter((m) => m !== "WALLET" || balance >= payment.amount);
-  const expired = payment.status === "CANCELLED" || payment.orders.every((o) => o.status === "CANCELLED");
+  const swap = payment.purpose === "SWAP_DIFFERENCE";
+  const expired = payment.status === "CANCELLED" || (payment.orders.length > 0 && payment.orders.every((o) => o.status === "CANCELLED"));
+  // A swap difference is paid online only (wallet swaps settle instantly on the plan page).
+  const payMethods = swap ? methods.filter((m) => m === "ESEWA" || m === "KHALTI") : methods;
   const awaitingCheck = payment.method === "BANK_TRANSFER" && Boolean(payment.proofUrl);
 
   return (
@@ -67,13 +72,14 @@ export default async function PayPage({ params, searchParams }: { params: Promis
             </li>
           ))}
           {payment.orders.length > 8 && <li>…and {payment.orders.length - 8} more days</li>}
+          {swap && <li>Pay the difference for your plan swap: {payment.note?.replace(/^Swap /, "")}. The swap is confirmed once the payment is verified.</li>}
         </ul>
         <p className="mt-3 text-xs text-ink-mute">Paying with: {METHOD_LABEL[payment.method]}</p>
       </div>
 
       {expired ? (
         <div className="mt-6 rounded-2xl border-2 border-ink-line bg-white p-5">
-          <p className="font-bold">This order expired before payment arrived.</p>
+          <p className="font-bold">{swap ? "This swap was cancelled (the day closed or you picked something else)." : "This order expired before payment arrived."}</p>
           <p className="mt-1 text-sm text-ink-soft">If you did pay, the money is added to your credit automatically once the provider confirms it.</p>
           <Link href="/menu" className="mt-3 inline-block font-semibold text-sindoor underline">Order again</Link>
         </div>
@@ -81,7 +87,7 @@ export default async function PayPage({ params, searchParams }: { params: Promis
         <PayClient
           paymentId={payment.id}
           method={payment.method}
-          methods={methods}
+          methods={payMethods}
           bankDetails={settings.bankDetails}
           qrImage={settings.qrImage}
           awaitingCheck={awaitingCheck}

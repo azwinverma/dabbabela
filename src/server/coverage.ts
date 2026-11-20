@@ -84,10 +84,12 @@ export async function searchCoverage(q: string) {
   const named = zones
     .map((z) => ({ zone: z, matches: z.areas.filter((a) => a !== VALLEY_WILDCARD && (norm(a).includes(term) || term.includes(norm(a)))) }))
     .filter((r) => r.matches.length || norm(r.zone.name).includes(term));
-  if (named.length) return named;
-  // nothing named: the valley catch-all zone (if any) covers it, as long as the place is inside the valley
-  const valley = zones.find((z) => z.areas.includes(VALLEY_WILDCARD));
-  return valley ? [{ zone: valley, matches: [] as string[] }] : [];
+  return named;
+}
+
+/** The active Kathmandu Valley catch-all zone, if any (for "not listed by name, but inside the valley" answers). */
+export async function valleyZone() {
+  return db.deliveryZone.findFirst({ where: { isActive: true, areas: { has: VALLEY_WILDCARD }, kitchen: { isActive: true } } });
 }
 
 // ───────────── WP-13: distance fee bands, zone time windows ─────────────

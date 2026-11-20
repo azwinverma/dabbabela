@@ -4,6 +4,7 @@ import { storeUpload } from "@/lib/upload";
 import { guarded } from "../_kit/guard";
 import { f } from "../_kit/form";
 import { createSupplierInvoice, recordSupplierPayment, reverseSupplierPayment, voidSupplierInvoice } from "@/server/finance/payables";
+import { applySupplierCredit, voidSupplierCredit } from "@/server/finance/supplier-credits";
 
 const PATHS = ["/admin/payables"];
 
@@ -57,6 +58,28 @@ export async function voidSupplierInvoiceAction(_: ActionResult, fd: FormData): 
     async (user) => {
       await voidSupplierInvoice(user, f.str(fd, "id", 40), f.str(fd, "reason", 300));
       return done("Invoice voided");
+    },
+    PATHS,
+  );
+}
+
+export async function applySupplierCreditAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
+  return guarded(
+    "purchasing.approve",
+    async (user) => {
+      await applySupplierCredit(user, { creditId: f.str(fd, "creditId", 40), invoiceId: f.str(fd, "invoiceId", 40), amount: f.money(fd, "amount", "Amount") });
+      return done("Credit applied");
+    },
+    PATHS,
+  );
+}
+
+export async function voidSupplierCreditAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
+  return guarded(
+    "purchasing.approve",
+    async (user) => {
+      await voidSupplierCredit(user, f.str(fd, "creditId", 40), f.str(fd, "reason", 300));
+      return done("Credit voided");
     },
     PATHS,
   );

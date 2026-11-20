@@ -1,10 +1,20 @@
 # Implementation status
 
-_Last updated: 2026-11-20 (WP-20 acceptance, security and performance pass)._ This is an honest status.
+_Last updated: 2026-11-20 (Phase 2C business gaps; earlier: WP-20 acceptance, security and performance pass)._ This is an honest status.
 "Done" means the flow works against a real Postgres database and the checks listed below cover it.
 **This is not a production-readiness claim.** The app is deployed to Vercel (https://dabbabela.vercel.app) in
 sandbox mode only. There is no production domain, no live payment merchant keys, and no SMS or email provider.
 The external blockers listed further down are still open.
+
+## Production readiness Phase 2C (2026-11-20)
+- **Swap "pay the difference":** a dearer swap of a paid plan meal can be paid from credit or online (eSewa/Khalti, `SWAP_DIFFERENCE` payment); the swap is applied once on verified payment, credited to the wallet if it can no longer be applied, and cancelled if unpaid at the cut-off. Cheaper swaps credit the wallet (paid) or reduce what's owed (unpaid). Integration-tested (4).
+- **Company menu:** applies to every company member on `/menu`, dabba pages, plan swaps/extra meals and checkout; Build-a-Dabba refused only on company-billed orders. Integration-tested.
+- **Address + window change:** the window is checked against the new address's zone (staff reassign and customer plan address change). Integration-tested.
+- **Company-invoice receipts** are dated records (`InvoiceReceipt`), shown on the invoice and in payment history (legacy audit-only payments still listed), and included in settlements cash flow and the journal. Billed adjustments tracked by `invoiceLineId`; referrals record hold/decision notes and reward time; single-order coupon redemptions record their order. Integration-tested (5) + E2E `company-invoices`.
+- **Purchase returns → supplier credit:** optional credit on return (credit-note no., idempotent), apply to supplier invoices with over-apply guards, void the unapplied remainder, net due after credits in ageing; credits are not cash. Integration-tested (6) + E2E `purchasing`.
+- **Analytics:** order adjustments and unbilled company share shown as separate KPIs (not folded into recognised revenue until a VAT split exists).
+- **E2E added:** `purchasing`, `company-invoices`, `disruption` (bandh wizard). Vitest: 401 tests / 39 files (with Phase 2A merged).
+- Not built: online payment of company invoices (purpose `INVOICE`).
 
 ## Production readiness — Phase 2B security hardening (2026-11-20)
 | Item | Status | Notes |
@@ -18,11 +28,7 @@ The external blockers listed further down are still open.
 | Money endpoint IDOR review | ✅ | Fixed: refund order↔payment mismatch + per-order cap, kitchen scope on refund/payment actions, pages and money exports, privacy export needs PII, invoice company scope, ledger email leak, team CSV audit |
 
 ## Verification snapshot (2026-11-20, local, dev database + throwaway test schemas)
-_Phase 2B re-run: typecheck 0 errors; lint 0 errors (same 7 warnings); Vitest **395 / 395** in **36** files (new: `approvals`,
-`security-hardening` integration, `security-hardening` unit); `next build` ✅; Playwright full suite against the production build
-on :3200 — **42 / 44** (new `e2e/security.spec.ts` 2/2; the 2 failures are `public.spec` "coverage lookup flags an unserved
-area" on desktop + mobile, failing since commit 63ed281 made a catch-all "Rest of Kathmandu Valley" zone match every search,
-unrelated to 2B)._
+_Phase 2B (merged with 2A + 2C + 55a768a) re-run: typecheck 0 errors; lint 0 errors (same 7 warnings); Vitest **442 / 442** in **42** files, one fully green run (a per-file Prisma disconnect, `tests/setup-db.ts`, fixes the "Can't reach database server" flakes caused by leaked per-file pools exhausting max_connections); `next build` ✅; Playwright full suite against the production build on :3200 — **46 / 46** (incl. `e2e/security.spec.ts`, 2A/2C specs)._
 | Check | Result |
 |---|---|
 | `npm run typecheck` | ✅ 0 errors |
@@ -129,12 +135,13 @@ section is in [FEATURE_AUDIT.md](FEATURE_AUDIT.md#final-status-2026-11-20). Each
 | Checkout & payments | ✅ sandbox | eSewa sandbox verified (signature, replay and tamper tests). Khalti tested with a mocked lookup only (no key) |
 | Meal plans (calendar picks, versioned prices, swap, add a meal, skip, pause/resume, cancel with credit, one-click renewal) | ✅ | Auto-renewal deliberately not built (needs gateway tokenisation) |
 | Capacity & races (day, slot, box, dish; wallet; coupons) | ✅ | Advisory locks. Dish capacity time-zone bug fixed in WP-20 |
+| Wallet top-up (Phase 2A: eSewa / Khalti / bank, limits, ledger, history, admin, report, reconciliation, alerts) | ✅ sandbox, **flag off** | `flags.walletTopup` stays off until legal advice on NRB e-money rules. Credit only after server-side verification; one TOPUP ledger row per payment (concurrency-tested). Refunds to source only, capped at unspent credit (TOPUP_REVERSAL). Wallet + gateway split at checkout is refused with a clear message (not built). Refunds above the approval threshold still use the plain flow until Phase 2B maker-checker (TODO hook in `requestRefund`) |
 | Kitchen (lock, production dashboard, BOM requirements, batches → stock, prep sheets, KOT, QR labels, packing, QC, pause/shut) | ✅ | |
 | Inventory (ledger, lots + FEFO, units, locations, transfers, suppliers, POs, receiving, returns, valuation, alerts) | ✅ | Transfers are single-step |
 | Dispatch & rider (routes, distance bands, OTP proof, photo option, cash custody, failures, performance) | ✅ | Grouping only, no route optimisation (by design) |
 | Finance (payments, reconciliation, refunds with proof, expenses, payables, settlement, period close, cash flow, journal CSV, profitability, invoices) | ✅ | Gateway refunds are recorded manually. Journal accounts await the accountant's chart |
 | Corporate (contracts, budgets, eligibility, company menus, team orders, invoices with adjustments, portal) | ✅ | |
-| Analytics & reports (metric registry, drill-down, 27 reports, CSV/XLSX, kitchen-scoped, PII-masked, audited) | ✅ | |
+| Analytics & reports (metric registry, drill-down, 27 reports + wallet top-ups, CSV/XLSX, kitchen-scoped, PII-masked, audited) | ✅ | |
 | CMS (blocks, pages draft/publish/schedule/restore, nav, branding, SEO, policies with revisions, banners, testimonials, FAQ, media) | ✅ | |
 | CRM, promotions, referrals, campaigns (tracking only), alerts center + jobs, audit log, global search | ✅ | Campaign messages aren't sent (no provider) |
 | Notifications: in-app, email (Resend), SMS (Sparrow/Aakash) | 🟡 | In-app works. Email and SMS adapters are built but untested against real providers (no keys) |

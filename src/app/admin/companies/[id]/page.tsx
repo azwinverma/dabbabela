@@ -476,7 +476,7 @@ async function InvoicesTab({ companyId, canInvoice, canView, unpaid, today }: { 
         <Table className="rounded-none border-0 shadow-none">
           <thead>
             <tr>
-              <Th>Recorded</Th>
+              <Th>Received</Th>
               <Th>Invoice</Th>
               <Th>Amount · reference</Th>
             </tr>

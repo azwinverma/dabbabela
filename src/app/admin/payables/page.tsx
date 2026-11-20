@@ -10,7 +10,8 @@ import { Kpi } from "@/components/admin/finance/kit";
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
 import { AGEING_BUCKETS, INVOICE_STATUSES, payablesAgeing } from "@/server/finance/payables";
 import { FinBadge, field, label } from "../expenses/_shared";
-import { createSupplierInvoiceAction } from "./actions";
+import { listSupplierCredits } from "@/server/finance/supplier-credits";
+import { createSupplierInvoiceAction, voidSupplierCreditAction } from "./actions";
 
 export const metadata = { title: "Supplier payables" };
 const PER = 50;
@@ -18,7 +19,7 @@ const PER = 50;
 export default async function PayablesPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const user = await requirePermission("purchasing.view");
   const sp = await searchParams;
-  const tab = sp.tab === "ageing" ? "ageing" : "invoices";
+  const tab = sp.tab === "ageing" ? "ageing" : sp.tab === "credits" ? "credits" : "invoices";
   return (
     <div>
       <PageHeader title="Supplier payables" description="Supplier invoices, what has been paid against them and how old the balance is. Payments are never edited — a wrong one is reversed." />
@@ -27,9 +28,16 @@ export default async function PayablesPage({ searchParams }: { searchParams: Pro
         tabs={[
           { key: "invoices", label: "Invoices", href: "/admin/payables" },
           { key: "ageing", label: "Ageing", href: "/admin/payables?tab=ageing" },
+          { key: "credits", label: "Supplier credits", href: "/admin/payables?tab=credits" },
         ]}
       />
-      {tab === "ageing" ? <Ageing asOf={sp.asOf && isValidISODate(sp.asOf) ? sp.asOf : todayKTM()} /> : <Invoices sp={sp} canCreate={can(user, "purchasing.create")} />}
+      {tab === "ageing" ? (
+        <Ageing asOf={sp.asOf && isValidISODate(sp.asOf) ? sp.asOf : todayKTM()} />
+      ) : tab === "credits" ? (
+        <Credits sp={sp} canApprove={can(user, "purchasing.approve")} />
+      ) : (
+        <Invoices sp={sp} canCreate={can(user, "purchasing.create")} />
+      )}
     </div>
   );
 }
@@ -188,11 +196,20 @@ async function Ageing({ asOf }: { asOf: string }) {
         <button className="h-[38px] rounded-lg bg-ink px-4 text-sm font-semibold text-paper">Apply</button>
       </form>
       <div className="mb-5 grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <Kpi label="Total owed" value={rs(a.total)} formula="Σ (invoice total − paid) over open and partly paid supplier invoices dated on or before the date." />
+        <Kpi label="Total owed" value={rs(a.total)} formula="Σ (invoice total − settled) over open and partly paid supplier invoices dated on or before the date. Settled = payments + supplier credits applied." />
         {AGEING_BUCKETS.map((b) => (
           <Kpi key={b.key} label={b.label} value={rs(a.totals[b.key])} tone={b.key === "d90plus" && a.totals[b.key] ? "bad" : b.key !== "current" && a.totals[b.key] ? "warn" : "default"} formula="Age = days past the due date (or the invoice date when no due date was given)." />
         ))}
       </div>
+      {a.unappliedCredit > 0 && (
+        <p className="mb-4 text-sm text-ink-soft">
+          Unapplied supplier credit {rs(a.unappliedCredit)} · net owed after credits <span className="font-semibold">{rs(a.net)}</span>.{" "}
+          <Link href="/admin/payables?tab=credits" className="text-sindoor underline">
+            Apply credits
+          </Link>{" "}
+          to the suppliers&apos; invoices to settle them (credits are not cash).
+        </p>
+      )}
       <Panel title="By supplier" bodyClass="p-0">
         <Table className="rounded-none border-0 shadow-none">
           <thead>
@@ -204,6 +221,8 @@ async function Ageing({ asOf }: { asOf: string }) {
                 </Th>
               ))}
               <Th className="text-right">Total</Th>
+              <Th className="text-right">Unapplied credit</Th>
+              <Th className="text-right">Net due</Th>
             </tr>
           </thead>
           <tbody>
@@ -221,14 +240,106 @@ async function Ageing({ asOf }: { asOf: string }) {
                     </Td>
                   ))}
                   <Td className="text-right font-semibold tabular-nums">{rs(s.total)}</Td>
+                  <Td className="text-right tabular-nums text-saag-dark">{s.unappliedCredit ? `−${rs(s.unappliedCredit)}` : "—"}</Td>
+                  <Td className="text-right font-semibold tabular-nums">{rs(s.net)}</Td>
                 </tr>
               ))
             ) : (
-              <EmptyRow colSpan={AGEING_BUCKETS.length + 2}>Nothing owed to suppliers.</EmptyRow>
+              <EmptyRow colSpan={AGEING_BUCKETS.length + 4}>Nothing owed to suppliers.</EmptyRow>
             )}
           </tbody>
         </Table>
       </Panel>
+    </>
+  );
+}
+
+async function Credits({ sp, canApprove }: { sp: Record<string, string | undefined>; canApprove: boolean }) {
+  const all = sp.all === "1";
+  const [credits, suppliers] = await Promise.all([listSupplierCredits({ supplierId: sp.supplier || null, includeClosed: all }), db.supplier.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } })]);
+  return (
+    <>
+      <p className="mb-4 text-sm text-ink-soft">
+        Credits suppliers owe us, mostly for goods returned on a purchase order (posted from the PO page). Apply a credit from the supplier invoice&apos;s page: it settles the invoice but is not cash, so cash flow
+        only counts real supplier payments. Voiding cancels only the part not yet applied.
+      </p>
+      <form className="mb-4 flex flex-wrap items-end gap-2">
+        <input type="hidden" name="tab" value="credits" />
+        <select name="supplier" defaultValue={sp.supplier ?? ""} className="field w-48" aria-label="Supplier">
+          <option value="">Any supplier</option>
+          {suppliers.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="all" value="1" defaultChecked={all} /> Include applied / void
+        </label>
+        <button className="h-[38px] rounded-lg bg-ink px-4 text-sm font-semibold text-paper">Filter</button>
+      </form>
+      <Table>
+        <thead>
+          <tr>
+            <Th>Created</Th>
+            <Th>Supplier</Th>
+            <Th>PO</Th>
+            <Th>Credit note</Th>
+            <Th className="text-right">Amount</Th>
+            <Th className="text-right">Applied</Th>
+            <Th className="text-right">Left</Th>
+            <Th>Status</Th>
+            <Th>Applied to</Th>
+            {canApprove && <Th />}
+          </tr>
+        </thead>
+        <tbody>
+          {credits.length ? (
+            credits.map((c) => (
+              <tr key={c.id}>
+                <Td className="whitespace-nowrap">{formatDay(isoDate(c.createdAt))}</Td>
+                <Td>
+                  <Link className="text-sindoor hover:underline" href={`/admin/payables?supplier=${c.supplierId}`}>
+                    {c.supplier.name}
+                  </Link>
+                </Td>
+                <Td className="font-mono text-xs">{c.po ? <Link className="text-sindoor hover:underline" href={`/admin/inventory/purchases/${c.po.id}`}>{c.po.number}</Link> : "—"}</Td>
+                <Td className="font-mono text-xs">{c.number ?? "—"}</Td>
+                <Td className="text-right tabular-nums">{rs(c.amount)}</Td>
+                <Td className="text-right tabular-nums text-ink-mute">{rs(c.appliedAmount)}</Td>
+                <Td className="text-right font-semibold tabular-nums">{c.status === "VOID" ? "—" : rs(c.amount - c.appliedAmount)}</Td>
+                <Td>
+                  <FinBadge status={c.status} />
+                </Td>
+                <Td className="text-xs">
+                  {c.applications.length
+                    ? c.applications.map((a) => (
+                        <Link key={a.id} href={`/admin/payables/${a.invoice.id}`} className="mr-2 text-sindoor hover:underline">
+                          {a.invoice.number} ({rs(a.amount)})
+                        </Link>
+                      ))
+                    : "—"}
+                </Td>
+                {canApprove && (
+                  <Td>
+                    {(c.status === "OPEN" || c.status === "PARTIAL") && (
+                      <ActionForm action={voidSupplierCreditAction} className="flex items-center gap-1">
+                        <input type="hidden" name="creditId" value={c.id} />
+                        <input name="reason" required placeholder="Why" aria-label="Reason" className="field h-8 w-28 py-1 text-xs" />
+                        <SubmitButton size="sm" variant="outline" pendingText="…" confirm="Void what is left of this credit?">
+                          Void
+                        </SubmitButton>
+                      </ActionForm>
+                    )}
+                  </Td>
+                )}
+              </tr>
+            ))
+          ) : (
+            <EmptyRow colSpan={canApprove ? 10 : 9}>No supplier credits{all ? "" : " open"}.</EmptyRow>
+          )}
+        </tbody>
+      </Table>
     </>
   );
 }

@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { db } from "@/lib/db";
 import { getSection } from "@/lib/cms";
-import { getCurrentUser } from "@/lib/auth";
+import { activeCompany, getCurrentUser } from "@/lib/auth";
+import { memberCompanyMenu } from "@/server/corporate";
 import { getI18n } from "@/lib/i18n/server";
 import { pick } from "@/lib/i18n";
 import { getSettings } from "@/lib/settings";
@@ -22,6 +23,7 @@ export default async function BuildPage({ searchParams }: { searchParams: Promis
   const { locale, t } = await getI18n();
   const kitchenId = await defaultKitchenId();
   const [intro, groups, user, dates, settings] = await Promise.all([getSection("build.intro", locale), builderGroups({ kitchenId }), getCurrentUser(), dateOptions(14), getSettings()]);
+  const companyMenu = await memberCompanyMenu(activeCompany(user));
   const existing = edit && user ? await db.customBox.findFirst({ where: { id: edit, userId: user.id } }) : null;
   const data: BuilderGroup[] = groups
     .filter((g) => g.options.length)
@@ -49,6 +51,11 @@ export default async function BuildPage({ searchParams }: { searchParams: Promis
     <>
       <PageHero eyebrow={String(intro.eyebrow)} title={String(intro.title)} intro={String(intro.intro)} />
       <div className="container py-10">
+        {companyMenu?.buildBlocked && (
+          <p className="mb-6 max-w-3xl rounded-xl border-2 border-akash bg-akash-light px-4 py-3 text-sm" data-testid="company-menu-note">
+            {companyMenu.companyName} bills your lunches from its own menu, so a built dabba can&apos;t go on a company-billed order. You can still build and save one here.
+          </p>
+        )}
         {data.length === 0 ? (
           <EmptyState title="Build-a-Dabba isn't open yet" text="The kitchen hasn't set up dishes for building yet. Try this week's menu." />
         ) : (

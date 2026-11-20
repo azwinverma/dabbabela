@@ -10,13 +10,21 @@ import { addMealAction, quoteAddMealAction, renewPlanAction, swapMealAction, typ
 
 export type SwapChoice = { boxId: string; name: string; delta: number; current: boolean; soldOut: boolean };
 
-/** Swap one meal's dabba (before the day's cut-off). The price difference is shown before confirming. */
-export function SwapMeal({ orderId, options, cutoff, paid }: { orderId: string; options: SwapChoice[]; cutoff: string; paid: boolean }) {
+/**
+ * Swap one meal's dabba (before the day's cut-off). The price difference is shown before confirming.
+ * Dearer dabba on a paid meal: pay the difference from wallet credit, or with eSewa/Khalti (the swap is confirmed
+ * once the payment is verified). Cheaper dabba on a paid meal: the saving goes to wallet credit.
+ */
+export function SwapMeal({ orderId, options, cutoff, paid, wallet = 0, gateways = [] }: { orderId: string; options: SwapChoice[]; cutoff: string; paid: boolean; wallet?: number; gateways?: ("ESEWA" | "KHALTI")[] }) {
   const current = options.find((o) => o.current)?.boxId ?? "";
   const [boxId, setBoxId] = useState(current);
   const chosen = options.find((o) => o.boxId === boxId);
   const choices = options.filter((o) => !o.soldOut || o.current);
+  const payable = (chosen && paid && chosen.delta > 0 ? [...(wallet >= chosen.delta ? (["WALLET"] as const) : []), ...gateways] : []) as ("WALLET" | "ESEWA" | "KHALTI")[];
+  const [method, setMethod] = useState<string>("");
+  const pick = payable.includes(method as never) ? method : (payable[0] ?? "");
   if (choices.length < 2) return null;
+  const blocked = Boolean(chosen && paid && chosen.delta > 0 && payable.length === 0);
   return (
     <details className="text-sm">
       <summary className="cursor-pointer font-semibold text-akash">Swap dabba</summary>
@@ -37,15 +45,31 @@ export function SwapMeal({ orderId, options, cutoff, paid }: { orderId: string; 
           <p className="text-xs text-ink-soft">
             {chosen.delta > 0
               ? paid
-                ? `${rs(chosen.delta)} more — taken from your Dabba Bela credit.`
+                ? `${rs(chosen.delta)} more — pay the difference below. The swap is confirmed once it's paid.`
                 : `${rs(chosen.delta)} more — added to what you pay for the plan.`
               : paid
                 ? `${rs(-chosen.delta)} less — added to your Dabba Bela credit.`
                 : `${rs(-chosen.delta)} less to pay.`}
           </p>
         )}
-        <p className="text-xs text-ink-mute">Changes close at {cutoff} on the day.</p>
-        <SubmitButton size="sm" pendingText="Swapping…">Swap</SubmitButton>
+        {payable.length > 0 && (
+          <fieldset className="space-y-1">
+            <legend className="label">Pay the difference with</legend>
+            {payable.map((m) => (
+              <label key={m} className="flex items-center gap-2 text-xs">
+                <input type="radio" name="method" value={m} checked={pick === m} onChange={() => setMethod(m)} />
+                {m === "WALLET" ? `Dabba Bela credit (${rs(wallet)} available)` : METHOD_LABEL[m]}
+              </label>
+            ))}
+          </fieldset>
+        )}
+        {blocked && <p className="text-xs text-sindoor">Online payment isn&apos;t available right now and your credit is short — pick a dabba at your plan price.</p>}
+        <p className="text-xs text-ink-mute">Changes close at {cutoff} on the day. An unpaid swap is cancelled at the cut-off.</p>
+        {!blocked && (
+          <SubmitButton size="sm" pendingText="Swapping…">
+            {pick === "ESEWA" || pick === "KHALTI" ? "Continue to payment" : "Swap"}
+          </SubmitButton>
+        )}
       </ActionForm>
     </details>
   );

@@ -79,6 +79,13 @@ export default async function SubPage({ params }: { params: Promise<{ id: string
                                 <option key={i.box.id} value={i.box.id}>{i.box.name} · {rs(planMealPrice(s, i.price))}</option>
                               ))}
                             </select>
+                            {o.paymentStatus === "PAID" && (
+                              <select name="method" className="field mt-1" aria-label="If dearer, customer pays with" defaultValue="WALLET">
+                                <option value="WALLET">If dearer: take from customer credit</option>
+                                <option value="ESEWA">If dearer: customer pays online (eSewa)</option>
+                                <option value="KHALTI">If dearer: customer pays online (Khalti)</option>
+                              </select>
+                            )}
                           </ReasonForm>
                         </div>
                       </details>
@@ -134,7 +141,7 @@ export default async function SubPage({ params }: { params: Promise<{ id: string
             />
             {s.payments.map((p) => (
               <p key={p.id} className="mt-2 flex items-center justify-between rounded bg-paper px-2 py-1 text-xs">
-                <span>{p.reference} · {METHOD_LABEL[p.method]} · {rs(p.amount)}</span>
+                <span>{p.reference} · {METHOD_LABEL[p.method]} · {rs(p.amount)}{p.purpose === "SWAP_DIFFERENCE" ? ` · swap difference${p.note ? ` (${p.note})` : ""}` : ""}</span>
                 <Badge tone={PAYMENT_STATUS[p.status].tone}>{PAYMENT_STATUS[p.status].label}</Badge>
               </p>
             ))}

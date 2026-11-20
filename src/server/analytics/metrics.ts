@@ -55,7 +55,7 @@ export const METRICS = M({
     permission: "analytics.view",
     basis: "cash",
     definition:
-      "Σ amount of payments with paid time in the range (status Paid / Partly refunded / Refunded), excluding wallet-credit spends (already counted when first paid) and company-invoice placeholders (company money arrives against invoices).",
+      "Σ amount of payments with paid time in the range (status Paid / Partly refunded / Refunded), excluding wallet-credit spends (already counted when first paid) and company-invoice placeholders (company money arrives against invoices). Includes wallet top-ups: real money in, but a liability (customer credit) until spent — never revenue on its own; with a kitchen/zone filter top-ups drop out (they have no orders).",
   },
   refundsOut: { label: "Refunds paid out", unit: "paisa", permission: "analytics.view", basis: "refunds", definition: "Σ amount of refunds marked Processed in the range, paid back by gateway, bank or cash. Refunds as wallet credit move no cash and are excluded." },
   netCash: { label: "Net cash", unit: "paisa", permission: "analytics.view", basis: "cash", definition: "Cash collected − refunds paid out." },
@@ -78,7 +78,7 @@ export const METRICS = M({
     definition: "Snapshot right now, ignoring the date range: Σ (total − VAT − refunded) of orders paid (Paid / Partly refunded) but not yet delivered (Scheduled → Out for delivery, or Delivery failed) + wallet credit balance (Σ credit ledger). A liability, not income.",
   },
   deferredPlans: { label: "Deferred prepaid plan revenue", unit: "paisa", permission: "analytics.view", basis: "deferred", definition: "The part of deferred revenue that belongs to paid meal plans: paid, undelivered plan meals (total − VAT − refunded)." },
-  walletBalance: { label: "Wallet credit owed", unit: "paisa", permission: "analytics.view", definition: "Σ amount over the whole credit ledger (credits − spends). Customer-level, so it is shown only without kitchen/zone/company filters." },
+  walletBalance: { label: "Wallet credit owed", unit: "paisa", permission: "analytics.view", definition: "Σ amount over the whole credit ledger (credits − spends), including wallet top-ups (TOPUP / TOPUP_REVERSAL rows). Customer-level, so it is shown only without kitchen/zone/company filters." },
   cancelled: { label: "Cancelled order value", unit: "paisa", permission: "analytics.view", basis: "cancelled", definition: "Σ total of orders Cancelled with delivery date in the range (single orders and plan meals)." },
   bookedByDelivery: {
     label: "Booked by delivery date",
@@ -87,7 +87,7 @@ export const METRICS = M({
     basis: "orders",
     definition: "Σ (subtotal + delivery fee) of orders Scheduled → Delivered by delivery date (the figure formerly labelled “gross sales”). Includes meals not yet delivered and VAT, so it is NOT revenue.",
   },
-  receivablesPending: { label: "Awaiting payment", unit: "paisa", permission: "analytics.view", basis: "receivables", definition: "Σ amount of payments still Pending right now (online not completed, cash not yet collected, transfer not verified)." },
+  receivablesPending: { label: "Awaiting payment", unit: "paisa", permission: "analytics.view", basis: "receivables", definition: "Σ amount of payments still Pending right now (online not completed, cash not yet collected, transfer not verified). Unpaid wallet top-ups are excluded — nobody owes us for credit they haven't bought." },
   receivablesCompanyUnbilled: {
     label: "Company share not yet invoiced",
     unit: "paisa",
