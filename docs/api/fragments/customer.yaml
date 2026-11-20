@@ -1,0 +1,1154 @@
+# OpenAPI 3.1 fragment — authenticated customer endpoints of /api/v1 (merged into docs/api/openapi.yaml).
+# Shared components referenced here are defined in the main file:
+#   #/components/schemas/Error, #/components/responses/{Unauthorized,Forbidden,NotFound,ValidationFailed,RateLimited},
+#   #/components/parameters/{IdempotencyKey,Cursor,Limit}, security scheme bearerAuth.
+# Money = integer paisa. Service dates = YYYY-MM-DD (Kathmandu). Timestamps = ISO-8601 UTC.
+# Every endpoint here requires `Authorization: Bearer <token>` and acts only on the caller's own records
+# (another customer's id → 404 NOT_FOUND).
+
+paths:
+  /profile:
+    get:
+      tags: [Account]
+      summary: The caller's profile and food preferences
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/Profile" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [Account]
+      summary: Update name / phone / language / marketing opt-in (omitted fields unchanged)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 80 }
+                phone: { type: string, description: "Nepal mobile 98/97/96 + 8 digits; changing it clears phoneVerified" }
+                email: { type: string, description: "Only for phone-only accounts (canSetEmail), once" }
+                locale: { type: string, enum: [en, ne] }
+                marketingOptIn: { type: boolean }
+      responses:
+        "200": { description: "Saved", content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { message: { type: string }, profile: { $ref: "#/components/schemas/Profile" } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /profile/preferences:
+    patch:
+      tags: [Account]
+      summary: Food preferences (diet, spice, allergies printed on labels, notes)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                diet: { type: string, enum: [ANY, VEG, EGG_OK, VEGAN] }
+                spiceTolerance: { type: integer, minimum: 0, maximum: 4 }
+                allergies: { type: array, items: { type: string }, description: "Allergen codes; unknown codes ignored" }
+                avoidOnionGarlic: { type: boolean }
+                dietaryNotes: { type: string, maxLength: 300 }
+      responses:
+        "200": { $ref: "#/components/responses/Message" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+  /profile/notification-preferences:
+    get:
+      tags: [Account]
+      summary: Topic × channel notification switches
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/NotificationPreferences" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [Account]
+      summary: Replace all switches (unlisted = off). Marketing opt-in follows MARKETING email/SMS.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [preferences]
+              properties:
+                preferences: { type: array, items: { $ref: "#/components/schemas/NotificationPreference" } }
+      responses:
+        "200": { description: "Saved", content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { message: { type: string }, preferences: { type: array, items: { $ref: "#/components/schemas/NotificationPreference" } } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /addresses:
+    get:
+      tags: [Account]
+      summary: Saved addresses (default first) with their delivery zone
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/Address" } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Account]
+      summary: Add an address (max 10); zone linked from area/ward/municipality
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AddressInput" } } } }
+      responses:
+        "201": { $ref: "#/components/responses/AddressSaved" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /addresses/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    patch:
+      tags: [Account]
+      summary: Update an address (omitted fields keep their value; re-validated, zone re-linked)
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AddressInput" } } } }
+      responses:
+        "200": { $ref: "#/components/responses/AddressSaved" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Account]
+      summary: Remove (archive) an address — refused while a meal plan delivers there
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/Message" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "Refused (live plan)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /addresses/{id}/default:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Account]
+      summary: Make this the default address
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/Message" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /cart/quote:
+    post:
+      tags: [Orders]
+      summary: Price a cart on the server (menu, cut-offs, capacity, company share, coupon, delivery, tax)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines]
+              properties:
+                lines: { type: array, minItems: 1, maxItems: 60, items: { $ref: "#/components/schemas/CartLine" } }
+                addressId: { type: [string, "null"] }
+                couponCode: { type: [string, "null"], maxLength: 30 }
+      responses:
+        "200": { description: "Quote (check `ok`, `error`, `addressProblem`, per-line `problem`)", content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/CartQuote" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+  /orders:
+    get:
+      tags: [Orders]
+      summary: The caller's orders (cursor pagination)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: scope, in: query, schema: { type: string, enum: [upcoming, past, all], default: all } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/OrderSummary" } }, meta: { $ref: "#/components/schemas/CursorMeta" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Orders]
+      summary: Place a cart order (money-moving — Idempotency-Key required)
+      description: Re-quoted on the server. `next = PAY` → POST /payments/{payment.id}/start (gateway) or /proof (bank); `DONE` → confirmed.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines, addressId, method]
+              properties:
+                lines: { type: array, minItems: 1, maxItems: 60, items: { $ref: "#/components/schemas/CartLine" } }
+                addressId: { type: string }
+                slotId: { type: [string, "null"] }
+                couponCode: { type: [string, "null"], maxLength: 30 }
+                method: { $ref: "#/components/schemas/PaymentMethod" }
+                notes: { type: [string, "null"], maxLength: 500 }
+      responses:
+        "201": { description: "Placed (or replayed — header Idempotent-Replayed true)", content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/PlaceOrderResult" } } } } } }
+        "400": { description: "Missing/invalid Idempotency-Key", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { description: "Same key still in progress (IDEMPOTENCY_IN_PROGRESS)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "422": { description: "Validation failed, order rejected (ORDER_REJECTED, CAPACITY_REJECTED, ACCOUNT_REJECTED) or IDEMPOTENCY_KEY_REUSED", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /orders/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Orders]
+      summary: Order detail (items, delivery snapshot, money, payment, refunds, adjustments, feedback, window, actions)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/OrderDetail" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /orders/{id}/timeline:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Orders]
+      summary: Status history + delivery milestones (no staff ids, photos or internal notes)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/OrderTimeline" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /orders/{id}/cancel:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+    post:
+      tags: [Orders]
+      summary: Cancel a single order before the cut-off (money-moving — paid money → credit or refund request)
+      security: [{ bearerAuth: [] }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { reason: { type: string, maxLength: 300 } } } } } }
+      responses:
+        "200": { description: "Cancelled", content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { settlement: { type: string, enum: [CREDIT, REFUND, NONE] }, amount: { type: integer }, message: { type: string } } } } } } } }
+        "400": { description: "Missing Idempotency-Key", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "Too late / not cancellable (ORDER_REJECTED)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /orders/{id}/skip:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+    post:
+      tags: [Subscriptions]
+      summary: Skip a plan meal (EXTEND → moved to plan end; CREDIT → value to wallet). Money-moving.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "Skipped", content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { policy: { type: string, enum: [EXTEND, CREDIT] }, moved: { type: array, items: { type: string, format: date } }, credited: { type: integer }, message: { type: string } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "Rejected", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /orders/{id}/unskip:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Subscriptions]
+      summary: Bring back a skipped plan meal before the cut-off (not once credited)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/Message" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "Rejected", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /orders/{id}/swap-options:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Subscriptions]
+      summary: Dabbas a plan meal can be swapped to, with price difference (delta > 0 = pay more)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      date: { type: string, format: date }
+                      cutoff: { type: string, description: "HH:mm Kathmandu" }
+                      options: { type: array, items: { type: object, properties: { boxId: { type: string }, name: { type: string }, isVeg: { type: boolean }, price: { type: integer }, delta: { type: integer }, current: { type: boolean }, soldOut: { type: boolean } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /orders/{id}/swap:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+    post:
+      tags: [Subscriptions]
+      summary: Swap a plan meal's dabba (money-moving; PAY_ONLINE → pay paymentId to apply the swap)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [boxId]
+              properties:
+                boxId: { type: string }
+                method: { type: [string, "null"], enum: [WALLET, ESEWA, KHALTI, null] }
+      responses:
+        "200":
+          description: Swapped / pending payment
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      changed: { type: boolean }
+                      delta: { type: integer }
+                      settlement: { type: string, enum: [NONE, WALLET_CHARGE, WALLET_CREDIT, DUE_LATER, PAY_ONLINE, PAID_ONLINE] }
+                      paymentId: { type: [string, "null"] }
+                      next: { type: string, enum: [PAY, DONE] }
+                      message: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "Rejected", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /orders/{id}/feedback:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Orders]
+      summary: Rate a delivered dabba (upsert)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating]
+              properties:
+                rating: { type: integer, minimum: 1, maximum: 5 }
+                taste: { type: [integer, "null"], minimum: 1, maximum: 5 }
+                portion: { type: [integer, "null"], minimum: 1, maximum: 5 }
+                onTime: { type: [boolean, "null"] }
+                comment: { type: [string, "null"], maxLength: 1000 }
+                publishConsent: { type: boolean }
+      responses:
+        "200": { $ref: "#/components/responses/Message" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /payments:
+    get:
+      tags: [Payments]
+      summary: The caller's payments (cursor pagination); meta.totals = paid / refunded / pending / wallet
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: "#/components/parameters/Cursor" }, { $ref: "#/components/parameters/Limit" }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/PaymentListItem" } }, meta: { type: object, properties: { nextCursor: { type: [string, "null"] }, totals: { type: object, additionalProperties: { type: integer } } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /payments/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Payments]
+      summary: Payment status (poll after the gateway browser closes) + what the pay screen needs
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/PaymentDetail" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /payments/{id}/start:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Payments]
+      summary: Start the gateway checkout — returns an eSewa form or a Khalti URL to open in an in-app browser
+      description: Close the browser when it navigates to any of `returnUrlPrefixes`, then poll GET /payments/{id}. The server verifies with the gateway; the redirect proves nothing.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "Checkout payload", content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/PaymentStart" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "PAYMENT_REJECTED (expired, nothing to pay, gateway unreachable)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /payments/{id}/method:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+    post:
+      tags: [Payments]
+      summary: Switch an unpaid payment's method (money-moving — WALLET settles from credit)
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [method], properties: { method: { $ref: "#/components/schemas/PaymentMethod" } } } } } }
+      responses:
+        "200": { description: "Switched", content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { status: { type: string }, method: { type: string }, settled: { type: boolean }, next: { type: string, enum: [PAY, DONE] } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "PAYMENT_REJECTED", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /payments/{id}/proof:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Payments]
+      summary: Upload a bank-transfer proof (multipart)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [proof, reference]
+              properties:
+                proof: { type: string, format: binary, description: "JPG/PNG/WEBP/AVIF/PDF ≤ 5 MB" }
+                reference: { type: string, minLength: 3, maxLength: 100 }
+      responses:
+        "200": { $ref: "#/components/responses/Message" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /subscriptions/quote:
+    post:
+      tags: [Subscriptions]
+      summary: Price a meal plan
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PlanInput" } } } }
+      responses:
+        "200": { description: "Quote", content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/PlanQuote" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+  /subscriptions:
+    get:
+      tags: [Subscriptions]
+      summary: The caller's meal plans
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/SubscriptionSummary" } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Subscriptions]
+      summary: Start a meal plan (money-moving — Idempotency-Key required)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/PlanInput"
+                - type: object
+                  required: [addressId, method]
+                  properties:
+                    slotId: { type: [string, "null"] }
+                    method: { $ref: "#/components/schemas/PaymentMethod" }
+                    notes: { type: [string, "null"], maxLength: 500 }
+      responses:
+        "201": { description: "Created (or replayed)", content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/SubscriptionPurchase" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { description: "Rejected / validation / IDEMPOTENCY_KEY_REUSED", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /subscriptions/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Subscriptions]
+      summary: Plan detail (meals with windows, pending swap payments, extra meals, policies, changes)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/SubscriptionDetail" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /subscriptions/{id}/pause:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Subscriptions]
+      summary: Pause a plan
+      security: [{ bearerAuth: [] }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { from: { type: string, format: date }, reason: { type: string, maxLength: 300 } } } } } }
+      responses:
+        "200": { description: "Paused", content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { paused: { type: integer }, message: { type: string } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "Rejected", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /subscriptions/{id}/resume:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Subscriptions]
+      summary: Resume a paused plan
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "Resumed", content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { rescheduled: { type: integer }, message: { type: string } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "Rejected", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /subscriptions/{id}/cancel:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+    post:
+      tags: [Subscriptions]
+      summary: Cancel a plan (money-moving — unused paid meals settled per policy)
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 3, maxLength: 500 } } } } } }
+      responses:
+        "200": { description: "Cancelled", content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { cancelled: { type: integer }, credit: { type: integer }, settlement: { type: string }, message: { type: string } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "Rejected (e.g. STAFF_ONLY policy)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /subscriptions/{id}/address:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    put:
+      tags: [Subscriptions]
+      summary: Move upcoming meals to another of the caller's addresses
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [addressId], properties: { addressId: { type: string } } } } } }
+      responses:
+        "200": { description: "Moved", content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { moved: { type: integer }, message: { type: string } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "Rejected", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /subscriptions/{id}/renewal-quote:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { name: weeks, in: query, schema: { type: integer, minimum: 1, maximum: 26 } }]
+    get:
+      tags: [Subscriptions]
+      summary: Preview renewing a plan
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { existingRenewal: { type: [object, "null"] }, addressId: { type: string }, startDate: { type: string, format: date }, weeks: { type: integer }, quote: { $ref: "#/components/schemas/PlanQuote" } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "Can't renew", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /subscriptions/{id}/renew:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+    post:
+      tags: [Subscriptions]
+      summary: Renew a plan (money-moving; never auto-charged)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [method]
+              properties:
+                method: { $ref: "#/components/schemas/PaymentMethod" }
+                weeks: { type: [integer, "null"], minimum: 1, maximum: 26 }
+                slotId: { type: [string, "null"] }
+      responses:
+        "200": { description: "Renewed (replayed = existing renewal)", content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/SubscriptionPurchase" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "Rejected", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /subscriptions/{id}/meals/quote:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Subscriptions]
+      summary: Price one extra meal for a plan
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ExtraMealInput" } } } }
+      responses:
+        "200": { description: "Quote", content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { name: { type: string }, unitPrice: { type: integer }, deliveryFee: { type: integer }, tax: { type: integer }, total: { type: integer }, taxInclusive: { type: boolean } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "Rejected", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /subscriptions/{id}/meals:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+    post:
+      tags: [Subscriptions]
+      summary: Buy one extra meal for a plan (money-moving)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ExtraMealInput"
+                - type: object
+                  required: [method]
+                  properties: { method: { $ref: "#/components/schemas/PaymentMethod" } }
+      responses:
+        "201": { description: "Added", content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { order: { type: [object, "null"] }, payment: { $ref: "#/components/schemas/PaymentBrief" }, needsPayment: { type: boolean }, next: { type: string, enum: [PAY, DONE] } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "Rejected", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /wallet:
+    get:
+      tags: [Wallet]
+      summary: Balance (paisa) and top-up options/limits when top-ups are on
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/Wallet" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /wallet/ledger:
+    get:
+      tags: [Wallet]
+      summary: Wallet history (append-only), newest first
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: "#/components/parameters/Cursor" }, { $ref: "#/components/parameters/Limit" }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/LedgerEntry" } }, meta: { type: object, properties: { nextCursor: { type: [string, "null"] }, balance: { type: integer } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /wallet/topups:
+    post:
+      tags: [Wallet]
+      summary: Start a wallet top-up (money-moving; 404 FEATURE_DISABLED while walletTopup is off)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, method]
+              properties:
+                amount: { type: integer, description: paisa }
+                method: { type: string, enum: [ESEWA, KHALTI, BANK_TRANSFER] }
+      responses:
+        "201": { description: "Started — then POST /payments/{payment.id}/start or /proof", content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { payment: { $ref: "#/components/schemas/PaymentBrief" }, replayed: { type: boolean }, next: { type: string, enum: [PAY, DONE] } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: "FEATURE_DISABLED", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "422": { description: "TOPUP_REJECTED (limits, method)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /wallet/topups/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Wallet]
+      summary: Top-up status (poll after the gateway closes)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/Topup" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /wallet/topups/{id}/cancel:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Wallet]
+      summary: Withdraw an unpaid top-up (not after a bank proof)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/Message" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "TOPUP_REJECTED", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /notifications:
+    get:
+      tags: [Account]
+      summary: In-app notifications (cursor pagination; meta.unread)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: "#/components/parameters/Cursor" }, { $ref: "#/components/parameters/Limit" }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/Notification" } }, meta: { type: object, properties: { nextCursor: { type: [string, "null"] }, unread: { type: integer } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /notifications/read:
+    post:
+      tags: [Account]
+      summary: Mark one (id) or all notifications read
+      security: [{ bearerAuth: [] }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { id: { type: string } } } } } }
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { marked: { type: integer }, message: { type: string } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /referrals:
+    get:
+      tags: [Customer]
+      summary: Refer a friend — own code, share text, friends, rewards, canClaim
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/Referrals" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /referrals/claim:
+    post:
+      tags: [Customer]
+      summary: Link a friend's code before the first order
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [code], properties: { code: { type: string, maxLength: 40 } } } } } }
+      responses:
+        "200": { description: "Linked", content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { status: { type: string }, message: { type: string } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { description: "REFERRAL_REJECTED", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /support/tickets:
+    get:
+      tags: [Customer]
+      summary: The caller's support conversations
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/TicketSummary" } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Customer]
+      summary: Open a ticket (optionally about one of the caller's orders)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject, body]
+              properties:
+                subject: { type: string, minLength: 3, maxLength: 160 }
+                body: { type: string, minLength: 5, maxLength: 4000 }
+                category: { type: string, enum: [ORDER, PAYMENT, DELIVERY, FOOD, ACCOUNT, CORPORATE, GENERAL] }
+                orderId: { type: [string, "null"] }
+      responses:
+        "201": { description: "Opened", content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { id: { type: string }, number: { type: string }, status: { type: string }, message: { type: string } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+  /support/tickets/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Customer]
+      summary: Ticket with its conversation (internal staff notes never included)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/TicketDetail" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /support/tickets/{id}/messages:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Customer]
+      summary: Reply on a ticket
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [body], properties: { body: { type: string, maxLength: 4000 } } } } } }
+      responses:
+        "200": { $ref: "#/components/responses/Message" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "Closed ticket / validation", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /saved-boxes:
+    get:
+      tags: [Customer]
+      summary: Saved Build-a-Dabba boxes (order with cart line kind=custom)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { type: object, properties: { id: { type: string }, name: { type: string }, price: { type: integer }, items: { type: array, items: { type: object } }, updatedAt: { type: string, format: date-time } } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /privacy/export:
+    get:
+      tags: [Account]
+      summary: Everything held about the caller (same JSON as the website download), audited
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { type: object, additionalProperties: true } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /privacy/requests:
+    get:
+      tags: [Account]
+      summary: The caller's privacy requests
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { type: object, properties: { id: { type: string }, type: { type: string, enum: [EXPORT, DELETE] }, status: { type: string, enum: [OPEN, DONE, REJECTED] }, createdAt: { type: string, format: date-time }, completedAt: { type: [string, "null"], format: date-time } } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /privacy/deletion-request:
+    post:
+      tags: [Account]
+      summary: Ask for account deletion (confirm = "DELETE")
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [confirm], properties: { confirm: { type: string, const: DELETE }, note: { type: [string, "null"], maxLength: 500 } } } } } }
+      responses:
+        "201": { description: "Requested", content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { requested: { type: boolean }, message: { type: string } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+components:
+  responses:
+    Message:
+      description: OK
+      content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { message: { type: string } } } } } } }
+    AddressSaved:
+      description: Saved
+      content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { message: { type: string }, covered: { type: boolean }, address: { $ref: "#/components/schemas/Address" } } } } } } }
+  schemas:
+    PaymentMethod: { type: string, enum: [ESEWA, KHALTI, BANK_TRANSFER, CASH, COMPANY_INVOICE, WALLET] }
+    CursorMeta: { type: object, properties: { nextCursor: { type: [string, "null"], description: "Pass back as ?cursor= for the next page; null = last page" } } }
+    Profile:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: [string, "null"] }
+        canSetEmail: { type: boolean }
+        phone: { type: [string, "null"] }
+        phoneVerified: { type: boolean }
+        locale: { type: string }
+        marketingOptIn: { type: boolean }
+        preferences: { type: object, properties: { diet: { type: string }, spiceTolerance: { type: integer }, allergies: { type: array, items: { type: string } }, avoidOnionGarlic: { type: boolean }, dietaryNotes: { type: [string, "null"] } } }
+        createdAt: { type: string, format: date-time }
+    NotificationPreference:
+      type: object
+      required: [topic, channel, enabled]
+      properties:
+        topic: { type: string, enum: [ORDER_UPDATES, PLAN_REMINDERS, MARKETING] }
+        channel: { type: string, enum: [IN_APP, EMAIL, SMS] }
+        enabled: { type: boolean }
+    NotificationPreferences:
+      type: object
+      properties:
+        topics: { type: array, items: { type: string } }
+        channels: { type: array, items: { type: string } }
+        preferences: { type: array, items: { $ref: "#/components/schemas/NotificationPreference" } }
+    AddressInput:
+      type: object
+      properties:
+        label: { type: string, maxLength: 40 }
+        type: { type: string, enum: [HOME, OFFICE, SHOP, COLLEGE, SITE, OTHER] }
+        recipientName: { type: string, maxLength: 80 }
+        phone: { type: string, description: Nepal phone }
+        placeName: { type: [string, "null"] }
+        line1: { type: string, maxLength: 200 }
+        area: { type: string, maxLength: 80, description: "Locality, e.g. Baneshwor — used to link the delivery zone" }
+        ward: { type: [integer, "null"] }
+        municipality: { type: [string, "null"] }
+        city: { type: string }
+        landmark: { type: [string, "null"] }
+        instructions: { type: [string, "null"] }
+        lat: { type: [number, "null"], description: "Optional pin inside Nepal (both or neither)" }
+        lng: { type: [number, "null"] }
+        isDefault: { type: boolean }
+    Address:
+      type: object
+      properties:
+        id: { type: string }
+        label: { type: string }
+        type: { type: string }
+        recipientName: { type: string }
+        phone: { type: string }
+        placeName: { type: [string, "null"] }
+        line1: { type: string }
+        area: { type: string }
+        ward: { type: [integer, "null"] }
+        municipality: { type: [string, "null"] }
+        city: { type: string }
+        landmark: { type: [string, "null"] }
+        instructions: { type: [string, "null"] }
+        lat: { type: [number, "null"] }
+        lng: { type: [number, "null"] }
+        isDefault: { type: boolean }
+        covered: { type: boolean }
+        zone: { type: [object, "null"], properties: { id: { type: string }, name: { type: string } } }
+        createdAt: { type: string, format: date-time }
+    CartLine:
+      type: object
+      required: [kind, id, date, qty]
+      properties:
+        kind: { type: string, enum: [box, custom], description: "box = LunchBox from the menu; custom = saved Build-a-Dabba" }
+        id: { type: string }
+        date: { type: string, format: date }
+        qty: { type: integer, minimum: 1, maximum: 25 }
+        subs: { type: array, maxItems: 4, items: { type: string }, description: Substitution option ids }
+    CartQuote:
+      type: object
+      properties:
+        ok: { type: boolean }
+        error: { type: [string, "null"] }
+        addressProblem: { type: [string, "null"] }
+        lines: { type: array, items: { type: object, properties: { key: { type: string }, kind: { type: string }, id: { type: string }, date: { type: string, format: date }, qty: { type: integer }, name: { type: string }, unitPrice: { type: integer }, diet: { type: string }, allergens: { type: array, items: { type: string } }, customizations: { type: array, items: { type: string } }, problem: { type: [string, "null"] }, warning: { type: [string, "null"] } } } }
+        days: { type: array, items: { type: object, properties: { date: { type: string, format: date }, subtotal: { type: integer }, deliveryFee: { type: integer }, discount: { type: integer }, tax: { type: integer }, total: { type: integer }, companyShare: { type: integer }, customerShare: { type: integer } } } }
+        subtotal: { type: integer }
+        deliveryFee: { type: integer }
+        companyDiscount: { type: integer }
+        couponDiscount: { type: integer }
+        tax: { type: integer }
+        taxInclusive: { type: boolean }
+        total: { type: integer }
+        companyShare: { type: integer }
+        customerShare: { type: integer }
+        couponCode: { type: [string, "null"] }
+        couponError: { type: [string, "null"] }
+        company: { type: [object, "null"], properties: { name: { type: string }, billingMode: { type: string } } }
+        kitchenId: { type: [string, "null"] }
+    PaymentBrief:
+      type: object
+      properties:
+        id: { type: string }
+        reference: { type: string }
+        method: { $ref: "#/components/schemas/PaymentMethod" }
+        status: { type: string, enum: [PENDING, PAID, FAILED, CANCELLED, PARTIALLY_REFUNDED, REFUNDED] }
+        amount: { type: integer }
+        purpose: { type: string, enum: [ORDER, SUBSCRIPTION, WALLET_TOPUP, INVOICE, SWAP_DIFFERENCE] }
+    PlaceOrderResult:
+      type: object
+      properties:
+        payment: { $ref: "#/components/schemas/PaymentBrief" }
+        orders: { type: array, items: { type: object, properties: { id: { type: string }, number: { type: string }, status: { type: string }, deliveryDate: { type: string, format: date }, total: { type: integer }, customerShare: { type: integer } } } }
+        needsPayment: { type: boolean }
+        next: { type: string, enum: [PAY, DONE] }
+    OrderSummary:
+      type: object
+      properties:
+        id: { type: string }
+        number: { type: string }
+        status: { type: string }
+        paymentStatus: { type: string }
+        source: { type: string }
+        deliveryDate: { type: string, format: date }
+        slotLabel: { type: [string, "null"] }
+        placeName: { type: [string, "null"] }
+        area: { type: string }
+        total: { type: integer }
+        customerShare: { type: integer }
+        companyShare: { type: integer }
+        subscriptionId: { type: [string, "null"] }
+        items: { type: array, items: { type: object, properties: { name: { type: string }, quantity: { type: integer } } } }
+        payment: { type: [object, "null"], properties: { id: { type: string }, method: { type: string }, status: { type: string } } }
+        deliveryOtp: { type: [string, "null"], description: "Hand-off code; only while OUT_FOR_DELIVERY" }
+        createdAt: { type: string, format: date-time }
+    OrderDetail:
+      type: object
+      properties:
+        id: { type: string }
+        number: { type: string }
+        code: { type: string }
+        status: { type: string }
+        paymentStatus: { type: string }
+        source: { type: string }
+        deliveryDate: { type: string, format: date }
+        slotLabel: { type: [string, "null"] }
+        deliveryOtp: { type: [string, "null"] }
+        delivery: { type: object, additionalProperties: true }
+        items: { type: array, items: { type: object, additionalProperties: true } }
+        money: { type: object, additionalProperties: { type: [integer, boolean, string, "null"] } }
+        allergenNote: { type: [string, "null"] }
+        notes: { type: [string, "null"] }
+        payment: { type: [object, "null"] }
+        subscription: { type: [object, "null"] }
+        refunds: { type: array, items: { type: object } }
+        adjustments: { type: array, items: { type: object } }
+        feedback: { type: [object, "null"] }
+        window: { type: object, properties: { open: { type: boolean }, cutoff: { type: string } } }
+        actions: { type: object, properties: { cancel: { type: boolean }, skip: { type: boolean }, unskip: { type: boolean }, swap: { type: boolean }, feedback: { type: boolean }, pay: { type: boolean } } }
+        createdAt: { type: string, format: date-time }
+        deliveredAt: { type: [string, "null"], format: date-time }
+        cancelledAt: { type: [string, "null"], format: date-time }
+    OrderTimeline:
+      type: object
+      properties:
+        orderId: { type: string }
+        status: { type: string }
+        steps: { type: array, items: { type: string } }
+        currentStep: { type: integer, description: "-1 when off the step line (cancelled, skipped, failed)" }
+        events: { type: array, items: { type: object, properties: { id: { type: string }, kind: { type: string, enum: [STATUS, DELIVERY] }, at: { type: string, format: date-time }, fromStatus: { type: [string, "null"] }, toStatus: { type: [string, "null"] }, type: { type: [string, "null"] }, note: { type: [string, "null"] } } } }
+    PaymentListItem:
+      type: object
+      properties:
+        id: { type: string }
+        reference: { type: string }
+        method: { type: string }
+        status: { type: string }
+        purpose: { type: string }
+        amount: { type: integer }
+        refundedAmount: { type: integer }
+        paidAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        subscription: { type: [object, "null"] }
+        firstOrder: { type: [object, "null"] }
+        orderCount: { type: integer }
+    PaymentDetail:
+      type: object
+      properties:
+        id: { type: string }
+        reference: { type: string }
+        purpose: { type: string }
+        method: { type: string }
+        status: { type: string }
+        amount: { type: integer }
+        refundedAmount: { type: integer }
+        paidAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        expired: { type: boolean }
+        proofSubmitted: { type: boolean }
+        awaitingVerification: { type: boolean }
+        lastAttempt: { type: [object, "null"] }
+        orders: { type: array, items: { type: object } }
+        subscription: { type: [object, "null"] }
+        switchableMethods: { type: array, items: { $ref: "#/components/schemas/PaymentMethod" } }
+        bankTransfer: { type: [object, "null"], properties: { bankDetails: { type: string }, qrImage: { type: [string, "null"] } } }
+    PaymentStart:
+      type: object
+      properties:
+        kind: { type: string, enum: [esewa, khalti, manual, done] }
+        method: { type: [string, "null"], enum: [POST, GET, null], description: "esewa: auto-submit a form POST to `action` with `fields`" }
+        action: { type: [string, "null"] }
+        fields: { type: [object, "null"], additionalProperties: { type: string } }
+        url: { type: [string, "null"], description: "khalti: open this URL" }
+        returnUrlPrefixes: { type: array, items: { type: string }, description: "Close the in-app browser when it navigates to any of these" }
+    PlanInput:
+      type: object
+      required: [planId, startDate, days]
+      properties:
+        planId: { type: string }
+        startDate: { type: string, format: date }
+        days: { type: array, items: { type: string, enum: [SUN, MON, TUE, WED, THU, FRI, SAT] } }
+        weeks: { type: [integer, "null"], minimum: 1, maximum: 26 }
+        picks: { type: object, additionalProperties: { type: object, properties: { boxId: { type: string }, customBoxId: { type: string } } }, description: "Per date (YYYY-MM-DD) dabba choice; omitted = chef's rotation" }
+        vegOnly: { type: boolean }
+        addressId: { type: [string, "null"] }
+        couponCode: { type: [string, "null"] }
+    PlanQuote:
+      type: object
+      properties:
+        ok: { type: boolean }
+        error: { type: [string, "null"] }
+        addressProblem: { type: [string, "null"] }
+        meals: { type: array, items: { type: object, properties: { date: { type: string, format: date }, name: { type: string }, price: { type: integer }, surcharge: { type: integer }, followsRotation: { type: boolean }, problem: { type: [string, "null"] }, boxId: { type: [string, "null"] }, customBoxId: { type: [string, "null"] } } } }
+        skippedDates: { type: array, items: { type: string, format: date } }
+        closures: { type: array, items: { type: object, properties: { date: { type: string, format: date }, name: { type: string } } } }
+        mealsTotal: { type: integer }
+        perMealEffective: { type: integer }
+        subtotal: { type: integer }
+        deliveryFee: { type: integer }
+        discount: { type: integer }
+        couponDiscount: { type: integer }
+        companyDiscount: { type: integer }
+        tax: { type: integer }
+        taxInclusive: { type: boolean }
+        total: { type: integer }
+        companyShare: { type: integer }
+        customerShare: { type: integer }
+        savings: { type: integer }
+        endDate: { type: [string, "null"], format: date }
+        couponCode: { type: [string, "null"] }
+        couponError: { type: [string, "null"] }
+    SubscriptionSummary:
+      type: object
+      properties:
+        id: { type: string }
+        reference: { type: string }
+        status: { type: string, enum: [PENDING_PAYMENT, ACTIVE, PAUSED, COMPLETED, CANCELLED] }
+        plan: { type: object, properties: { id: { type: string }, name: { type: string }, slug: { type: string } } }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        days: { type: array, items: { type: string } }
+        vegOnly: { type: boolean }
+        mealsTotal: { type: integer }
+        mealsDelivered: { type: integer }
+        pricePerMeal: { type: integer }
+        total: { type: integer }
+        pausedUntil: { type: [string, "null"], format: date }
+        createdAt: { type: string, format: date-time }
+    SubscriptionPurchase:
+      type: object
+      properties:
+        subscription: { type: object, properties: { id: { type: string }, reference: { type: string }, status: { type: string }, startDate: { type: string, format: date }, endDate: { type: string, format: date }, total: { type: integer } } }
+        payment: { $ref: "#/components/schemas/PaymentBrief" }
+        replayed: { type: boolean }
+        needsPayment: { type: boolean }
+        next: { type: string, enum: [PAY, DONE] }
+    SubscriptionDetail:
+      type: object
+      properties:
+        id: { type: string }
+        reference: { type: string }
+        status: { type: string }
+        plan: { type: object }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        days: { type: array, items: { type: string } }
+        boxChoice: { type: string }
+        vegOnly: { type: boolean }
+        slotId: { type: [string, "null"] }
+        pausedUntil: { type: [string, "null"], format: date }
+        money: { type: object, additionalProperties: true }
+        address: { oneOf: [{ $ref: "#/components/schemas/Address" }, { type: "null" }] }
+        policies: { type: object, properties: { skip: { type: string }, skipText: { type: string }, cancel: { type: string }, cancelText: { type: string } } }
+        meals: { type: array, items: { type: object, properties: { id: { type: string }, number: { type: string }, deliveryDate: { type: string, format: date }, status: { type: string }, paymentStatus: { type: string }, followsRotation: { type: boolean }, items: { type: array, items: { type: object } }, window: { type: object, properties: { open: { type: boolean }, cutoff: { type: string } } }, deliveryOtp: { type: [string, "null"] } } } }
+        pendingSwapPayments: { type: array, items: { type: object } }
+        extraMeals: { type: array, items: { type: object } }
+        changes: { type: array, items: { type: object } }
+        createdAt: { type: string, format: date-time }
+    ExtraMealInput:
+      type: object
+      required: [date, boxId]
+      properties:
+        date: { type: string, format: date }
+        boxId: { type: string }
+    Wallet:
+      type: object
+      properties:
+        balance: { type: integer }
+        walletEnabled: { type: boolean }
+        topup:
+          type: object
+          properties:
+            enabled: { type: boolean }
+            methods: { type: array, items: { type: string, enum: [ESEWA, KHALTI, BANK_TRANSFER] } }
+            min: { type: [integer, "null"] }
+            max: { type: [integer, "null"] }
+            daily: { type: [integer, "null"] }
+            cap: { type: [integer, "null"] }
+            usedToday: { type: [integer, "null"] }
+            pendingToday: { type: [integer, "null"] }
+            maxNow: { type: [integer, "null"] }
+            note: { type: [string, "null"] }
+    LedgerEntry:
+      type: object
+      properties:
+        id: { type: string }
+        amount: { type: integer, description: "> 0 credit, < 0 spend" }
+        reason: { type: string }
+        reasonLabel: { type: string }
+        note: { type: [string, "null"] }
+        orderId: { type: [string, "null"] }
+        paymentId: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+    Topup:
+      type: object
+      properties:
+        id: { type: string }
+        reference: { type: string }
+        method: { type: string }
+        status: { type: string }
+        amount: { type: integer }
+        credited: { type: integer }
+        proofSubmitted: { type: boolean }
+        cancellable: { type: boolean }
+        lastAttempt: { type: [object, "null"] }
+        bankTransfer: { type: [object, "null"] }
+        paidAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+    Notification:
+      type: object
+      properties:
+        id: { type: string }
+        type: { type: string }
+        title: { type: string }
+        body: { type: [string, "null"] }
+        link: { type: [string, "null"], description: Website path }
+        readAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+    Referrals:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        code: { type: [string, "null"] }
+        shareText: { type: [string, "null"] }
+        shareUrl: { type: [string, "null"] }
+        offer: { type: object, additionalProperties: true }
+        friends: { type: array, items: { type: object, properties: { id: { type: string }, name: { type: string }, status: { type: string }, at: { type: string, format: date-time } } } }
+        rewarded: { type: integer }
+        rewardCount: { type: integer }
+        received: { type: [object, "null"] }
+        canClaim: { type: boolean }
+    TicketSummary:
+      type: object
+      properties:
+        id: { type: string }
+        number: { type: string }
+        subject: { type: string }
+        category: { type: string }
+        status: { type: string, enum: [OPEN, PENDING, RESOLVED, CLOSED] }
+        order: { type: [object, "null"] }
+        messageCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    TicketDetail:
+      type: object
+      properties:
+        id: { type: string }
+        number: { type: string }
+        subject: { type: string }
+        category: { type: string }
+        status: { type: string }
+        order: { type: [object, "null"] }
+        canReply: { type: boolean }
+        messages: { type: array, items: { type: object, properties: { id: { type: string }, body: { type: string }, fromMe: { type: boolean }, author: { type: string }, createdAt: { type: string, format: date-time } } } }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }

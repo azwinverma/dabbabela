@@ -3,21 +3,16 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
-import type { AddressType, DietPreference } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getCurrentUser, type CurrentUser } from "@/lib/auth";
-import { isNepalPhone, normalizeNepalPhone, isNepalMobile } from "@/lib/phone";
 import { LOCALE_COOKIE, isLocale } from "@/lib/i18n";
 import { done, fail, type ActionResult } from "@/lib/action";
 import { str, bool } from "@/lib/utils";
-import { findZone } from "@/server/coverage";
-import { parsePin, PinError } from "@/server/customer-dashboard";
+import { updatePreferences, updateProfile, saveNotificationPrefs, requestDeletion } from "@/server/profile";
+import { archiveAddress, saveAddress, setDefaultAddress } from "@/server/addresses";
 import { createTicket, replyTicket, TICKET_CATEGORIES } from "@/server/support";
 import { cancelOrder, OrderError } from "@/server/orders";
 import { skipMeal, unskipMeal, pauseSubscription, resumeSubscription, cancelSubscription, changePlanAddress } from "@/server/subscriptions";
-import { audit } from "@/lib/audit";
-import { PREF_CHANNELS, PREF_TOPICS } from "./account-constants";
 
 async function me(next = "/account"): Promise<CurrentUser> {
   const u = await getCurrentUser();
@@ -35,55 +30,24 @@ function msg(e: unknown, fallback = "Something went wrong — try again") {
 
 export async function updateProfileAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   const user = await me("/account/profile");
-  const name = str(fd.get("name"));
-  const phoneRaw = str(fd.get("phone"));
-  const email = str(fd.get("email")).toLowerCase();
-  const locale = str(fd.get("locale"));
-  if (name.length < 2) return fail("Enter your name", { name: "Required" });
-  let phone: string | null = user.phoneNumber;
-  if (phoneRaw) {
-    if (!isNepalMobile(phoneRaw)) return fail("Enter a Nepal mobile number", { phone: "98/97/96 + 8 digits" });
-    phone = normalizeNepalPhone(phoneRaw);
-    const taken = await db.user.findFirst({ where: { phoneNumber: phone, id: { not: user.id } } });
-    if (taken) return fail("That number is on another account", { phone: "Already registered" });
-  }
-  const data: { name: string; phoneNumber: string | null; marketingOptIn: boolean; locale?: string; email?: string } = { name: name.slice(0, 80), phoneNumber: phone, marketingOptIn: bool(fd.get("marketingOptIn")) };
-  if (isLocale(locale)) {
-    data.locale = locale;
-    (await cookies()).set(LOCALE_COOKIE, locale, { path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax" });
-  }
-  // Phone-only accounts start with a placeholder email and may set a real one once.
-  if (email && user.email.endsWith("@phone.dabbabela.local")) {
-    if (!z.string().email().safeParse(email).success) return fail("Enter a valid email", { email: "Invalid" });
-    if (await db.user.findUnique({ where: { email } })) return fail("That email is on another account", { email: "Taken" });
-    data.email = email;
-  }
-  if (phone !== user.phoneNumber) await db.user.update({ where: { id: user.id }, data: { phoneNumberVerified: false } });
-  await db.user.update({ where: { id: user.id }, data });
+  const r = await updateProfile(user, { name: str(fd.get("name")), phone: str(fd.get("phone")), email: str(fd.get("email")), locale: str(fd.get("locale")), marketingOptIn: bool(fd.get("marketingOptIn")) });
+  if (!r.ok) return fail(r.message, r.errors);
+  if (r.locale) (await cookies()).set(LOCALE_COOKIE, r.locale, { path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax" });
   revalidatePath("/account", "layout");
-  return done("Profile saved");
+  return done(r.message);
 }
-
-const DIETS: DietPreference[] = ["ANY", "VEG", "EGG_OK", "VEGAN"];
 
 export async function updatePreferencesAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   const user = await me("/account/profile");
-  const diet = str(fd.get("diet")) as DietPreference;
-  const spice = Math.max(0, Math.min(4, parseInt(str(fd.get("spiceTolerance")) || "2", 10)));
-  const codes = new Set((await db.allergen.findMany({ select: { code: true } })).map((a) => a.code));
-  const allergies = fd.getAll("allergies").map(String).filter((c) => codes.has(c));
-  await db.user.update({
-    where: { id: user.id },
-    data: {
-      diet: DIETS.includes(diet) ? diet : "ANY",
-      spiceTolerance: spice,
-      allergies,
-      avoidOnionGarlic: bool(fd.get("avoidOnionGarlic")),
-      dietaryNotes: str(fd.get("dietaryNotes")).slice(0, 300) || null,
-    },
+  const r = await updatePreferences(user.id, {
+    diet: str(fd.get("diet")),
+    spiceTolerance: str(fd.get("spiceTolerance")),
+    allergies: fd.getAll("allergies").map(String),
+    avoidOnionGarlic: bool(fd.get("avoidOnionGarlic")),
+    dietaryNotes: str(fd.get("dietaryNotes")),
   });
   revalidatePath("/account/profile");
-  return done(allergies.length ? "Saved. Your allergies will be printed on every dabba label." : "Food preferences saved");
+  return done(r.message);
 }
 
 export async function setLocaleAction(locale: string) {
@@ -96,117 +60,34 @@ export async function setLocaleAction(locale: string) {
 
 // ───────── addresses ─────────
 
-const TYPES: AddressType[] = ["HOME", "OFFICE", "SHOP", "COLLEGE", "SITE", "OTHER"];
-
-const addressSchema = z.object({
-  label: z.string().trim().min(1, "Give it a name").max(40),
-  type: z.enum(["HOME", "OFFICE", "SHOP", "COLLEGE", "SITE", "OTHER"]),
-  recipientName: z.string().trim().min(2, "Who receives it?").max(80),
-  phone: z.string().trim().refine(isNepalPhone, "Enter a Nepal phone number"),
-  placeName: z.string().trim().max(120).optional(),
-  line1: z.string().trim().min(3, "Street, tole or building").max(200),
-  area: z.string().trim().min(2, "Locality, e.g. Baneshwor").max(80),
-  ward: z.coerce.number().int().min(1).max(40).optional(),
-  municipality: z.string().trim().max(80).optional(),
-  city: z.string().trim().min(2).max(60).default("Kathmandu"),
-  landmark: z.string().trim().max(160).optional(),
-  instructions: z.string().trim().max(300).optional(),
-});
-
 export type AddressResult = ActionResult & { addressId?: string; covered?: boolean; zoneName?: string | null };
+
+const ADDRESS_FIELDS = ["label", "type", "recipientName", "phone", "placeName", "line1", "area", "ward", "municipality", "city", "landmark", "instructions", "lat", "lng"] as const;
 
 export async function saveAddressAction(_: AddressResult, fd: FormData): Promise<AddressResult> {
   const user = await me("/account/addresses");
-  const opt = (k: string) => str(fd.get(k)) || undefined;
-  const parsed = addressSchema.safeParse({
-    label: str(fd.get("label")) || "Address",
-    type: TYPES.includes(str(fd.get("type")) as AddressType) ? str(fd.get("type")) : "OFFICE",
-    recipientName: str(fd.get("recipientName")),
-    phone: str(fd.get("phone")),
-    placeName: opt("placeName"),
-    line1: str(fd.get("line1")),
-    area: str(fd.get("area")),
-    ward: opt("ward"),
-    municipality: opt("municipality"),
-    city: opt("city") ?? "Kathmandu",
-    landmark: opt("landmark"),
-    instructions: opt("instructions"),
-  });
-  // Optional map pin: both or neither, inside Nepal (same rule as Account → Addresses → map pin).
-  let pin: { lat: number; lng: number } | null = null;
-  let pinError: string | null = null;
-  try {
-    pin = parsePin(fd.get("lat"), fd.get("lng"));
-  } catch (err) {
-    if (!(err instanceof PinError)) throw err;
-    pinError = err.message;
-  }
-  if (!parsed.success || pinError) {
-    const errors: Record<string, string> = {};
-    for (const i of parsed.success ? [] : parsed.error.issues) errors[String(i.path[0])] ??= i.message;
-    if (pinError) errors.lat = errors.lng = pinError;
-    return fail(pinError && parsed.success ? pinError : "Check the highlighted fields", errors);
-  }
-  const d = parsed.data;
-  const zone = await findZone({ area: d.area, ward: d.ward ?? null, municipality: d.municipality ?? null, city: d.city });
-  const id = str(fd.get("id"));
-  const makeDefault = bool(fd.get("isDefault")) || user.addresses.length === 0;
-  const data = {
-    ...d,
-    phone: normalizeNepalPhone(d.phone)!,
-    placeName: d.placeName ?? null,
-    ward: d.ward ?? null,
-    municipality: d.municipality ?? null,
-    landmark: d.landmark ?? null,
-    instructions: d.instructions ?? null,
-    lat: pin?.lat ?? null,
-    lng: pin?.lng ?? null,
-    zoneId: zone?.id ?? null,
-  };
-  let addressId = id;
-  if (id) {
-    const own = user.addresses.find((a) => a.id === id);
-    if (!own) return fail("Address not found");
-    await db.address.update({ where: { id }, data });
-  } else {
-    if (user.addresses.length >= 10) return fail("You can keep up to 10 addresses — remove one first");
-    addressId = (await db.address.create({ data: { ...data, userId: user.id } })).id;
-  }
-  if (makeDefault) {
-    await db.address.updateMany({ where: { userId: user.id, id: { not: addressId } }, data: { isDefault: false } });
-    await db.address.update({ where: { id: addressId }, data: { isDefault: true } });
-  }
+  const raw = Object.fromEntries(ADDRESS_FIELDS.map((k) => [k, fd.get(k)]));
+  const r = await saveAddress(user, raw, { id: str(fd.get("id")) || null, isDefault: bool(fd.get("isDefault")) });
+  if (!r.ok) return fail(r.message ?? "Check the highlighted fields", r.errors);
   revalidatePath("/account/addresses");
   revalidatePath("/checkout");
-  return {
-    ok: true,
-    addressId,
-    covered: Boolean(zone),
-    zoneName: zone?.name ?? null,
-    message: zone ? `Saved — we deliver here (${zone.name})` : `Saved. We don't deliver to ${d.area} yet — we'll let you know when we do.`,
-  };
+  return { ok: true, addressId: r.addressId, covered: r.covered, zoneName: r.zoneName, message: r.message };
 }
 
 export async function deleteAddressAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   const user = await me("/account/addresses");
-  const id = str(fd.get("id"));
-  if (!user.addresses.find((a) => a.id === id)) return fail("Address not found");
-  // Archive (orders keep their snapshot); live plans keep delivering to it until moved.
-  const live = await db.subscription.count({ where: { addressId: id, status: { in: ["ACTIVE", "PAUSED", "PENDING_PAYMENT"] } } });
-  if (live) return fail("A meal plan still delivers here — move the plan to another address first");
-  await db.address.update({ where: { id }, data: { archivedAt: new Date(), isDefault: false } });
+  const r = await archiveAddress(user, str(fd.get("id")));
+  if (!r.ok) return fail(r.message);
   revalidatePath("/account/addresses");
-  return done("Address removed");
+  return done(r.message);
 }
 
 export async function setDefaultAddressAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   const user = await me("/account/addresses");
-  const id = str(fd.get("id"));
-  if (!user.addresses.find((a) => a.id === id)) return fail("Address not found");
-  await db.address.updateMany({ where: { userId: user.id }, data: { isDefault: false } });
-  await db.address.update({ where: { id }, data: { isDefault: true } });
+  const r = await setDefaultAddress(user, str(fd.get("id")));
+  if (!r.ok) return fail(r.message);
   revalidatePath("/account/addresses");
-  return done("Default address updated");
+  return done(r.message);
 }
 
 // ───────── company ─────────
@@ -401,16 +282,7 @@ export async function markNotificationsReadAction(_: ActionResult, fd: FormData)
 
 export async function saveNotificationPrefsAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   const user = await me("/account/notifications");
-  for (const topic of PREF_TOPICS)
-    for (const channel of PREF_CHANNELS) {
-      const enabled = bool(fd.get(`${topic}:${channel}`));
-      await db.notificationPreference.upsert({
-        where: { userId_topic_channel: { userId: user.id, topic, channel } },
-        create: { userId: user.id, topic, channel, enabled },
-        update: { enabled },
-      });
-    }
-  await db.user.update({ where: { id: user.id }, data: { marketingOptIn: bool(fd.get("MARKETING:EMAIL")) || bool(fd.get("MARKETING:SMS")) } });
+  await saveNotificationPrefs(user.id, (key) => bool(fd.get(key)));
   return done("Notification settings saved");
 }
 
@@ -418,11 +290,8 @@ export async function saveNotificationPrefsAction(_: ActionResult, fd: FormData)
 
 export async function requestDeletionAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   const user = await me("/account/privacy");
-  if (str(fd.get("confirm")).toUpperCase() !== "DELETE") return fail('Type DELETE to confirm', { confirm: "Type DELETE" });
-  const open = await db.dataRequest.findFirst({ where: { userId: user.id, type: "DELETE", status: "OPEN" } });
-  if (open) return fail("You already have a deletion request open — we'll be in touch");
-  await db.dataRequest.create({ data: { userId: user.id, type: "DELETE", note: str(fd.get("note")).slice(0, 500) || null } });
-  await audit({ actorId: user.id, action: "privacy.delete_requested", entity: "User", entityId: user.id });
+  const r = await requestDeletion(user.id, { confirm: str(fd.get("confirm")), note: str(fd.get("note")) });
+  if (!r.ok) return fail(r.message, r.errors);
   revalidatePath("/account/privacy");
-  return done("Request received. We'll confirm by email within 7 days. Order and tax records we must keep by law are anonymised, not deleted.");
+  return done(r.message);
 }

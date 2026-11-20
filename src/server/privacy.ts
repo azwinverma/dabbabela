@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
+import { CURRENT_USER_INCLUDE } from "@/lib/user-context";
 
 /**
  * Privacy requests.
@@ -113,4 +114,51 @@ export async function rejectDataRequest(requestId: string, actorId: string, note
   if (!note.trim()) throw new Error("Explain why");
   await audit({ actorId, action: "privacy.reject", entity: "DataRequest", entityId: requestId, reason: note });
   return db.dataRequest.update({ where: { id: requestId }, data: { status: "REJECTED", handledById: actorId, completedAt: new Date(), note } });
+}
+
+/**
+ * The signed-in customer's own data export ("Download my data" on Account → Privacy, and GET /api/v1/privacy/export).
+ * No secrets: no password hashes, tokens or session ids. Audited as `privacy.export`.
+ */
+export async function customerSelfExport(userId: string) {
+  const user = await db.user.findUniqueOrThrow({ where: { id: userId }, include: CURRENT_USER_INCLUDE });
+  const [orders, subscriptions, payments, credit, feedback, tickets, customBoxes, notifications] = await Promise.all([
+    db.order.findMany({ where: { userId: user.id }, include: { items: { select: { name: true, quantity: true, unitPrice: true, lineTotal: true, components: true } }, events: { select: { toStatus: true, note: true, createdAt: true } } }, orderBy: { createdAt: "asc" } }),
+    db.subscription.findMany({ where: { userId: user.id }, include: { plan: { select: { name: true } }, changes: true } }),
+    db.payment.findMany({ where: { userId: user.id }, select: { reference: true, method: true, status: true, amount: true, refundedAmount: true, paidAt: true, createdAt: true } }),
+    db.creditLedger.findMany({ where: { userId: user.id }, select: { amount: true, reason: true, note: true, createdAt: true } }),
+    db.feedback.findMany({ where: { userId: user.id } }),
+    db.supportTicket.findMany({ where: { userId: user.id }, include: { messages: { where: { internal: false }, select: { body: true, createdAt: true, authorId: true } } } }),
+    db.customBox.findMany({ where: { userId: user.id } }),
+    db.notification.findMany({ where: { userId: user.id }, select: { title: true, body: true, createdAt: true, readAt: true } }),
+  ]);
+  const body = {
+    exportedAt: new Date().toISOString(),
+    note: "Amounts are in paisa (100 paisa = Rs 1).",
+    profile: {
+      name: user.name,
+      email: user.email,
+      phone: user.phoneNumber,
+      locale: user.locale,
+      diet: user.diet,
+      spiceTolerance: user.spiceTolerance,
+      allergies: user.allergies,
+      avoidOnionGarlic: user.avoidOnionGarlic,
+      dietaryNotes: user.dietaryNotes,
+      marketingOptIn: user.marketingOptIn,
+      createdAt: user.createdAt,
+      company: user.membership ? { name: user.membership.company.name, status: user.membership.status, role: user.membership.role, department: user.membership.department } : null,
+    },
+    addresses: user.addresses.map(({ zone: _z, userId: _u, ...a }) => a),
+    orders,
+    subscriptions,
+    payments,
+    credit,
+    feedback,
+    supportTickets: tickets,
+    savedDabbas: customBoxes,
+    notifications,
+  };
+  await audit({ actorId: user.id, action: "privacy.export", entity: "User", entityId: user.id });
+  return body;
 }
