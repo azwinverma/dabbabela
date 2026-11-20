@@ -592,6 +592,7 @@ export async function placeCartOrder(
     if (e instanceof CapacityError) throw new OrderError(e.message);
     if (e instanceof Error && e.message.includes("idempotencyKey")) {
       const existing = await db.payment.findUnique({ where: { idempotencyKey: input.idempotencyKey! }, include: { orders: true } });
+      if (existing && existing.userId !== user.id) throw new OrderError("Please refresh the page and try again");
       if (existing) return { payment: existing, orders: existing.orders, replayed: true };
     }
     throw e;

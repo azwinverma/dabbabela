@@ -115,7 +115,9 @@ export async function qcAction(_p: ActionResult, fd: FormData): Promise<ActionRe
     if (!["TEMPERATURE", "TASTE", "HYGIENE", "PACKAGING", "OTHER"].includes(type) || !["PASS", "FAIL"].includes(result)) return fail("Pick a check type and result");
     const note = String(fd.get("note") ?? "").trim();
     if (result === "FAIL" && !note) return fail("Describe the failure and what was done");
-    await db.qcLog.create({ data: { kitchenId, date: dateOnly(date), type, result, value: String(fd.get("value") ?? "").trim() || null, note: note || null, batchId: String(fd.get("batchId") ?? "") || null, actorId: user.id } });
+    const batchId = String(fd.get("batchId") ?? "") || null;
+    if (batchId && !(await db.productionBatch.findFirst({ where: { id: batchId, kitchenId }, select: { id: true } }))) return fail("That batch isn't in this kitchen");
+    await db.qcLog.create({ data: { kitchenId, date: dateOnly(date), type, result, value: String(fd.get("value") ?? "").trim() || null, note: note || null, batchId, actorId: user.id } });
     revalidatePath("/admin/kitchen/qc");
     return done("QC check logged");
   });

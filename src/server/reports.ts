@@ -278,8 +278,8 @@ export function csv(rows: (string | number | boolean | null | undefined | Date)[
   const cell = (v: unknown) => {
     if (v === null || v === undefined) return "";
     const s = v instanceof Date ? v.toISOString() : String(v);
-    // Neutralise spreadsheet formula injection.
-    const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+    // Neutralise spreadsheet formula injection (plain negative numbers such as "-50.00" are left alone).
+    const safe = /^[=+\-@\t\r]/.test(s) && !/^-\d+(\.\d+)?$/.test(s) ? `'${s}` : s;
     return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
   };
   return "﻿" + rows.map((r) => r.map(cell).join(",")).join("\r\n");
