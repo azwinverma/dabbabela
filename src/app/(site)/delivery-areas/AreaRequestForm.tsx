@@ -1,6 +1,7 @@
 "use client";
 
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
+import { Turnstile } from "@/components/ui/Turnstile";
 import { Input, Textarea } from "@/components/ui/Fields";
 import { areaRequestAction } from "@/lib/actions/public";
 
@@ -21,6 +22,7 @@ export function AreaRequestForm({ area, title }: { area: string; title: string }
             <Input name="people" type="number" min={1} max={500} label="People who'd order (optional)" />
           </div>
           <Textarea name="note" label="Anything else (optional)" rows={2} />
+          <Turnstile action="area" />
           <SubmitButton pendingText="Sending…">Send request</SubmitButton>
         </>
       )}

@@ -1,6 +1,7 @@
 "use client";
 
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
+import { Turnstile } from "@/components/ui/Turnstile";
 import { Input, Select, Textarea } from "@/components/ui/Fields";
 import { contactAction } from "@/lib/actions/public";
 
@@ -28,6 +29,7 @@ export function ContactForm({ defaults }: { defaults?: { name?: string; email?: 
           <Input label="Subject" name="subject" className="sm:col-span-2" />
           <Textarea label="Message" name="message" required rows={5} className="sm:col-span-2" error={s.errors?.message} />
           <div className="sm:col-span-2">
+            <Turnstile action="contact" />
             <SubmitButton pendingText="Sending…">Send message</SubmitButton>
             <p className="mt-2 text-xs text-ink-mute">For an existing order, include the order number — or use Help in your account.</p>
           </div>

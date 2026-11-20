@@ -6,12 +6,13 @@ import { PrintButton } from "@/components/admin/finance/PrintButton";
 import { PageHeader, Panel } from "@/components/admin/ui";
 import { IssueButton, PaymentForm, VoidForm, CreditNoteForm } from "../InvoiceForms";
 import Link from "next/link";
+import { inCompanyScope } from "@/server/corporate";
 
 export default async function InvoicePage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("invoices.view");
+  const user = await requirePermission("invoices.view");
   const { id } = await params;
   const inv = await db.invoice.findUnique({ where: { id }, include: { lines: true, company: true } });
-  if (!inv) notFound();
+  if (!inv || (inv.companyId && !inCompanyScope(user, inv.companyId))) notFound();
   const [notes, related] = await Promise.all([
     db.invoice.findMany({ where: { relatedId: inv.id }, select: { id: true, number: true, total: true } }),
     inv.relatedId ? db.invoice.findUnique({ where: { id: inv.relatedId }, select: { id: true, number: true } }) : null,

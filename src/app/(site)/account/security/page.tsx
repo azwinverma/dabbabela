@@ -10,11 +10,17 @@ function device(ua: string | null) {
   return `${br} on ${os}`;
 }
 
+const METHOD: Record<string, string> = { email: "email & password", phone: "mobile code", "two-factor": "authenticator code", "backup-code": "backup code" };
+
 export default async function SecurityPage({ searchParams }: { searchParams: Promise<{ setup?: string }> }) {
   const sp = await searchParams;
   const user = await requireUser("/account/security");
   const hasPassword = await db.account.count({ where: { userId: user.id, providerId: "credential", password: { not: null } } });
-  const sessions = await db.session.findMany({ where: { userId: user.id, expiresAt: { gt: new Date() } }, orderBy: { updatedAt: "desc" } });
+  const [sessions, logins] = await Promise.all([
+    // Never select the token: sessions are revoked by id, so tokens never reach the browser.
+    db.session.findMany({ where: { userId: user.id, expiresAt: { gt: new Date() } }, orderBy: { updatedAt: "desc" }, select: { id: true, userAgent: true, ipAddress: true, updatedAt: true, createdAt: true } }),
+    db.loginEvent.findMany({ where: { userId: user.id }, orderBy: { createdAt: "desc" }, take: 15, select: { id: true, createdAt: true, method: true, success: true, reason: true, ip: true, userAgent: true } }),
+  ]);
   const forced = sp.setup === "2fa" && isStaff(user.role) && !user.twoFactorEnabled;
   return (
     <div className="grid gap-6 lg:grid-cols-2">
@@ -46,7 +52,10 @@ export default async function SecurityPage({ searchParams }: { searchParams: Pro
       <section className="rounded-2xl border-2 border-ink bg-paper-card p-5 lg:col-span-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-xl font-extrabold">Where you're signed in</h2>
-          {sessions.length > 1 && <RevokeButton all />}
+          <div className="flex flex-wrap gap-2">
+            {sessions.length > 1 && <RevokeButton all />}
+            <RevokeButton everywhere />
+          </div>
         </div>
         <ul className="mt-3 divide-y divide-ink-line">
           {sessions.map((s) => (
@@ -59,10 +68,34 @@ export default async function SecurityPage({ searchParams }: { searchParams: Pro
                   {s.ipAddress ? ` · ${s.ipAddress.replace(/\.\d+$/, ".•")}` : ""}
                 </span>
               </span>
-              {s.id !== user.sessionId && <RevokeButton token={s.token} />}
+              {s.id !== user.sessionId && <RevokeButton sessionId={s.id} />}
             </li>
           ))}
         </ul>
+      </section>
+      <section className="rounded-2xl border-2 border-ink bg-paper-card p-5 lg:col-span-2" aria-labelledby="login-history">
+        <h2 id="login-history" className="text-xl font-extrabold">Recent sign-ins</h2>
+        <p className="mt-1 text-sm text-ink-soft">If you don't recognise a sign-in, change your password and sign out everywhere.</p>
+        {logins.length ? (
+          <ul className="mt-3 divide-y divide-ink-line">
+            {logins.map((l) => (
+              <li key={l.id} className="flex flex-wrap items-center justify-between gap-3 py-2 text-sm">
+                <span>
+                  <span className="font-semibold">{device(l.userAgent)}</span>
+                  <span className="block text-xs text-ink-mute">
+                    {formatStamp(l.createdAt)} · {METHOD[l.method] ?? l.method}
+                    {l.ip ? ` · ${l.ip.replace(/\.\d+$/, ".•")}` : ""}
+                  </span>
+                </span>
+                <span className={l.success ? "rounded-full bg-saag-light px-2 py-0.5 text-xs font-bold text-saag-dark" : "rounded-full bg-sindoor-light px-2 py-0.5 text-xs font-bold text-sindoor-dark"}>
+                  {l.success ? (l.reason === "TWO_FACTOR_REQUIRED" ? "Password OK, code asked" : "Signed in") : "Failed"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-3 text-sm text-ink-mute">No sign-ins recorded yet.</p>
+        )}
       </section>
     </div>
   );

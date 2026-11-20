@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
 import { Input } from "@/components/ui/Fields";
+import { Turnstile } from "@/components/ui/Turnstile";
 import { loginAction, sendOtpAction, verifyOtpAction, verifyTwoFactorAction } from "@/lib/actions/auth";
 import type { AccountDict } from "@/lib/i18n/account";
 import { cn } from "@/lib/utils";
@@ -38,6 +39,7 @@ export function LoginForm({ next, phoneOtp, t }: { next: string; phoneOtp: boole
               <input type="hidden" name="next" value={next} />
               <Input label={t.email} name="email" type="email" autoComplete="email" required error={state.errors?.email} />
               <Input label={t.password} name="password" type="password" autoComplete="current-password" required minLength={8} />
+              <Turnstile action="login" />
               <div className="flex items-center justify-between gap-3">
                 <SubmitButton pendingText={t.loggingIn}>{t.login}</SubmitButton>
                 <Link href="/forgot-password" className="text-sm font-semibold text-ink-soft underline underline-offset-2">
@@ -51,6 +53,7 @@ export function LoginForm({ next, phoneOtp, t }: { next: string; phoneOtp: boole
         <div className="space-y-4">
           <ActionForm action={sendOtpAction} className="space-y-3">
             <Input label={t.mobile} name="phone" type="tel" inputMode="tel" autoComplete="tel" placeholder="98XXXXXXXX" value={phone} onChange={(e) => setPhone(e.target.value)} required />
+            <Turnstile action="otp" />
             <SubmitButton variant="outline" pendingText="…">
               {t.sendCode}
             </SubmitButton>

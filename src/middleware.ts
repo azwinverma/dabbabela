@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionCookie } from "better-auth/cookies";
 import { CONSENT_COOKIE, FIRST_TOUCH_COOKIE, touchCookieUpdates } from "@/lib/attribution";
+import { cspFromEnv, generateNonce } from "@/lib/csp";
 
 /**
  * Runs on every route except static assets.
@@ -8,6 +9,8 @@ import { CONSENT_COOKIE, FIRST_TOUCH_COOKIE, touchCookieUpdates } from "@/lib/at
  *     request (so `request-context.ts` / audit rows share it) and echoes it on the response.
  *  2. Attribution (WP-11): on consented page views only, records the first touch (once) and the last marketing touch
  *     in first-party cookies (see `src/lib/attribution.ts`).
+ *  0. Content-Security-Policy with a fresh nonce per request (src/lib/csp.ts), on the request (for Next's inline
+ *     scripts) and on the response.
  *  3. First line of defence only: bounce visitors without a session cookie away from protected areas to /login.
  *     Every protected page and server action re-validates the session and permissions on the server.
  */
@@ -39,6 +42,10 @@ export function middleware(req: NextRequest) {
   const requestId = requestIdFor(req.headers);
   const { pathname, search } = req.nextUrl;
 
+  // Per-request CSP nonce: Next reads it from the request's CSP header and puts it on its inline scripts.
+  const nonce = generateNonce();
+  const csp = cspFromEnv(nonce);
+
   let res: NextResponse;
   if (isProtected(pathname) && !getSessionCookie(req, { cookiePrefix: "dabba" })) {
     const url = req.nextUrl.clone();
@@ -48,9 +55,12 @@ export function middleware(req: NextRequest) {
   } else {
     const headers = new Headers(req.headers);
     headers.set("x-request-id", requestId);
+    headers.set("x-nonce", nonce);
+    headers.set("Content-Security-Policy", csp);
     res = NextResponse.next({ request: { headers } });
   }
   res.headers.set("x-request-id", requestId);
+  res.headers.set("Content-Security-Policy", csp);
 
   if (req.cookies.get(CONSENT_COOKIE)?.value === "granted" && isTrackablePageView(req)) {
     for (const c of touchCookieUpdates(req.cookies.get(FIRST_TOUCH_COOKIE)?.value, req.nextUrl, req.headers.get("referer"))) {

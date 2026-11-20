@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { AuthFrame } from "@/components/site/AuthFrame";
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
+import { Turnstile } from "@/components/ui/Turnstile";
 import { Input } from "@/components/ui/Fields";
 import { forgotAction } from "@/lib/actions/auth";
 import { getLocale } from "@/lib/i18n/server";
@@ -15,6 +16,7 @@ export default async function ForgotPage() {
     <AuthFrame title={t.forgotTitle} intro={t.forgotIntro}>
       <ActionForm action={forgotAction} className="space-y-4" resetOnSuccess>
         <Input label={t.email} name="email" type="email" autoComplete="email" required />
+        <Turnstile action="reset" />
         <SubmitButton pendingText="…">{t.sendLink}</SubmitButton>
       </ActionForm>
       <p className="mt-6 text-sm text-ink-soft">

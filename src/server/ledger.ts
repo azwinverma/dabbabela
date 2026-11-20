@@ -35,14 +35,21 @@ export async function spendCredit(tx: Tx, e: Omit<LedgerEntry, "reason"> & { rea
   return tx.creditLedger.create({ data: { ...e, reason: e.reason ?? "SPEND", amount: -e.amount } });
 }
 
+/**
+ * Staff adjustment (either sign) inside a caller's transaction — always with a note; never edits existing rows.
+ * `reason` defaults to ADJUSTMENT (GOODWILL for profile credits). A debit can't take the wallet below zero.
+ */
+export async function adjustCreditTx(tx: Tx, e: Omit<LedgerEntry, "reason"> & { note: string; reason?: "ADJUSTMENT" | "GOODWILL" }) {
+  if (!Number.isInteger(e.amount) || e.amount === 0) throw new Error("Enter a non-zero amount");
+  await lockUser(tx, e.userId);
+  if (e.amount < 0) {
+    const bal = await walletBalance(e.userId, tx);
+    if (bal + e.amount < 0) throw new Error("That would make the wallet negative");
+  }
+  return tx.creditLedger.create({ data: { ...e, reason: e.reason ?? "ADJUSTMENT" } });
+}
+
 /** Staff adjustment (either sign) — always with a note; never edits existing rows. */
 export async function adjustCredit(e: LedgerEntry & { note: string }) {
-  return db.$transaction(async (tx) => {
-    await lockUser(tx, e.userId);
-    if (e.amount < 0) {
-      const bal = await walletBalance(e.userId, tx);
-      if (bal + e.amount < 0) throw new Error("That would make the wallet negative");
-    }
-    return tx.creditLedger.create({ data: { ...e, reason: "ADJUSTMENT" } });
-  });
+  return db.$transaction((tx) => adjustCreditTx(tx, { ...e, reason: "ADJUSTMENT" }));
 }

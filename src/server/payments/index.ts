@@ -326,21 +326,74 @@ async function refundable(tx: Tx, paymentId: string) {
   return { p, available: p.amount - p.refundedAmount - (pending._sum.amount ?? 0) };
 }
 
-export async function requestRefund(input: { paymentId: string; orderId?: string | null; amount: number; reason: string; method: RefundMethod; actorId: string }) {
-  if (input.amount <= 0) throw new PaymentError("Enter an amount");
+export type RefundInput = { paymentId: string; orderId?: string | null; amount: number; reason: string; method: RefundMethod; actorId: string };
+
+/** What can still be refunded on a payment (and on one of its orders), counting open refund requests. */
+export async function refundableNow(paymentId: string, orderId?: string | null, client: Tx | typeof db = db) {
+  const p = await client.payment.findUnique({ where: { id: paymentId }, select: { id: true, userId: true, status: true, amount: true, refundedAmount: true, purpose: true } });
+  if (!p) return null;
+  const pending = await client.refund.aggregate({ _sum: { amount: true }, where: { paymentId, status: { in: ["REQUESTED", "APPROVED"] } } });
+  const payment = p.amount - p.refundedAmount - (pending._sum.amount ?? 0);
+  let order: number | null = null;
+  if (orderId) {
+    const o = await client.order.findUnique({ where: { id: orderId }, select: { paymentId: true, customerShare: true, refundedAmount: true } });
+    if (o && o.paymentId === paymentId) {
+      const open = await client.refund.aggregate({ _sum: { amount: true }, where: { orderId, status: { in: ["REQUESTED", "APPROVED"] } } });
+      order = o.customerShare - o.refundedAmount - (open._sum.amount ?? 0);
+    }
+  }
+  return { payment: p, available: Math.max(0, payment), orderAvailable: order === null ? null : Math.max(0, order) };
+}
+
+/**
+ * Create a refund inside a caller's transaction. Re-validates everything under a per-payment lock: the payment is
+ * paid, the amount fits what's left (payment-wide and, when an order is named, on that order), and the order really
+ * belongs to the payment (no refunding order B against payment A). Works for any Payment purpose.
+ * `approvedById` (maker-checker execution) creates the refund already APPROVED by that second person.
+ */
+export async function requestRefundTx(tx: Tx, input: RefundInput & { approvedById?: string | null }) {
+  if (!Number.isInteger(input.amount) || input.amount <= 0) throw new PaymentError("Enter an amount");
   if (!input.reason.trim()) throw new PaymentError("Give a reason");
-  const r = await db.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`refund:${input.paymentId}`}))`;
-    const { p, available } = await refundable(tx, input.paymentId);
-    if (!["PAID", "PARTIALLY_REFUNDED"].includes(p.status)) throw new PaymentError("Only paid payments can be refunded");
-    if (input.amount > available) throw new PaymentError(`At most ${rs(available)} can be refunded`);
-    return tx.refund.create({ data: { paymentId: p.id, orderId: input.orderId ?? null, amount: input.amount, reason: input.reason, method: input.method, requestedById: input.actorId } });
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`refund:${input.paymentId}`}))`;
+  const { p, available } = await refundable(tx, input.paymentId);
+  if (!["PAID", "PARTIALLY_REFUNDED"].includes(p.status)) throw new PaymentError("Only paid payments can be refunded");
+  if (input.amount > available) throw new PaymentError(`At most ${rs(available)} can be refunded`);
+  if (input.orderId) {
+    const o = await tx.order.findUnique({ where: { id: input.orderId }, select: { paymentId: true, customerShare: true, refundedAmount: true, number: true } });
+    if (!o || o.paymentId !== p.id) throw new PaymentError("That order wasn't paid with this payment");
+    const open = await tx.refund.aggregate({ _sum: { amount: true }, where: { orderId: input.orderId, status: { in: ["REQUESTED", "APPROVED"] } } });
+    const left = o.customerShare - o.refundedAmount - (open._sum.amount ?? 0);
+    if (input.amount > left) throw new PaymentError(`At most ${rs(Math.max(0, left))} can be refunded on order ${o.number}`);
+  }
+  return tx.refund.create({
+    data: {
+      paymentId: p.id,
+      orderId: input.orderId ?? null,
+      amount: input.amount,
+      reason: input.reason,
+      method: input.method,
+      requestedById: input.actorId,
+      ...(input.approvedById ? { status: "APPROVED" as const, approvedById: input.approvedById } : {}),
+    },
   });
+}
+
+export async function requestRefund(input: RefundInput) {
+  const r = await db.$transaction((tx) => requestRefundTx(tx, input));
   await audit({ actorId: input.actorId, action: "refund.request", entity: "Refund", entityId: r.id, summary: `${rs(r.amount)} via ${r.method}`, reason: input.reason });
   return r;
 }
 
+/**
+ * Approve a requested refund. Maker-checker safety net (covers refunds created by any path, e.g. a cancellation
+ * with a REFUND settlement): at or above the approval threshold the approver must be someone other than the requester.
+ */
 export async function approveRefund(refundId: string, actorId: string) {
+  const ref = await db.refund.findUnique({ where: { id: refundId }, select: { amount: true, requestedById: true, status: true } });
+  if (!ref || ref.status !== "REQUESTED") throw new PaymentError("Refund isn't waiting for approval");
+  const { approvalThreshold } = await getSettings();
+  if (approvalThreshold > 0 && ref.amount >= approvalThreshold && ref.requestedById === actorId)
+    throw new PaymentError(`Refunds of ${rs(approvalThreshold)} or more need a second person — someone else has to approve a refund you requested`);
   const r = await db.refund.updateMany({ where: { id: refundId, status: "REQUESTED" }, data: { status: "APPROVED", approvedById: actorId } });
   if (!r.count) throw new PaymentError("Refund isn't waiting for approval");
   await audit({ actorId, action: "refund.approve", entity: "Refund", entityId: refundId });

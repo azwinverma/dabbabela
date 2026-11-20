@@ -19,6 +19,22 @@ Hosting: **Vercel** (functions pinned to `sin1`, Singapore) + **Neon Postgres** 
 5. Environment variables (Production): `BETTER_AUTH_SECRET` (`openssl rand -base64 32`),
    `BETTER_AUTH_URL` and `NEXT_PUBLIC_SITE_URL` (your https domain), `CRON_SECRET`, `SETUP_KEY`,
    `RESEND_API_KEY` + `EMAIL_FROM`, payment keys when activated, SMS keys when approved.
+   Security (Phase 2B, all optional and env-gated — see the table below): `NEXT_PUBLIC_TURNSTILE_SITE_KEY` +
+   `TURNSTILE_SECRET_KEY`, `SENTRY_DSN` (+ `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT` for source maps),
+   `STAFF_SESSION_MAX_HOURS`.
+
+### Security environment variables (Phase 2B)
+| Variable | Effect when set | When unset |
+|---|---|---|
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile widget on sign-up, login, mobile-code request, password reset, contact, area-request and team-lead forms; tokens verified server-side (siteverify, 5 s timeout). **Fails closed in production** (no/invalid token or Cloudflare unreachable = refused). Both are needed; the site key is inlined at build time, so redeploy after setting it. CSP adds `challenges.cloudflare.com` to `frame-src`/`connect-src`. | Skipped (dev, tests, E2E). `/api/health` → `integrations.turnstile: false` |
+| `SENTRY_DSN` | `@sentry/nextjs` (11.11.0, pinned) on server, edge and browser; PII scrubbed (`src/lib/sentry-scrub.ts`); release = `VERCEL_GIT_COMMIT_SHA`; CSP `connect-src` adds the DSN's ingest origin. Redeploy after setting it (the browser DSN is inlined at build). | No SDK loaded or initialised. `/api/health` → `integrations.sentry: false` |
+| `SENTRY_TRACES_SAMPLE_RATE` | 0–1 performance tracing sample rate | 0 (errors only) |
+| `SENTRY_AUTH_TOKEN` + `SENTRY_ORG` + `SENTRY_PROJECT` | Source maps uploaded (and deleted from the output) during `next build`; release created | No upload; the build never contacts Sentry |
+| `STAFF_SESSION_MAX_HOURS` | Absolute lifetime of a staff session (1–720 h) | 24 h |
+| `AUTH_RATE_LIMIT` | `true` turns the sign-in limits on outside production; `false` turns them off (**E2E server only — never in production**) | On in production, off in dev |
+
+The maker-checker threshold is a setting, not an env var: Admin → Settings → "Wallet top-up & approvals" → approval threshold
+(default Rs 2,000).
 6. Deploy. `vercel-build` runs `prisma generate && prisma migrate deploy && tsx prisma/foundation.ts && next build`.
    The foundation step is idempotent (adds missing preset roles, expense categories, plan price rows, nav links, meal
    categories; never changes existing rows), so it is safe on every deploy, including preview deployments sharing a database.
@@ -65,7 +81,10 @@ Neon keeps point-in-time history (plan dependent). Monthly: restore yesterday in
 
 ## Monitoring
 * Uptime monitor on `/api/health` (503 when the DB is down; shows failed jobs/messages).
-* Vercel logs / log drain (structured JSON, PII redacted). Add Sentry for error tracking (backlog).
+* Vercel logs / log drain (structured JSON, PII redacted). Sentry error tracking once `SENTRY_DSN` is set (`/api/health`
+  shows `sentry: true`). Server errors are captured through Next's `onRequestError` (`src/instrumentation.ts`).
+* Alerts center: "Approvals waiting" raises an alert for maker-checker requests pending over 4 h (critical after 24 h) and for
+  approved requests whose execution failed.
 * Dashboard alerts: failed jobs, failed outbox messages, stuck pending payments, low stock, unverified transfers.
 
 ## Operational runbook
@@ -79,6 +98,8 @@ Neon keeps point-in-time history (plan dependent). Monthly: restore yesterday in
 | Refund through eSewa/Khalti | Process in the merchant portal, then record it in Admin → Refunds with the reference. |
 | Staff member leaves | Admin → Staff → deactivate (sessions revoked immediately). |
 | Suspected account compromise | Deactivate, reset password + 2FA, review Audit log. |
+| Large refund / credit / adjustment waiting | Admin → Approvals. A second staff member with "Maker-checker approvals → approve" opens it, checks the "Now" column (live refundable amount / balance), approves (executes at once) or rejects with a note. FAILED = the live state changed; fix and press Retry. |
+| Turnstile blocks real users (Cloudflare incident) | Unset both Turnstile keys and redeploy (forms fall back to honeypot + rate limits). |
 
 ## Verifying a staging deployment (before launch)
 1. `npx prisma migrate status` against the staging database shows every migration applied, including `20261120061329_perf_indexes`
@@ -98,7 +119,11 @@ IDOR isolation (customers, companies, kitchens); cron auth; dev bypasses inert i
 reports reconcile with order records. Everything below still needs the owner or a live environment.
 
 - [ ] `BETTER_AUTH_SECRET`, `CRON_SECRET`, `SETUP_KEY` (long, random) set in Production; `SETUP_KEY` removed after `/setup`
-- [ ] `DISABLE_STAFF_2FA`, `SEED_DEMO`, `ALLOW_DEMO_SEED`, `PAYMENTS_SANDBOX` unset in Production; `SMS_PROVIDER` not `console`
+- [ ] `DISABLE_STAFF_2FA`, `SEED_DEMO`, `ALLOW_DEMO_SEED`, `PAYMENTS_SANDBOX`, `AUTH_RATE_LIMIT` unset in Production; `SMS_PROVIDER` not `console`
+- [ ] Turnstile keys set (`/api/health` → `turnstile: true`); sign up / log in once on production to confirm the widget passes
+- [ ] Sentry DSN set (`sentry: true`); trigger a test error on staging and check the event has no email/phone/payment reference
+- [ ] Browser console on home, menu, checkout, login, admin and rider shows no CSP violations (the `e2e/security.spec.ts` check, against staging)
+- [ ] Approval threshold reviewed in Settings; at least two staff hold "approvals → approve"
 - [ ] Staging verified (section above), including the acceptance E2E
 - [ ] Brand cleared: trademark search, `.com.np` domain, social handles (name is provisional)
 - [ ] Company registration, PAN/VAT; tax advice on VAT rate, invoice format and IRD rules; enter legal name and PAN in Settings; enable the VAT tax rule only after VAT registration

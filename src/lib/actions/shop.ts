@@ -10,6 +10,7 @@ import { getSettings } from "@/lib/settings";
 import { siteUrl } from "@/lib/site-url";
 import { storeUpload } from "@/lib/upload";
 import { log } from "@/lib/logger";
+import { LIMITS, rateLimit, requestIp } from "@/lib/rate-limit";
 import { done, fail, type ActionResult } from "@/lib/action";
 import { str } from "@/lib/utils";
 import { quoteCart, placeCartOrder, OrderError, type CartLine } from "@/server/orders";
@@ -22,6 +23,24 @@ import { orderTouch, readAttribution } from "@/lib/attribution";
 type Result<T = unknown> = { ok: boolean; error?: string; fieldErrors?: Record<string, string>; redirectTo?: string; data?: T };
 
 const METHODS: PaymentMethod[] = ["ESEWA", "KHALTI", "BANK_TRANSFER", "CASH", "COMPANY_INVOICE", "WALLET"];
+
+const SLOW_DOWN = "Too many attempts — wait a minute and try again";
+
+/** Per-user limits on checkout / payment actions (LIMITS in src/lib/rate-limit.ts). */
+async function perUser(name: "checkout" | "payStart" | "proofUpload", userId: string) {
+  return rateLimit(`shop:${name}`, userId, LIMITS[name].max, LIMITS[name].windowMs);
+}
+
+/** Peek at the wrong-coupon counter for this IP without counting a hit. */
+async function couponAttemptsLeft() {
+  const row = await db.rateLimit.findUnique({ where: { key: `rl:shop:coupon-fail:${await requestIp()}` } });
+  if (!row || Date.now() - Number(row.lastRequest) > LIMITS.couponFail.windowMs) return true;
+  return row.count < LIMITS.couponFail.max;
+}
+
+async function recordCouponFailure() {
+  await rateLimit("shop:coupon-fail", await requestIp(), LIMITS.couponFail.max, LIMITS.couponFail.windowMs);
+}
 
 function errText(e: unknown, fallback = "Something went wrong — please try again") {
   if (e instanceof OrderError || e instanceof PaymentError || e instanceof CapacityError || e instanceof CrmError) return e.message;
@@ -55,7 +74,13 @@ export type CartQuoteDTO = {
 
 export async function quoteCartAction(input: { lines: CartLine[]; addressId?: string | null; couponCode?: string | null }): Promise<CartQuoteDTO> {
   const user = await getCurrentUser();
-  const q = await quoteCart(user, { lines: input.lines, addressId: input.addressId ?? null, couponCode: input.couponCode ?? null });
+  let couponCode = input.couponCode ?? null;
+  // Coupon guessing: after LIMITS.couponFail wrong codes per IP in the window, codes are no longer checked.
+  const couponBlocked = Boolean(couponCode) && !(await couponAttemptsLeft());
+  if (couponBlocked) couponCode = null;
+  const q = await quoteCart(user, { lines: input.lines, addressId: input.addressId ?? null, couponCode });
+  if (couponBlocked) q.couponError = "Too many coupon attempts — try again in a few minutes";
+  else if (couponCode && q.couponError) await recordCouponFailure();
   return {
     ok: q.ok && !q.addressProblem,
     error: q.error,
@@ -116,6 +141,7 @@ async function checkoutAttribution() {
 export async function placeOrderAction(input: z.input<typeof placeSchema>): Promise<Result<{ paymentId: string }>> {
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "Log in to place your order", redirectTo: "/login?next=/checkout" };
+  if (!(await perUser("checkout", user.id))) return { ok: false, error: SLOW_DOWN };
   const p = placeSchema.safeParse(input);
   if (!p.success) return { ok: false, error: p.error.issues[0]?.message ?? "Check your order" };
   try {
@@ -163,6 +189,7 @@ export type PlanQuoteDTO = {
 export async function startPaymentAction(paymentId: string): Promise<{ ok: boolean; error?: string; start?: StartResult }> {
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "Log in to pay" };
+  if (!(await perUser("payStart", user.id))) return { ok: false, error: SLOW_DOWN };
   try {
     return { ok: true, start: await startPayment(paymentId, user.id, await siteUrl()) };
   } catch (e) {
@@ -174,10 +201,11 @@ export async function switchMethodAction(paymentId: string, method: PaymentMetho
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "Log in first" };
   if (!METHODS.includes(method)) return { ok: false, error: "Choose a payment method" };
+  if (!(await perUser("payStart", user.id))) return { ok: false, error: SLOW_DOWN };
   try {
     await switchPaymentMethod(paymentId, user.id, method);
     revalidatePath(`/pay/${paymentId}`);
-    const p = await db.payment.findUnique({ where: { id: paymentId }, select: { status: true, method: true } });
+    const p = await db.payment.findFirst({ where: { id: paymentId, userId: user.id }, select: { status: true, method: true } });
     const settled = p?.status === "PAID" || p?.method === "CASH";
     return { ok: true, redirectTo: settled ? `/thank-you/${paymentId}` : `/pay/${paymentId}` };
   } catch (e) {
@@ -188,6 +216,7 @@ export async function switchMethodAction(paymentId: string, method: PaymentMetho
 export async function uploadProofAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   const user = await getCurrentUser();
   if (!user) return fail("Log in first");
+  if (!(await perUser("proofUpload", user.id))) return fail(SLOW_DOWN);
   const paymentId = str(fd.get("paymentId"));
   const reference = str(fd.get("reference"));
   const file = fd.get("proof");

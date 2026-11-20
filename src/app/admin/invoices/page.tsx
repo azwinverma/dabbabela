@@ -10,14 +10,17 @@ import { Badge } from "@/components/ui/Badge";
 import { Kpi } from "@/components/admin/finance/kit";
 import { ageing, uninvoicedByCompany } from "@/server/invoices";
 import { GenerateForm } from "./InvoiceForms";
+import { companyScope } from "@/server/corporate";
 
 export const metadata = { title: "Invoices" };
 
 export default async function Invoices({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  await requirePermission("invoices.view");
+  const user = await requirePermission("invoices.view");
   const sp = await searchParams;
+  const companyIds = companyScope(user);
   const prev = monthRange(addDays(`${todayKTM().slice(0, 7)}-01`, -1).slice(0, 7));
   const where: Prisma.InvoiceWhereInput = {
+    ...(companyIds ? { companyId: { in: companyIds } } : {}),
     ...(sp.status && sp.status in INVOICE_STATUS ? { status: sp.status as InvoiceStatus } : {}),
     ...(sp.company ? { companyId: sp.company } : {}),
     ...(sp.q ? { OR: [{ number: { contains: sp.q, mode: "insensitive" } }, { billingName: { contains: sp.q, mode: "insensitive" } }] } : {}),

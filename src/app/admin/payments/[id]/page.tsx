@@ -10,12 +10,14 @@ import { PageHeader, Panel, KV, Table, Th, Td, EmptyRow, PaymentBadge, OrderBadg
 import { Badge } from "@/components/ui/Badge";
 import { VerifyForms } from "../VerifyForms";
 import { RefundRequestForm } from "../../refunds/RefundRequestForm";
+import { paymentWhere } from "@/components/admin/ops/scope";
 
 export default async function PaymentDetail({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("payments.view");
   const { id } = await params;
-  const p = await db.payment.findUnique({
-    where: { id },
+  // Kitchen-scoped staff only see payments with an order in their kitchens.
+  const p = await db.payment.findFirst({
+    where: { id, ...paymentWhere(user) },
     include: {
       user: { select: { id: true, name: true } },
       orders: { orderBy: { deliveryDate: "asc" } },

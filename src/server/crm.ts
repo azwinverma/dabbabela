@@ -10,6 +10,7 @@ import { userAttributionSnapshot, type Touch } from "@/lib/attribution";
 import { dateWhere, one, pageWindow, parseDateRange, parseEnum, type ListState, type SearchParamsRecord } from "@/app/admin/_kit/params";
 import { addCredit } from "./ledger";
 import { lockUser } from "./capacity";
+import { needsApproval, requestApproval } from "./approvals";
 import { completeDataRequest, exportUserData } from "./privacy";
 import { csv } from "./reports";
 
@@ -482,9 +483,25 @@ export async function issueCredit(actor: Staff, userId: string, amount: number, 
   if (why.length < 3) throw new CrmError("A reason is required for every credit");
   const u = await customerOr404(userId);
   if (u.deletedAt) throw new CrmError("This customer's personal data was deleted");
+  // Maker-checker: at or above the approval threshold a second person must approve (issueCreditOrRequest).
+  if (await needsApproval(amount)) throw new CrmError("Credit this large needs a second person's approval");
   const row = await db.$transaction((tx) => addCredit(tx, { userId, amount, reason: "GOODWILL", actorId: actor.id, note: why.slice(0, 300) }));
   await audit({ actorId: actor.id, approvedById: actor.id, action: "credit.issue", entity: "User", entityId: userId, summary: `+Rs ${(amount / 100).toFixed(2)} goodwill credit`, reason: why, after: { amount, ledgerId: row.id } });
   return row;
+}
+
+/**
+ * Profile credit by an approver: below the approval threshold it is issued at once; at or above it a maker-checker
+ * ApprovalRequest (WALLET_ADJUSTMENT, reason GOODWILL) is created for a second person.
+ */
+export async function issueCreditOrRequest(actor: Staff, userId: string, amount: number, note: string, idempotencyKey?: string | null) {
+  need(actor, "refunds.approve");
+  checkAmount(amount);
+  if (!(await needsApproval(amount))) return { issued: true as const, row: await issueCredit(actor, userId, amount, note) };
+  const why = note.trim();
+  if (why.length < 3) throw new CrmError("A reason is required for every credit");
+  const { request } = await requestApproval(actor, { kind: "WALLET_ADJUSTMENT", payload: { userId, amount, note: why.slice(0, 300), reason: "GOODWILL" }, reason: why, idempotencyKey });
+  return { issued: false as const, approvalId: request.id };
 }
 
 /** Credit requested by staff who can't approve: waits for an approver (stored as an audit entry). */

@@ -48,8 +48,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ type: st
 
   let rows: (string | number | boolean | null | undefined | Date)[][] = [];
 
+  // Payments / refunds / plans / ledger have no kitchen column: scoped staff get rows tied to an order in their kitchens.
+  const viaOrders = scope ? { orders: { some: { kitchenId: { in: scope } } } } : {};
+
   if (type === "privacy") {
     const id = url.searchParams.get("user") ?? "";
+    // A data-subject export is the full unmasked record, so it also needs customers.pii.
+    if (!pii) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!id || !(await db.user.findUnique({ where: { id }, select: { id: true } }))) return NextResponse.json({ error: "Not found" }, { status: 404 });
     const data = await exportUserData(id);
     await audit({ actorId: user.id, action: "privacy.export", entity: "User", entityId: id });
     return new NextResponse(JSON.stringify(data, null, 2), {
@@ -79,19 +85,19 @@ export async function GET(req: Request, { params }: { params: Promise<{ type: st
       GROUP BY 1 ORDER BY 2 DESC`;
     rows = [["Dish", "Portions"], ...r.map((x) => [x.name, Number(x.n)])];
   } else if (type === "subscriptions") {
-    const subs = await db.subscription.findMany({ where: { createdAt: stamp }, include: { user: { select: { name: true, email: true } }, plan: { select: { name: true } } }, orderBy: { createdAt: "asc" } });
+    const subs = await db.subscription.findMany({ where: { createdAt: stamp, ...viaOrders }, include: { user: { select: { name: true, email: true } }, plan: { select: { name: true } } }, orderBy: { createdAt: "asc" } });
     rows = [["Reference", "Plan", "Customer", "Email", "Status", "Start", "End", "Meals", "Per meal", "Total", "Discount", "Coupon", "Created"]];
     for (const s of subs) rows.push([s.reference, s.plan.name, s.user.name, email(s.user.email), s.status, isoDate(s.startDate), isoDate(s.endDate), s.mealsTotal, money(s.pricePerMeal), money(s.total), money(s.discount), s.couponCode, s.createdAt]);
   } else if (type === "payments") {
-    const ps = await db.payment.findMany({ where: { createdAt: stamp }, include: { user: { select: { name: true, email: true } } }, orderBy: { createdAt: "asc" } });
+    const ps = await db.payment.findMany({ where: { createdAt: stamp, ...viaOrders }, include: { user: { select: { name: true, email: true } } }, orderBy: { createdAt: "asc" } });
     rows = [["Reference", "Method", "Status", "Amount", "Refunded", "Customer", "Email", "Paid at", "Verified by", "Note", "Created"]];
     for (const p of ps) rows.push([p.reference, p.method, p.status, money(p.amount), money(p.refundedAmount), p.user.name, email(p.user.email), p.paidAt, p.verifiedById, p.note, p.createdAt]);
   } else if (type === "refunds") {
-    const rs_ = await db.refund.findMany({ where: { createdAt: stamp }, include: { payment: { select: { reference: true } }, order: { select: { number: true } } }, orderBy: { createdAt: "asc" } });
+    const rs_ = await db.refund.findMany({ where: { createdAt: stamp, ...(scope ? { payment: viaOrders } : {}) }, include: { payment: { select: { reference: true } }, order: { select: { number: true } } }, orderBy: { createdAt: "asc" } });
     rows = [["Payment", "Order", "Amount", "Method", "Status", "Reason", "Provider ref", "Processed at", "Requested"]];
     for (const r of rs_) rows.push([r.payment.reference, r.order?.number, money(r.amount), r.method, r.status, r.reason, r.providerRef, r.processedAt, r.createdAt]);
   } else if (type === "ledger") {
-    const ls = await db.creditLedger.findMany({ where: { createdAt: stamp }, include: { user: { select: { name: true, email: true } } }, orderBy: { createdAt: "asc" } });
+    const ls = await db.creditLedger.findMany({ where: { createdAt: stamp, ...(scope ? { order: kw } : {}) }, include: { user: { select: { name: true, email: true } } }, orderBy: { createdAt: "asc" } });
     rows = [["When", "Customer", "Email", "Amount", "Reason", "Order", "Payment", "Note"]];
     for (const l of ls) rows.push([l.createdAt, l.user.name, email(l.user.email), money(l.amount), l.reason, l.orderId, l.paymentId, l.note]);
   } else if (type === "invoices") {

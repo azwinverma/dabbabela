@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { handleEsewaReturn } from "@/server/payments";
 import { log } from "@/lib/logger";
+import { LIMITS, rateLimitIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const { id } = await params;
   const url = new URL(req.url);
   const to = (path: string) => NextResponse.redirect(new URL(path, url.origin), 303);
+  // Each return triggers a server-to-server status lookup: cap it per IP so the endpoint can't be used to hammer the gateway.
+  if (!(await rateLimitIp("pay-return", LIMITS.payReturn.max, LIMITS.payReturn.windowMs))) return to(`/pay/${id}?status=pending`);
   const payment = await db.payment.findUnique({ where: { id }, select: { id: true, status: true } });
   if (!payment) return to("/account/orders");
   if (payment.status === "PAID") return to(`/thank-you/${id}`);

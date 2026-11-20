@@ -38,6 +38,7 @@ export const REGISTRY = {
 
   payments: { label: "Payments (approve = verify transfers)", group: "Money", actions: ["view", "approve", "export"] },
   refunds: { label: "Refunds & credit (create = request)", group: "Money", actions: ["view", "create", "approve"] },
+  approvals: { label: "Maker-checker approvals (approve = decide others' requests above the threshold)", group: "Money", actions: ["view", "approve"] },
   invoices: { label: "Company invoices", group: "Money", actions: ["view", "edit"] },
   expenses: { label: "Expenses", group: "Money", actions: ["view", "create", "approve", "export"] },
   purchasing: { label: "Supplier invoices & payables", group: "Money", actions: ["view", "create", "approve"] },

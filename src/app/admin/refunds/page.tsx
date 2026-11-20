@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { RefundStatus } from "@prisma/client";
+import type { Prisma, RefundStatus } from "@prisma/client";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { db } from "@/lib/db";
@@ -11,6 +11,7 @@ import { PageHeader, Table, Th, Td, EmptyRow, Tabs, Panel } from "@/components/a
 import { Badge } from "@/components/ui/Badge";
 import { walletBalance } from "@/server/ledger";
 import { ApproveButton, RejectForm, ProcessForm, AdjustForm } from "./RefundForms";
+import { paymentWhere } from "@/components/admin/ops/scope";
 
 export const metadata = { title: "Refunds & credit" };
 
@@ -30,14 +31,14 @@ export default async function Refunds({ searchParams }: { searchParams: Promise<
     <div>
       <PageHeader title="Refunds & credit" description="Requested → approved by finance → processed with proof. Money is never marked returned without a transaction reference or receipt (wallet credit is posted to the ledger)." />
       <Tabs tabs={tabs} current={view} />
-      {view === "ledger" ? <Ledger q={sp.q} canAdjust={approver} pii={can(user, "customers.pii")} /> : <Queue status={view as RefundStatus} approver={approver} />}
+      {view === "ledger" ? <Ledger q={sp.q} uid={sp.uid} canAdjust={approver} pii={can(user, "customers.pii")} /> : <Queue status={view as RefundStatus} approver={approver} scope={paymentWhere(user)} />}
     </div>
   );
 }
 
-async function Queue({ status, approver }: { status: RefundStatus; approver: boolean }) {
+async function Queue({ status, approver, scope }: { status: RefundStatus; approver: boolean; scope: Prisma.PaymentWhereInput }) {
   const rows = await db.refund.findMany({
-    where: { status: status in REFUND_STATUS ? status : "REQUESTED" },
+    where: { status: status in REFUND_STATUS ? status : "REQUESTED", payment: scope },
     include: { payment: { select: { id: true, reference: true, method: true, user: { select: { name: true } } } }, order: { select: { id: true, number: true } } },
     orderBy: { createdAt: status === "REQUESTED" || status === "APPROVED" ? "asc" : "desc" },
     take: 100,
@@ -108,17 +109,20 @@ async function Queue({ status, approver }: { status: RefundStatus; approver: boo
   );
 }
 
-async function Ledger({ q, canAdjust, pii }: { q?: string; canAdjust: boolean; pii: boolean }) {
-  const customers = q
+async function Ledger({ q, uid, canAdjust, pii }: { q?: string; uid?: string; canAdjust: boolean; pii: boolean }) {
+  // Without customers.pii: name (partial) or an exact full email only — no partial email/phone probing; results stay masked.
+  const customers = uid
+    ? await db.user.findMany({ where: { id: uid.slice(0, 64) }, select: { id: true, name: true, email: true }, take: 1 })
+    : q
     ? await db.user.findMany({
-        where: { OR: [{ name: { contains: q, mode: "insensitive" } }, { email: { contains: q, mode: "insensitive" } }, { phoneNumber: { contains: q.replace(/\D/g, "") || q } }] },
+        where: { OR: [{ name: { contains: q, mode: "insensitive" } }, ...(pii ? [{ email: { contains: q, mode: "insensitive" as const } }, { phoneNumber: { contains: q.replace(/\D/g, "") || q } }] : [{ email: { equals: q.trim(), mode: "insensitive" as const } }])] },
         select: { id: true, name: true, email: true },
         take: 10,
       })
     : [];
   const one = customers.length === 1 ? customers[0] : null;
   const [entries, balance] = one ? await Promise.all([db.creditLedger.findMany({ where: { userId: one.id }, orderBy: { createdAt: "desc" }, take: 100 }), walletBalance(one.id)]) : [[], 0];
-  const recent = !q ? await db.creditLedger.findMany({ include: { user: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 30 }) : [];
+  const recent = !q && !uid ? await db.creditLedger.findMany({ include: { user: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 30 }) : [];
   return (
     <div className="space-y-4">
       <form className="flex gap-2">
@@ -130,7 +134,7 @@ async function Ledger({ q, canAdjust, pii }: { q?: string; canAdjust: boolean; p
         <ul className="flex flex-wrap gap-2 text-sm">
           {customers.map((c) => (
             <li key={c.id}>
-              <Link href={`/admin/refunds?view=ledger&q=${encodeURIComponent(c.email)}`} className="rounded-full border border-ink-line bg-white px-3 py-1 hover:border-ink">
+              <Link href={`/admin/refunds?view=ledger&uid=${encodeURIComponent(c.id)}`} className="rounded-full border border-ink-line bg-white px-3 py-1 hover:border-ink">
                 {c.name} · {pii ? c.email : maskEmail(c.email)}
               </Link>
             </li>
@@ -143,7 +147,7 @@ async function Ledger({ q, canAdjust, pii }: { q?: string; canAdjust: boolean; p
           <LedgerTable rows={entries.map((e) => ({ ...e, who: null }))} />
         </Panel>
       )}
-      {!q && (
+      {!q && !uid && (
         <Panel title="Latest ledger entries" bodyClass="p-0">
           <LedgerTable rows={recent.map((e) => ({ ...e, who: e.user.name }))} />
         </Panel>

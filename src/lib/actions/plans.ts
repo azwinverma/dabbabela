@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { z } from "zod";
+import { LIMITS, rateLimit } from "@/lib/rate-limit";
 import type { PaymentMethod, Weekday } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth";
 import { log } from "@/lib/logger";
@@ -94,6 +95,7 @@ export async function subscribePlanAction(
 ): Promise<{ ok: boolean; error?: string; redirectTo?: string; data?: { paymentId: string } }> {
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "Log in to start a plan", redirectTo: "/login?next=/plans" };
+  if (!(await rateLimit("checkout", user.id, LIMITS.checkout.max, LIMITS.checkout.windowMs))) return { ok: false, error: "Too many attempts — wait a minute and try again" };
   const p = planSchema.safeParse(input);
   if (!p.success) return { ok: false, error: p.error.issues[0]?.message ?? "Check the plan details" };
   if (!input.addressId) return { ok: false, error: "Choose a delivery address" };

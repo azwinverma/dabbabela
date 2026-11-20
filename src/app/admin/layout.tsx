@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { ADMIN_NAV } from "@/components/admin/nav";
 import { signOutAction } from "./_kit/session";
+import { pendingForApprover } from "@/server/approvals";
 
 export const metadata: Metadata = { title: "Control room", robots: { index: false, follow: false } };
 
@@ -13,7 +14,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const nav = ADMIN_NAV.map((g) => ({ ...g, items: g.items.filter((i) => can(user, i.perm)) })).filter((g) => g.items.length);
 
   const zero = Promise.resolve(0);
-  const [leads, messages, tickets, pendingPay, refunds, failedMsgs, kitchen] = await Promise.all([
+  const [leads, messages, tickets, pendingPay, refunds, failedMsgs, kitchen, approvals] = await Promise.all([
     can(user, "leads.view") ? db.corporateLead.count({ where: { status: "NEW" } }) : zero,
     can(user, "support.view") ? db.contactMessage.count({ where: { isRead: false, isArchived: false } }) : zero,
     can(user, "support.view") ? db.supportTicket.count({ where: { status: "OPEN" } }) : zero,
@@ -21,6 +22,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     can(user, "refunds.approve") ? db.refund.count({ where: { status: { in: ["REQUESTED", "APPROVED"] } } }) : zero,
     can(user, "settings.view") ? db.outboundMessage.count({ where: { status: "FAILED" } }) : zero,
     user.kitchenId ? db.kitchen.findUnique({ where: { id: user.kitchenId }, select: { name: true } }) : Promise.resolve(null),
+    pendingForApprover(user),
   ]);
 
   return (
@@ -38,6 +40,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         "/admin/support": tickets,
         "/admin/payments": pendingPay,
         "/admin/refunds": refunds,
+        "/admin/approvals": approvals,
         "/admin/notifications": failedMsgs,
       }}
     >

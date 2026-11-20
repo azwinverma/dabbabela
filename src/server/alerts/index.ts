@@ -17,6 +17,7 @@ import { duplicatePayments, reconciliation } from "./detectors/finance";
 import { corporateAccounts, corporateInvoices, corporateShortfall } from "./detectors/corporate";
 import { integrations, paymentMismatch } from "./detectors/integrations";
 import { security } from "./detectors/security";
+import { approvals } from "./detectors/approvals";
 
 export * from "./types";
 
@@ -40,6 +41,7 @@ export const DETECTORS: Detector[] = [
   integrations,
   paymentMismatch,
   security,
+  approvals,
 ];
 
 export const DETECTOR_LABEL: Record<string, string> = Object.fromEntries(DETECTORS.map((d) => [d.name, d.label]));

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
+import { Turnstile } from "@/components/ui/Turnstile";
 import { Input } from "@/components/ui/Fields";
 import { registerAction } from "@/lib/actions/auth";
 import type { AccountDict } from "@/lib/i18n/account";
@@ -31,6 +32,7 @@ export function RegisterForm({ next, code, referral, t }: { next: string; code: 
             </Link>
             .
           </p>
+          <Turnstile action="register" />
           <SubmitButton pendingText="…">{t.register}</SubmitButton>
         </>
       )}

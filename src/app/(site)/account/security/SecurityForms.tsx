@@ -88,13 +88,14 @@ export function DisableTwoFactor() {
   );
 }
 
-export function RevokeButton({ token, all }: { token?: string; all?: boolean }) {
+export function RevokeButton({ sessionId, all, everywhere }: { sessionId?: string; all?: boolean; everywhere?: boolean }) {
   return (
     <ActionForm action={revokeSessionAction} showMessage={false}>
-      {token && <input type="hidden" name="token" value={token} />}
+      {sessionId && <input type="hidden" name="sessionId" value={sessionId} />}
       {all && <input type="hidden" name="all" value="1" />}
-      <SubmitButton size="sm" variant="ghost">
-        {all ? "Sign out all other devices" : "Sign out"}
+      {everywhere && <input type="hidden" name="everywhere" value="1" />}
+      <SubmitButton size="sm" variant="ghost" confirm={everywhere ? "Sign out of every device, including this one?" : undefined}>
+        {everywhere ? "Sign out everywhere" : all ? "Sign out all other devices" : "Sign out this device"}
       </SubmitButton>
     </ActionForm>
   );

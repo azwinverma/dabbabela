@@ -98,6 +98,22 @@ export const TEMPLATES = {
     },
     sms: null,
   },
+  "approval.requested": {
+    // Staff-only (maker-checker, src/server/approvals.ts): a money action above the threshold waits for a second person.
+    topic: "SECURITY",
+    inApp: { title: "Approval needed: {{summary}}", body: "{{requester}} asked: {{reason}}" },
+    email: {
+      subject: "Approval needed: {{summary}}",
+      body: "<p>{{requester}} asked for <strong>{{summary}}</strong>.</p><p>Reason: {{reason}}</p><p><a href=\"{{link}}\">Review the request</a> — you can approve or reject it.</p>",
+    },
+    sms: null,
+  },
+  "approval.decided": {
+    topic: "SECURITY",
+    inApp: { title: "{{summary}}: {{decision}}", body: "Your approval request was {{decision}}." },
+    email: null,
+    sms: null,
+  },
 } as const;
 
 export type TemplateKey = keyof typeof TEMPLATES;

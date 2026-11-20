@@ -1,6 +1,7 @@
 "use client";
 
 import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
+import { Turnstile } from "@/components/ui/Turnstile";
 import { Checkbox, Input, Select, Textarea } from "@/components/ui/Fields";
 import { leadAction } from "@/lib/actions/public";
 
@@ -35,6 +36,7 @@ export function LeadForm() {
           <Textarea label="Anything we should know" name="message" rows={3} className="sm:col-span-2" placeholder="Dietary needs, delivery point, start date…" />
           <Checkbox name="trial" label="We'd like a free tasting for a few people first" className="sm:col-span-2" />
           <div className="sm:col-span-2">
+            <Turnstile action="lead" />
             <SubmitButton pendingText="Sending…" size="lg">
               Send enquiry
             </SubmitButton>

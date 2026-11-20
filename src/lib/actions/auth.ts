@@ -19,6 +19,23 @@ import { str } from "@/lib/utils";
 import { readAttribution } from "@/lib/attribution";
 import { storeUserAttribution } from "@/server/crm";
 import { claimReferral } from "@/server/marketing";
+import { authLimitsOn, LIMITS, rateLimit, requestIp } from "@/lib/rate-limit";
+import { checkTurnstile, TURNSTILE_FAILED } from "@/lib/turnstile";
+
+const TOO_MANY = "Too many attempts — wait a few minutes and try again";
+
+/**
+ * Our own limits for the auth server actions: `auth.api.*` called from a server action skips Better Auth's HTTP
+ * rate limiter, so without this the forms would be unlimited. Keys: per IP, and per account identifier when given.
+ */
+async function limited(name: keyof typeof LIMITS, ...ids: (string | null | undefined)[]) {
+  if (!authLimitsOn()) return false;
+  const { max, windowMs } = LIMITS[name];
+  const ip = await requestIp();
+  if (!(await rateLimit(`auth:${name}:ip`, ip, name === "signInEmail" ? LIMITS.signIn.max : max, windowMs))) return true;
+  for (const id of ids) if (id && !(await rateLimit(`auth:${name}:id`, id.toLowerCase(), max, windowMs))) return true;
+  return false;
+}
 
 /** Only same-site relative paths are allowed as ?next= targets. */
 function safeNext(next: string | null | undefined) {
@@ -64,6 +81,8 @@ export async function loginAction(_: ActionResult, fd: FormData): Promise<Action
   const password = String(fd.get("password") ?? "");
   const next = safeNext(str(fd.get("next")));
   if (!email || !password) return fail("Enter your email and password");
+  if (await limited("signInEmail", email)) return fail(TOO_MANY);
+  if (!(await checkTurnstile(fd, "login")).ok) return fail(TURNSTILE_FAILED);
   try {
     const res = (await auth.api.signInEmail({ body: { email, password, rememberMe: true }, headers: await headers() })) as {
       twoFactorRedirect?: boolean;
@@ -82,6 +101,7 @@ export async function verifyTwoFactorAction(_: ActionResult, fd: FormData): Prom
   const backup = fd.get("mode") === "backup";
   const next = safeNext(str(fd.get("next")));
   if (!code) return fail("Enter the code");
+  if (await limited("twoFactor")) return fail(TOO_MANY);
   try {
     const h = await headers();
     const res = (backup
@@ -99,6 +119,8 @@ export async function sendOtpAction(_: ActionResult, fd: FormData): Promise<Acti
   if (!s.flags.phoneOtp) return fail("Mobile sign-in isn't available yet — use your email");
   const phone = normalizeNepalPhone(str(fd.get("phone")));
   if (!phone || !isNepalMobile(phone)) return fail("Enter a Nepal mobile number (98/97/96…)");
+  if (await limited("otpSend", phone)) return fail(TOO_MANY);
+  if (!(await checkTurnstile(fd, "otp")).ok) return fail(TURNSTILE_FAILED);
   try {
     await auth.api.sendPhoneNumberOTP({ body: { phoneNumber: phone }, headers: await headers() });
     return { ok: true, message: `We sent a code to ${phone.replace(/^\+977/, "")}` };
@@ -114,6 +136,7 @@ export async function verifyOtpAction(_: ActionResult, fd: FormData): Promise<Ac
   const code = str(fd.get("code"));
   const next = safeNext(str(fd.get("next")));
   if (!phone || !code) return fail("Enter your number and the code");
+  if (await limited("otpVerify", phone)) return fail(TOO_MANY);
   try {
     const res = (await auth.api.verifyPhoneNumber({ body: { phoneNumber: phone, code }, headers: await headers() })) as { user?: { id: string; email?: string } };
     if (!res.user) return fail("That code isn't right");
@@ -150,6 +173,8 @@ export async function registerAction(_: ActionResult, fd: FormData): Promise<Act
     return fail("Check the highlighted fields", errors);
   }
   const d = parsed.data;
+  if (await limited("signUp")) return fail(TOO_MANY);
+  if (!(await checkTurnstile(fd, "register")).ok) return fail(TURNSTILE_FAILED);
   const phone = normalizeNepalPhone(d.phone)!;
   if (await db.user.findUnique({ where: { phoneNumber: phone } })) return fail("That mobile number is already on another account", { phone: "Already registered" });
   const company = d.companyCode ? await db.company.findFirst({ where: { joinCode: d.companyCode.toUpperCase(), isActive: true } }) : null;
@@ -196,6 +221,8 @@ export async function logoutAction() {
 export async function forgotAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   const email = str(fd.get("email")).toLowerCase();
   if (!z.string().email().safeParse(email).success) return fail("Enter a valid email");
+  if (await limited("reset", email)) return fail("Too many requests — try again in a few minutes");
+  if (!(await checkTurnstile(fd, "reset")).ok) return fail(TURNSTILE_FAILED);
   try {
     await auth.api.requestPasswordReset({ body: { email, redirectTo: "/reset-password" }, headers: await headers() });
   } catch (e) {
@@ -211,6 +238,7 @@ export async function resetAction(_: ActionResult, fd: FormData): Promise<Action
   const pw = String(fd.get("password") ?? "");
   const pw2 = String(fd.get("password2") ?? "");
   if (!token) return fail("This link is incomplete — ask for a new one");
+  if (await limited("resetSubmit")) return fail(TOO_MANY);
   if (pw.length < 8) return fail("Use at least 8 characters", { password: "At least 8 characters" });
   if (pw !== pw2) return fail("The two passwords don't match", { password2: "Doesn't match" });
   try {
@@ -289,17 +317,33 @@ export async function disableTwoFactorAction(_: ActionResult, fd: FormData): Pro
 
 export async function revokeSessionAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   const user = await me();
-  const token = str(fd.get("token"));
+  // Sessions are addressed by id; tokens never leave the server (they used to be rendered into the page).
+  const sessionId = str(fd.get("sessionId")).slice(0, 64);
   const all = fd.get("all") === "1";
+  const everywhere = fd.get("everywhere") === "1";
   try {
-    if (all) await auth.api.revokeOtherSessions({ headers: await headers() });
-    else {
-      const owned = await db.session.findFirst({ where: { token, userId: user.id } });
-      if (!owned) return fail("Session not found");
-      await auth.api.revokeSession({ body: { token }, headers: await headers() });
+    if (everywhere) {
+      const { count } = await db.session.deleteMany({ where: { userId: user.id } });
+      await audit({ actorId: user.id, action: "user.sessions_revoke_all", entity: "User", entityId: user.id, summary: `Signed out everywhere (${count} session(s), including this one)` });
+    } else if (all) {
+      const { count } = await db.session.deleteMany({ where: { userId: user.id, id: { not: user.sessionId } } });
+      await audit({ actorId: user.id, action: "user.sessions_revoke_others", entity: "User", entityId: user.id, summary: `Signed out ${count} other session(s)` });
+    } else {
+      if (!sessionId || sessionId === user.sessionId) return fail("Use “Sign out” in the menu to end this session");
+      const { count } = await db.session.deleteMany({ where: { id: sessionId, userId: user.id } });
+      if (!count) return fail("Session not found");
+      await audit({ actorId: user.id, action: "user.session_revoke", entity: "User", entityId: user.id, summary: "Signed out one device" });
     }
   } catch (e) {
     return fail(authMessage(e, "We couldn't sign that device out"));
+  }
+  if (everywhere) {
+    try {
+      await auth.api.signOut({ headers: await headers() }); // clears this browser's cookies
+    } catch {
+      /* session row already gone */
+    }
+    return done("Signed out everywhere", "/login?signedout=1");
   }
   revalidatePath("/account/security");
   return done(all ? "Signed out everywhere else" : "Device signed out");
