@@ -957,6 +957,7 @@ model Order {
   @@index([subscriptionId])
   @@index([companyId, deliveryDate])
   @@index([paymentId])
+  @@index([createdAt]) // admin orders list (newest first) and placed-date analytics
 }
 
 model OrderItem {
@@ -978,6 +979,8 @@ model OrderItem {
   lineTotal   Int
 
   customizations OrderItemCustomization[]
+
+  @@index([orderId]) // capacity checks on every quote/order join OrderItem→Order; order detail includes
 }
 
 model OrderItemCustomization {
@@ -1012,6 +1015,8 @@ model OrderAdjustment {
   reason    String
   actorId   String?
   createdAt DateTime @default(now())
+
+  @@index([orderId]) // order detail, analytics adjustments, receivables
 }
 
 // ═════════════════════════════ Payments, refunds, ledger, invoices ═════════════════════════════
@@ -1066,6 +1071,7 @@ model Payment {
 
   @@index([status])
   @@index([userId])
+  @@index([subscriptionId]) // plan pages, renewals, payment history
 }
 
 model PaymentAttempt {
@@ -1132,6 +1138,7 @@ model Refund {
   updatedAt     DateTime     @updatedAt
 
   @@index([status])
+  @@index([paymentId]) // payment detail, refund totals
 }
 
 /// Append-only wallet ledger. Balance = SUM(amount). Rows are never updated or deleted.
@@ -1201,6 +1208,8 @@ model InvoiceLine {
   quantity    Int     @default(1)
   unitPrice   Int
   amount      Int
+
+  @@index([invoiceId]) // invoice pages and regeneration
 }
 
 model TaxRule {
@@ -1684,6 +1693,7 @@ model DeliveryRoute {
   cost Int? // paisa: rider pay + fuel for this route (estimated)
 
   @@index([date])
+  @@index([kitchenId, date]) // dispatch and rider pages load a kitchen's routes for a day
 }
 
 model DeliveryAssignment {
@@ -1694,6 +1704,8 @@ model DeliveryAssignment {
   route     DeliveryRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
   sequence  Int           @default(0)
   createdAt DateTime      @default(now())
+
+  @@index([routeId]) // dispatch board and rider route
 }
 
 model DeliveryEvent {
