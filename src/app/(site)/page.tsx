@@ -3,7 +3,11 @@ import Link from "next/link";
 import { ArrowRight, Check, MapPin } from "lucide-react";
 import { db } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
-import { getHomeLayout } from "@/lib/cms-store";
+import { getHomeLayout, HOME_BUILDER_KEY } from "@/lib/cms-store";
+import { getPublicPage, HOME_SLUG } from "@/lib/cms/pages";
+import { Blocks } from "@/lib/cms/render";
+import { boxInclude } from "@/server/menu";
+import { isPublicBox, toPublicBox } from "@/lib/public";
 import { getSections } from "@/lib/cms";
 import { getI18n } from "@/lib/i18n/server";
 import { pick, format } from "@/lib/i18n";
@@ -32,7 +36,8 @@ export default async function HomePage() {
   const { locale, t } = await getI18n();
   const layout = await getHomeLayout();
   const keys = layout.filter((b) => b.visible).map((b) => b.key);
-  const [s, sections, days, plans, zones, faqs, testimonials] = await Promise.all([
+  const featuredCount = Math.min(6, Math.max(1, Number((await getSections(["home.featured"], locale))["home.featured"]?.count) || 3));
+  const [s, sections, days, plans, zones, faqs, testimonials, featured, builder] = await Promise.all([
     getSettings(),
     getSections(keys, locale),
     keys.includes("home.week") ? upcomingDays(locale) : Promise.resolve([] as PublicDay[]),
@@ -40,12 +45,50 @@ export default async function HomePage() {
     db.deliveryZone.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" }, select: { id: true, name: true, areas: true } }),
     db.faq.findMany({ where: { published: true }, orderBy: { sortOrder: "asc" }, take: 8 }),
     db.testimonial.findMany({ where: { published: true, consentNote: { not: "" } }, orderBy: { sortOrder: "asc" }, take: 3 }),
+    keys.includes("home.featured")
+      ? db.lunchBox
+          .findMany({ where: { isActive: true, isVisible: true, isFeatured: true }, include: boxInclude, orderBy: { sortOrder: "asc" }, take: featuredCount })
+          .then((rows) => rows.filter(isPublicBox).map((b) => toPublicBox(b, locale)))
+          .catch(() => [])
+      : Promise.resolve([]),
+    keys.includes(HOME_BUILDER_KEY) ? getPublicPage(HOME_SLUG, locale) : Promise.resolve(null),
   ]);
 
   const blocks: Record<string, (d: Data) => React.ReactNode> = {
     "home.hero": (d) => <Hero d={d} cutoff={s.orderCutoff} />,
     "home.how": (d) => <How d={d} />,
     "home.week": (d) => <Week d={d} days={days} t={t} />,
+    "home.featured": (d) =>
+      featured.length ? (
+        <section className="container py-20" key="featured">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <SectionHeading eyebrow={d.eyebrow} title={d.title} intro={d.intro} />
+            {d.linkLabel && (
+              <Link href="/menu" className="font-semibold text-sindoor underline underline-offset-4">
+                {d.linkLabel} →
+              </Link>
+            )}
+          </div>
+          <ul className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {featured.map((bx) => (
+              <li key={bx.id}>
+                <Link href={`/boxes/${bx.slug}`} className="card group block overflow-hidden">
+                  <BoxImage box={bx} className="border-b-2 border-ink" />
+                  <div className="p-4">
+                    <h3 className="font-display text-lg font-bold group-hover:text-sindoor">{bx.name}</h3>
+                    {bx.tagline && <p className="mt-1 text-sm text-ink-soft">{bx.tagline}</p>}
+                    <div className="mt-3 flex items-center justify-between gap-2">
+                      <DietBadge diet={bx.diet} t={t} verified={bx.dietVerified} />
+                      <span className="font-bold text-sindoor">{rs(bx.price)}</span>
+                    </div>
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null,
+    [HOME_BUILDER_KEY]: () => (builder && builder.blocks.length ? <Blocks blocks={builder.blocks} locale={locale} t={t} firstIsTitle={false} /> : null),
     "home.build": (d) => <BuildTeaser d={d} />,
     "home.plans": (d) =>
       plans.length ? (

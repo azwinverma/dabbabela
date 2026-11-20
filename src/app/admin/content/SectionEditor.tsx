@@ -5,8 +5,8 @@ import type { Field } from "@/lib/cms";
 
 type Data = Record<string, any>;
 
-function blank(fields: Field[]): Data {
-  return Object.fromEntries(fields.map((f) => [f.name, f.type === "boolean" ? false : f.type === "number" ? 0 : f.type === "list" ? [] : ""]));
+export function blank(fields: Field[]): Data {
+  return Object.fromEntries(fields.map((f) => [f.name, f.type === "boolean" ? false : f.type === "number" ? 0 : f.type === "list" ? [] : f.type === "select" ? (f.options?.[0]?.value ?? "") : ""]));
 }
 
 function ImageInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -54,7 +54,7 @@ function ImageInput({ value, onChange }: { value: string; onChange: (v: string) 
   );
 }
 
-function FieldInput({ field, value, onChange, placeholder, id }: { field: Field; value: any; onChange: (v: any) => void; placeholder?: string; id?: string }) {
+export function FieldInput({ field, value, onChange, placeholder, id }: { field: Field; value: any; onChange: (v: any) => void; placeholder?: string; id?: string }) {
   switch (field.type) {
     case "textarea":
       return <textarea id={id} className="field" rows={3} value={value ?? ""} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />;
@@ -71,6 +71,16 @@ function FieldInput({ field, value, onChange, placeholder, id }: { field: Field;
       return <input id={id} type="number" className="field" value={value ?? 0} onChange={(e) => onChange(Number(e.target.value))} />;
     case "image":
       return <ImageInput value={value ?? ""} onChange={onChange} />;
+    case "select":
+      return (
+        <select id={id} className="field" value={value ?? field.options?.[0]?.value ?? ""} onChange={(e) => onChange(e.target.value)}>
+          {(field.options ?? []).map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      );
     case "list":
       return <ListInput field={field} value={Array.isArray(value) ? value : []} onChange={onChange} />;
     default:

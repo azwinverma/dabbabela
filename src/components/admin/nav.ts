@@ -80,7 +80,7 @@ export const ADMIN_NAV_ALL: NavGroup[] = [
     items: [
       { href: "/admin/content", label: "Page sections", icon: "PanelsTopLeft", perm: "content.view" },
       { href: "/admin/pages", label: "Pages & policies", icon: "FileText", perm: "content.view" },
-      { href: "/admin/site", label: "Navigation, SEO & redirects", icon: "Globe", perm: "seo.view", ready: false, owner: "WP-14" },
+      { href: "/admin/site", label: "Navigation, SEO & redirects", icon: "Globe", perm: "seo.view", ready: true, owner: "WP-14" },
       { href: "/admin/blog", label: "Journal", icon: "Newspaper", perm: "content.view" },
       { href: "/admin/banners", label: "Banners & promos", icon: "Megaphone", perm: "marketing.view" },
       { href: "/admin/campaigns", label: "Campaigns & referrals", icon: "Target", perm: "marketing.view", ready: true, owner: "WP-15" },

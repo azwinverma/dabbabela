@@ -106,9 +106,14 @@ export async function rollbackSection(key: string, locale: Locale, revisionId: s
 // ───────────── home page layout (order + visibility of blocks) ─────────────
 
 export type HomeBlock = { key: string; visible: boolean };
+/** Home layout entry that renders the published blocks of the page-builder page "home" (src/lib/cms/pages.ts). */
+export const HOME_BUILDER_KEY = "home.builder";
 /** Lazy: cms.ts re-exports from this module, so SECTIONS must not be read at import time. */
 export function homeBlockKeys() {
-  return SECTIONS.filter((s) => s.key.startsWith("home.")).map((s) => s.key);
+  const keys = SECTIONS.filter((s) => s.key.startsWith("home.")).map((s) => s.key);
+  const cta = keys.indexOf("home.cta");
+  keys.splice(cta < 0 ? keys.length : cta, 0, HOME_BUILDER_KEY);
+  return keys;
 }
 
 export async function getHomeLayout(): Promise<HomeBlock[]> {
@@ -116,7 +121,13 @@ export async function getHomeLayout(): Promise<HomeBlock[]> {
   const saved = (row?.value as HomeBlock[] | undefined) ?? [];
   const keys = homeBlockKeys();
   const known = saved.filter((b) => keys.includes(b.key));
-  for (const k of keys) if (!known.find((b) => b.key === k)) known.push({ key: k, visible: true });
+  // Blocks added since the layout was saved go in at their default spot (before the closing call to action), shown.
+  for (const [i, k] of keys.entries()) {
+    if (known.find((b) => b.key === k)) continue;
+    const next = keys.slice(i + 1).find((n) => known.some((b) => b.key === n));
+    const at = next ? known.findIndex((b) => b.key === next) : known.length;
+    known.splice(at, 0, { key: k, visible: true });
+  }
   return known;
 }
 

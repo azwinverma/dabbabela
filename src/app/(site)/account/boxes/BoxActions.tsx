@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useCart } from "@/components/site/cart";
@@ -41,7 +42,7 @@ export function BoxActions({ id, name, price, dates }: { id: string; name: strin
       </div>
       {msg && (
         <p role="status" className="text-sm font-semibold text-saag-dark">
-          {msg} · <a href="/checkout" className="underline">Checkout</a>
+          {msg} · <Link href="/checkout" className="underline">Checkout</Link>
         </p>
       )}
       <div className="flex flex-wrap gap-3 text-sm">

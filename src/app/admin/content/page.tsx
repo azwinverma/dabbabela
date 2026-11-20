@@ -2,7 +2,7 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { requirePermission } from "@/lib/auth";
 import { SECTIONS } from "@/lib/cms";
-import { getHomeLayout } from "@/lib/cms-store";
+import { getHomeLayout, HOME_BUILDER_KEY } from "@/lib/cms-store";
 import { formatStamp } from "@/lib/dates";
 import { PageHeader, Panel } from "@/components/admin/ui";
 import { Badge } from "@/components/ui/Badge";
@@ -49,7 +49,10 @@ export default async function ContentPage() {
         </div>
         <Panel title="Home page order">
           <p className="mb-3 text-sm text-ink-mute">Reorder or hide blocks on the home page. Hidden blocks keep their content.</p>
-          <HomeLayoutEditor initial={layout} labels={Object.fromEntries(SECTIONS.map((s) => [s.key, s.label]))} save={saveLayoutAction} />
+          <HomeLayoutEditor initial={layout} labels={{ ...Object.fromEntries(SECTIONS.map((s) => [s.key, s.label])), [HOME_BUILDER_KEY]: "Page-builder blocks (page “home”)" }} save={saveLayoutAction} />
+          <p className="mt-3 text-xs text-ink-mute">
+            “Page-builder blocks” shows whatever is published on the <Link href="/admin/pages?tab=builder" className="underline">home blocks page</Link> — add any block type there (meal showcase, stats, gallery…).
+          </p>
         </Panel>
       </div>
     </>

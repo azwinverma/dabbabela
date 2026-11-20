@@ -7,25 +7,32 @@ import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
 import { Input, Textarea, Checkbox } from "@/components/ui/Fields";
 import { buttonClass } from "@/components/ui/Button";
 import { ConfirmAction } from "@/components/admin/ConfirmAction";
-import { savePage, deletePage } from "../actions";
+import { Badge } from "@/components/ui/Badge";
+import { can } from "@/lib/permissions";
+import { formatStamp } from "@/lib/dates";
+import { policyRevisions } from "@/lib/cms/policies";
+import { savePage, deletePage, restorePageRevision } from "../actions";
 
 export default async function PageEdit({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("content.view");
+  const user = await requirePermission("content.view");
   const { id } = await params;
   const p = id === "new" ? null : await db.page.findUnique({ where: { id } });
   if (id !== "new" && !p) notFound();
+  const revisions = p ? await policyRevisions(p.id) : [];
+  const canPublish = can(user, "content.publish");
+  const names = new Map((await db.user.findMany({ where: { id: { in: revisions.map((r) => r.actorId).filter((x): x is string => Boolean(x)) } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]));
   return (
     <>
       <PageHeader
         title={p ? p.title : "New page"}
-        back={{ href: "/admin/pages", label: "Pages" }}
+        back={{ href: "/admin/pages?tab=policies", label: "Policies & info pages" }}
         actions={
           p && (
             <>
               <Link href={`/info/${p.slug}`} target="_blank" className={buttonClass("outline", "sm")}>
                 View
               </Link>
-              <ConfirmAction action={deletePage.bind(null, p.id)} label="Delete" variant="danger" confirm="Delete this page?" />
+              {canPublish && <ConfirmAction action={deletePage.bind(null, p.id)} label="Delete" variant="danger" confirm="Delete this page?" />}
             </>
           )
         }
@@ -55,8 +62,33 @@ export default async function PageEdit({ params }: { params: Promise<{ id: strin
             </div>
           </Panel>
           <SubmitButton>Save page</SubmitButton>
+          {!canPublish && <p className="text-xs text-ink-mute">You can edit unpublished pages. Changing a published page needs the content publish permission.</p>}
         </div>
       </ActionForm>
+      {p && (
+        <Panel title="Revision history" className="mt-6" bodyClass="p-0">
+          <ul className="divide-y divide-ink-line/50">
+            {revisions.length === 0 && <li className="px-4 py-6 text-center text-sm text-ink-mute">No revisions yet — the first save records one.</li>}
+            {revisions.map((r, i) => (
+              <li key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold">
+                    {r.title} {i === 0 && <Badge tone="good">current</Badge>}
+                  </p>
+                  <p className="text-xs text-ink-mute">
+                    {formatStamp(r.createdAt)} · {r.actorId ? (names.get(r.actorId) ?? "staff") : "system"} · {r.body.length.toLocaleString()} characters
+                  </p>
+                  <details className="mt-1">
+                    <summary className="cursor-pointer text-xs font-semibold text-akash">Show text</summary>
+                    <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-paper p-3 font-mono text-xs">{r.body}</pre>
+                  </details>
+                </div>
+                {canPublish && i > 0 && <ConfirmAction action={restorePageRevision.bind(null, p.id, r.id)} label="Restore" confirm="Replace the current text with this revision? (The current text stays in the history.)" />}
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      )}
     </>
   );
 }

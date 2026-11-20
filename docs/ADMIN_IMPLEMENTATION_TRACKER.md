@@ -761,7 +761,54 @@ campaign, no consent → nothing stored, request-id header, portion kept).
 
 **Depends:** WP-01.
 
-## WP-14: CMS page builder, navigation, branding, SEO ⬜ (L)
+## WP-14: CMS page builder, navigation, branding, SEO ✅ (L)
+**Done 2026-11-05.** No schema change.
+- **Blocks (`src/lib/cms/blocks.ts`, client-safe):** 14 zod-validated types — hero, text (markdown), image, cta, featureGrid,
+  mealShowcase (live dabbas: featured / this week / category), pricingTable (live `MealPlan` price mirror), testimonials (consented
+  only), faq (published FAQs), partners, banner, gallery, illustration (brand art set), stats (named live metrics only). Plain-text
+  fields refuse HTML tags and `javascript:`; markdown goes through `md()` (raw HTML escaped); links pass `isSafeHref` (site path,
+  https, mailto, tel, #); images pass `isSafeImage` and https images must be in `MediaAsset` (checked on save). Saving refuses any
+  invalid block with readable errors; rendering skips (and logs) invalid/unknown blocks.
+- **Pages (`src/lib/cms/pages.ts`, actor-checked):** `createPage`, `updatePageMeta` (renaming a live page adds a redirect, no
+  chains), `updatePageSeo` (`seo.edit`: title, description, OG image, canonical, noindex), `saveDraft` (`content.edit`, one DRAFT
+  per page+locale), `publishDraft` now or scheduled (`content.publish`), `restoreVersion` (copies an old version into a new published
+  one), `cancelSchedule`, `unpublishPage`/`republishPage`, `deletePage`. Read time: `liveVersion` = latest effective PUBLISHED or
+  due SCHEDULED version, so schedules need no cron; Nepali falls back to English. **`publishDuePages(now)`** for WP-16 (idempotent
+  status tidy-up). Reserved first segments (fixed routes) can't be used as slugs. All changes audited (`cms_page.*`).
+- **Routes:** `src/app/(site)/[...slug]` — published page → `Redirect` (308/307, hit counted) → 404, with `cmsMetadata` (canonical,
+  robots noindex, OG) and JSON-LD (WebPage, BreadcrumbList, FAQPage when FAQ blocks). Staff preview `/preview/<pageId>?v=&locale=`
+  with desktop/mobile toggle (iframe `/preview/<id>/frame`), `content.view`, noindex.
+- **Admin:** `/admin/pages` tabs: Page builder (create, list), Policies & info pages, "Where each page is managed" map.
+  `/admin/pages/cms/[id]`: per-locale block editor (add, reorder, duplicate, hide, edit; client + server validation), save draft /
+  publish now / schedule (Kathmandu time), discard, version history with preview + restore, page details, SEO panel.
+  `/admin/site` (nav entry flipped ready): Navigation (4 menus, EN/NE labels, sub-links, order, show/hide, add/remove), Branding &
+  contact, Redirects (hits), SEO overview. Policy pages: `PageRevision` on every content change (first change also stores the
+  replaced text), revision list + restore (`content.publish`); editing a published policy or publishing needs `content.publish`.
+- **Navigation:** `getNav(menu, locale)` (cached, tag `cms`) drives Header (HEADER) and Footer (FOOTER_EXPLORE / FOOTER_COMPANY /
+  FOOTER_LEGAL + published policy pages flagged "link in footer"); the old hardcoded links remain only as an empty-DB fallback.
+  Footer "Cookie choices" button dispatches `OPEN_EVENT` (WP-11).
+- **Branding (`Setting` "branding"):** header/footer logo + favicon (media library), colour preset (approved palette → announcement
+  bar + footer), typography preset (bundled fonts only, fixed CSS map); contact, hours and socials saved to the site settings record.
+- **Built-in content (`ensureCmsContent()`, idempotent, Setting `cms.content.v1`, run on `/admin/pages`):** `/our-story` and
+  `/how-it-works` block pages built from the current published section copy (about.story/process, home.how/plans), linked in
+  Footer · Company; a "home" blocks page (placed via the new `home.builder` entry in the home layout); `nutrition` and
+  `delivery-policy` policy pages (needs review); privacy policy gains the attribution-cookie section (old text kept as a revision).
+  Home: new "Featured dabbas" section (`home.featured`, live `isFeatured` boxes). New home-layout entries are inserted at their
+  default position in saved layouts. Sitemap adds published, indexable CMS pages; robots disallows `/preview`.
+- **Permissions:** `content.edit` drafts; `content.publish` publishes/schedules/restores/unpublishes, edits nav and branding (live
+  immediately); `seo.edit` page SEO + redirects. Banners stay on `/admin/banners` (`marketing.*`).
+
+Tests: `tests/integration/cms-builder.test.ts` (15: every block's defaults validate, unsafe content/URLs refused, markdown script
+escaped + invalid blocks skipped, draft not public / publish visible / NE fallback / unpublish, scheduled read-time visibility +
+idempotent `publishDuePages`, restore as new version, unsafe blocks + non-library images refused, edit/publish/SEO/nav split,
+nav from DB per locale + hidden + audited, redirect normalisation/hits/loops/chains/built-in paths, rename keeps old URL, sitemap
+published-only + noindex/canonical metadata, built-in content + privacy revision + idempotent, policy revisions + restore, branding presets).
+**Deferred:** Playwright acceptance 16 (not run here); `orders.modificationWindow` settings field (WP-03 request — `/admin/settings`
+isn't owned here); favicon/theme colour through root-layout metadata (request below; today a hoisted `<link rel="icon">`);
+header sub-links render top-level only (footer shows them); Nepali label for "Cookie choices" is inline (i18n dictionaries not owned);
+legal review of policies and the cookie text (external blocker). Lint: one error in unowned `(site)/account/boxes/BoxActions.tsx`
+now reported by `no-html-link-for-pages` because the catch-all route matches every path (request below).
+
 **Owns:**
 - `src/lib/cms/**` (new block registry), `src/lib/cms.ts`, `src/lib/cms-store.ts`
 - `src/app/admin/content/**`, `src/app/admin/pages/**`, `src/app/admin/site/**` (new: nav, branding, redirects, SEO)
@@ -775,12 +822,6 @@ campaign, no consent → nothing stored, request-id header, portion kept).
 - **SEO and policies:** canonical and noindex; JSON-LD; policy page revisions.
 - **Content pages:** seeded Nutrition and Delivery Policy pages, marked "needs review".
 - **Customer-facing:** header, footer, new pages, home featured-meals block.
-
-**Tests:**
-- Invalid block payloads are rejected.
-- Script injection is escaped.
-- Scheduled publish is idempotent.
-- E2E (acceptance 16): a new page block appears on the public site after publish.
 
 **Depends:** WP-01.
 
@@ -983,7 +1024,7 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-06 | WP-11 | Renew / swap / add-meal server actions in `src/lib/actions/shop.ts` (WP-06 may add new exported actions in a new file `src/lib/actions/plans.ts` instead) | done (WP-06 in `src/lib/actions/plans.ts`; WP-11 removed the old `shop.ts quotePlanAction/subscribeAction`, `PlanQuoteDTO` type kept) |
 | WP-11 | WP-06 | Subscription attribution: let `createSubscription` accept `attribution`/`campaignId` (→ `Subscription.campaignId`, e.g. via `cleanAttribution` from `orders.ts`) and pass it from `subscribePlanAction`/`renewPlanAction` with `orderTouch(readAttribution(await cookies()))` + `campaignIdFor()` (`src/lib/attribution.ts`, `src/server/crm.ts`) | done (integration pass: `createSubscription` takes `attribution` → `Subscription.campaignId` via `cleanAttribution`; `subscribePlanAction` / `renewPlanAction` pass the checkout reader `orderTouch(readAttribution(cookies))` + `campaignIdFor`; `renewSubscription` forwards it) |
 | WP-11 | WP-03 / WP-12 | Suspended customers: staff-placed orders (`orders-admin.ts`) and company/team orders (`team.ts`) should refuse a customer whose account is suspended or deleted — call `assertCustomerCanOrder(userId)` (`src/server/crm.ts`) or check `isActive`/`deletedAt` in `placeCartOrder` | done (integration pass: `placeCartOrder` and `createSubscription` refuse inactive/deleted accounts (`assertAccountCanOrder`, covers team orders, which go through `placeCartOrder`); `createManualOrder` and each bulk member call `assertCustomerCanOrder`) |
-| WP-11 | WP-14 | Privacy policy: add the attribution-cookie paragraph (`dabba_consent` 180 d, `dabba_ft` 90 d, `dabba_lt` 30 d; UTM values, referring host, landing path; stored on account/orders; "No thanks" deletes). Footer "Cookie choices" link: `onClick={() => window.dispatchEvent(new Event("dabba:consent-open"))}` (export `OPEN_EVENT` in `ConsentNotice.tsx`). Note: WP-11 mounted `<ConsentNotice />` in `src/app/(site)/layout.tsx` (one line) | open |
+| WP-11 | WP-14 | Privacy policy: add the attribution-cookie paragraph (`dabba_consent` 180 d, `dabba_ft` 90 d, `dabba_lt` 30 d; UTM values, referring host, landing path; stored on account/orders; "No thanks" deletes). Footer "Cookie choices" link: `onClick={() => window.dispatchEvent(new Event("dabba:consent-open"))}` (export `OPEN_EVENT` in `ConsentNotice.tsx`). Note: WP-11 mounted `<ConsentNotice />` in `src/app/(site)/layout.tsx` (one line) | done (WP-14: privacy section added by `ensureCmsContent()` with the old text kept as a `PageRevision`; footer "Cookie choices" button dispatches `OPEN_EVENT`) |
 | WP-11 | WP-15 / WP-10 | Attribution report: first touch = `User.acquisitionSource`/`User.attribution` (flat first touch + `last`), order = `Order.attribution` (last touch) + `Order.campaignId`. The `/api/admin/export/customers` CSV could reuse `exportCustomerDirectory` (adds acquisition source, filters) | WP-15 part done (`campaignPerformance` first/last touch on `/admin/campaigns`); WP-10 part open |
 | WP-11 | e2e owners / WP-20 | The site now shows an in-flow consent bar above the header until answered; e2e contexts that assert on top-of-page layout can pre-set cookie `dabba_consent=granted` or `denied` | open |
 | WP-06 | WP-16 | Daily cron: call `syncPlanPriceMirrors()` (scheduled plan price becomes the `MealPlan` mirror read by home/CMS pricing tables) next to `completeAndRemind()` | open |
@@ -1019,6 +1060,11 @@ _Record here when a package needs a change in a file owned by another package._
 | WP-15 | WP-11 | Optional: accept `?ref=CODE` at sign-up (`auth.ts`) and call `claimReferral(userId, code)`; checkout coupon field hint "Friend's referral code works here too" | open |
 | WP-15 | `ledger.ts` owner | Add `"REFERRAL"` to `LedgerEntry["reason"]` (marketing.ts writes the row directly in its own transaction) | open |
 | WP-15 | WP-00 (next schema change) | `Referral.rewardedAt`, `Referral.note` (hold reason / staff decision — today in the audit log), and setting `CouponRedemption.orderId` (orders.ts passes only `paymentId`) | open |
+| WP-14 | WP-16 | Call `publishDuePages()` (`src/lib/cms/pages.ts`) in the housekeeping / frequent cron next to `publishDueMenus()`. Visibility doesn't depend on it (read-time check); it records due versions as PUBLISHED and supersedes the old ones (idempotent) | open |
+| WP-14 | WP-00 (foundation / seed) | Call `ensureCmsContent(db)` (`src/lib/cms/builtin.ts`) from `prisma/foundation.ts` (with `SCRIPT_CONTEXT=1`) and the seed, so `/our-story`, `/how-it-works`, `nutrition`, `delivery-policy` and the privacy cookie section exist without a staff visit to `/admin/pages` | open |
+| WP-14 | root layout owner / WP-20 | Favicon + theme colour from branding: in `src/app/layout.tsx` `generateMetadata` add `icons: (await getBranding()).faviconUrl` (`src/lib/cms/branding.ts`); then drop the hoisted `<link rel="icon">` in `Header.tsx` | open |
+| WP-14 | WP-18 (account pages) | `src/app/(site)/account/boxes/BoxActions.tsx` line ~44: `<a href="/checkout">` → `<Link href="/checkout">`. With the CMS catch-all route, `@next/next/no-html-link-for-pages` treats every internal path as a page, so `npm run lint` reports this one error | done (lead) |
+| WP-14 | i18n owner | Add `site.cookieChoices` ("Cookie choices" / "कुकी छनोट") to the dictionaries; `Footer.tsx` uses an inline label meanwhile | open |
 
 ## External blockers (⛔)
 | Blocker | Affects |
@@ -1052,3 +1098,4 @@ _Record here when a package needs a change in a file owned by another package._
 | 2026-11-19 | WP-18 | Customer dashboard: today's lunch status line (DB status, no GPS), upcoming 14 days with per-day cut-off, Renew links, meal calendar, `/account/payments` (payments, refunds, credit, totals), address map pin (geolocation on consent + manual), loading/error states for account, menu, plans and admin; EN/NE strings (NE needs review); 10 integration tests |
 | 2026-11-19 | Integration pass | Ordering core: distance fee bands + zone windows (checkout, plans, staff re-pricing), company menu + per-day company share + bulk menu/budget, suspended accounts refused everywhere, subscription attribution, kitchen gate in date pickers, non-open kitchens explained at checkout/coverage, `/admin/invoices` on contract-aware company invoices with adjustments; test fixes (ops KTM-1, access seeded plans); 8 integration tests |
 | 2026-11-19 | WP-15 | Promotions: free-delivery/box-scoped coupon checks, stacking rule, per-customer lock, coupons on the kit + usage; campaigns + spend + legacy import + first/last-touch performance; campaign templates (no sending); referrals with fraud holds and exactly-once wallet rewards, `/account/referrals`; 9 integration tests |
+| 2026-11-05 | WP-14 | CMS: 14 validated blocks, CmsPage draft/publish/schedule (read-time)/restore + preview, catch-all with redirects, NavItem header/footer, branding presets, per-page SEO + sitemap + JSON-LD, policy revisions, built-in pages + privacy cookie section, home featured/builder blocks; 15 integration tests |
