@@ -130,7 +130,8 @@ const cached = unstable_cache(loadSettings, ["site-settings-v2"], { tags: ["sett
 /** Cached in Next; direct DB read in scripts/tests (no Next incremental cache there). */
 export async function getSettings(): Promise<SiteSettings> {
   if (process.env.VITEST || process.env.SCRIPT_CONTEXT) return loadSettings();
-  return cached();
+  // re-merge: the Next data cache outlives deploys, so a cached object can predate newly added settings/flags
+  return mergeSettings(await cached());
 }
 
 export async function saveSettings(patch: Partial<SiteSettings>) {
