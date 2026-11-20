@@ -105,6 +105,11 @@ model User {
   referralCode      ReferralCode?
   referralReceived  Referral?
 
+  // ── Production readiness: maker-checker + mobile push ──
+  approvalsRequested ApprovalRequest[] @relation("ApprovalRequestedBy")
+  approvalsDecided   ApprovalRequest[] @relation("ApprovalDecidedBy")
+  deviceTokens       DeviceToken[]
+
   @@index([role])
 }
 
@@ -1016,7 +1021,13 @@ model OrderAdjustment {
   actorId   String?
   createdAt DateTime @default(now())
 
+  /// Company invoice line that billed this adjustment (replaces the `[adj:<id>]` tag in InvoiceLine.description).
+  /// SetNull: regenerating a draft invoice deletes its lines and frees the adjustment for the next invoice.
+  invoiceLineId String?
+  invoiceLine   InvoiceLine? @relation(fields: [invoiceLineId], references: [id], onDelete: SetNull)
+
   @@index([orderId]) // order detail, analytics adjustments, receivables
+  @@index([invoiceLineId])
 }
 
 // ═════════════════════════════ Payments, refunds, ledger, invoices ═════════════════════════════
@@ -1028,6 +1039,15 @@ enum PaymentMethod {
   CASH
   COMPANY_INVOICE
   WALLET
+}
+
+/// What a Payment pays for. Orders link through Order.paymentId; the others use the columns noted.
+enum PaymentPurpose {
+  ORDER // one or more orders (Order.paymentId)
+  SUBSCRIPTION // a meal plan (Payment.subscriptionId)
+  WALLET_TOPUP // closed-loop store credit; credited as CreditLedger reason TOPUP after server-side verification
+  INVOICE // a company invoice paid online (InvoiceReceipt.paymentId)
+  SWAP_DIFFERENCE // plan swap up-charge not covered by wallet credit (Payment.subscriptionId)
 }
 
 enum PaymentStatus {
@@ -1069,8 +1089,12 @@ model Payment {
   feeActual      Int? // paisa, from the imported gateway statement
   statementLines GatewayStatementLine[]
 
+  purpose        PaymentPurpose  @default(ORDER)
+  invoiceReceipt InvoiceReceipt?
+
   @@index([status])
   @@index([userId])
+  @@index([purpose, status]) // top-up history / reconciliation by purpose
   @@index([subscriptionId]) // plan pages, renewals, payment history
 }
 
@@ -1147,7 +1171,10 @@ model CreditLedger {
   userId    String
   user      User     @relation("CreditOwner", fields: [userId], references: [id], onDelete: Restrict)
   amount    Int // paisa: + credit / − spend
-  reason    String // SKIP_CREDIT | REFUND | ADJUSTMENT | SPEND | REVERSAL | GOODWILL
+  /// SKIP_CREDIT | REFUND | ADJUSTMENT | SPEND | REVERSAL | GOODWILL | CANCEL_CREDIT | DISRUPTION_CREDIT | REFERRAL
+  /// | TOPUP (wallet top-up, paymentId = the WALLET_TOPUP Payment) | TOPUP_REVERSAL (negative row undoing a TOPUP,
+  /// e.g. a refunded or charged-back top-up; paymentId = same Payment)
+  reason    String
   orderId   String?
   paymentId String?
   refundId  String?
@@ -1192,10 +1219,31 @@ model Invoice {
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  lines  InvoiceLine[]
-  orders Order[]
+  lines    InvoiceLine[]
+  orders   Order[]
+  receipts InvoiceReceipt[]
 
   @@index([companyId, status])
+}
+
+/// A dated receipt of money against a (company) invoice. Σ receipts = cash received; Invoice.paidAmount also
+/// includes credit-note settlements, so it is not a cash figure. Append-only (reverse with a negative row + note).
+model InvoiceReceipt {
+  id           String   @id @default(cuid())
+  invoiceId    String
+  invoice      Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  amount       Int // paisa received (negative = reversal of an earlier receipt)
+  method       String // BANK_TRANSFER | CHEQUE | CASH | ESEWA | KHALTI | OTHER
+  reference    String // bank / cheque / gateway reference
+  receivedAt   DateTime // when the money arrived (not when it was keyed in)
+  paymentId    String?  @unique // set when paid online through a Payment with purpose INVOICE
+  payment      Payment? @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  recordedById String?
+  note         String?
+  createdAt    DateTime @default(now())
+
+  @@index([invoiceId])
+  @@index([receivedAt]) // cash flow / journal by date
 }
 
 model InvoiceLine {
@@ -1208,6 +1256,8 @@ model InvoiceLine {
   quantity    Int     @default(1)
   unitPrice   Int
   amount      Int
+
+  adjustments OrderAdjustment[]
 
   @@index([invoiceId]) // invoice pages and regeneration
 }
@@ -1274,6 +1324,7 @@ model CouponRedemption {
   createdAt DateTime @default(now())
 
   @@index([couponId, userId])
+  @@index([orderId])
 }
 
 // ═════════════════════════════ Corporate ═════════════════════════════
@@ -1557,6 +1608,7 @@ model Supplier {
 
   invoices SupplierInvoice[]
   expenses Expense[]
+  credits  SupplierCredit[]
 }
 
 /// A stock item. Quantity on hand = SUM(StockMovement.quantity) per kitchen.
@@ -1651,6 +1703,7 @@ model PurchaseOrder {
   lines PurchaseOrderLine[]
 
   supplierInvoices SupplierInvoice[]
+  supplierCredits  SupplierCredit[]
 }
 
 model PurchaseOrderLine {
@@ -2299,7 +2352,8 @@ model SupplierInvoice {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
-  payments SupplierPayment[]
+  payments           SupplierPayment[]
+  creditApplications SupplierCreditApplication[]
 
   @@unique([supplierId, number])
   @@index([status, dueDate])
@@ -2442,10 +2496,12 @@ model Referral {
   code             ReferralCode @relation(fields: [codeId], references: [id], onDelete: Cascade)
   refereeId        String       @unique
   referee          User         @relation(fields: [refereeId], references: [id], onDelete: Cascade)
-  status           String       @default("PENDING") // PENDING | QUALIFIED | REWARDED | REJECTED
+  status           String       @default("PENDING") // PENDING | HELD | APPROVED | QUALIFIED | REWARDED | REJECTED
   rewardLedgerId   String?
   qualifiedOrderId String?
   createdAt        DateTime     @default(now())
+  rewardedAt       DateTime?
+  note             String? // hold reason / staff decision (also audited)
 }
 
 // ── Alerts ──
@@ -2562,4 +2618,120 @@ model SavedView {
   createdAt DateTime @default(now())
 
   @@index([userId, module])
+}
+
+// ═════════════════════════════ Production readiness (2026-11-20) ═════════════════════════════
+
+// ── Maker-checker approvals ──
+
+enum ApprovalKind {
+  REFUND // payload: { paymentId, orderId?, amount, method, reason }
+  WALLET_ADJUSTMENT // payload: { userId, amount (±paisa), note }
+  ORDER_ADJUSTMENT // payload: { orderId, amount (±paisa), reason }
+  EXPENSE
+  SUPPLIER_CREDIT
+  OTHER
+}
+
+enum ApprovalStatus {
+  PENDING // waiting for a second staff member
+  APPROVED // approved, not yet executed
+  REJECTED
+  CANCELLED // withdrawn by the requester
+  EXECUTED // approved and the money movement was carried out
+  FAILED // approved but execution failed (see error); can be retried
+}
+
+/// A money action above the approval threshold, waiting for a second staff member. The requester can never decide
+/// their own request. Execution re-runs the normal service (same checks, idempotent) and records executedAt/error.
+model ApprovalRequest {
+  id             String         @id @default(cuid())
+  kind           ApprovalKind
+  status         ApprovalStatus @default(PENDING)
+  amount         Int            @default(0) // paisa (absolute value; sign lives in payload)
+  entity         String? // "Payment" | "User" | "Order" …
+  entityId       String?
+  payload        Json // what to execute once approved
+  reason         String
+  kitchenId      String? // scope for kitchen-scoped approvers
+  idempotencyKey String?        @unique // a retried submit returns the same request
+  requestedById  String
+  requestedBy    User           @relation("ApprovalRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  decidedById    String?
+  decidedBy      User?          @relation("ApprovalDecidedBy", fields: [decidedById], references: [id], onDelete: Restrict)
+  decidedAt      DateTime?
+  decisionNote   String?
+  executedAt     DateTime?
+  error          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([status, createdAt])
+  @@index([kind, status])
+  @@index([requestedById])
+  @@index([entity, entityId])
+}
+
+// ── Mobile push ──
+// Mobile sign-in uses Better Auth's `bearer` plugin, which reuses the Session table (token) — no schema needed.
+
+enum DevicePlatform {
+  IOS
+  ANDROID
+  WEB
+}
+
+model DeviceToken {
+  id         String         @id @default(cuid())
+  userId     String
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform   DevicePlatform
+  token      String         @unique // FCM / APNs registration token; re-registering moves it to the current user
+  appVersion String?
+  lastSeenAt DateTime       @default(now())
+  createdAt  DateTime       @default(now())
+
+  @@index([userId])
+}
+
+// ── Supplier credit (purchase returns) ──
+
+/// A credit the supplier owes us, usually for goods returned on a purchase order (returnToSupplier → credit value).
+/// Applied against supplier invoices through SupplierCreditApplication; the applied part counts as settled on the
+/// invoice but is not cash (cash flow uses SupplierPayment only).
+model SupplierCredit {
+  id            String         @id @default(cuid())
+  supplierId    String
+  supplier      Supplier       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  poId          String? // purchase order the return was posted against
+  po            PurchaseOrder? @relation(fields: [poId], references: [id], onDelete: Restrict)
+  returnKey     String?        @unique // idempotency key of the return that created it (one credit per return)
+  number        String? // supplier's credit-note number, when they send one
+  amount        Int // paisa
+  appliedAmount Int            @default(0) // Σ applications
+  status        String         @default("OPEN") // OPEN | PARTIAL | APPLIED | VOID
+  reason        String?
+  createdById   String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  applications SupplierCreditApplication[]
+
+  @@index([supplierId, status])
+  @@index([poId])
+}
+
+/// Append-only: part of a supplier credit used to settle a supplier invoice.
+model SupplierCreditApplication {
+  id        String          @id @default(cuid())
+  creditId  String
+  credit    SupplierCredit  @relation(fields: [creditId], references: [id], onDelete: Restrict)
+  invoiceId String
+  invoice   SupplierInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  amount    Int // paisa
+  actorId   String?
+  createdAt DateTime        @default(now())
+
+  @@index([creditId])
+  @@index([invoiceId])
 }

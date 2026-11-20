@@ -13,7 +13,7 @@ export async function walletBalance(userId: string, client: Tx | typeof db = db)
 export type LedgerEntry = {
   userId: string;
   amount: number;
-  reason: "SKIP_CREDIT" | "REFUND" | "ADJUSTMENT" | "SPEND" | "REVERSAL" | "GOODWILL" | "CANCEL_CREDIT" | "DISRUPTION_CREDIT" | "REFERRAL";
+  reason: "SKIP_CREDIT" | "REFUND" | "ADJUSTMENT" | "SPEND" | "REVERSAL" | "GOODWILL" | "CANCEL_CREDIT" | "DISRUPTION_CREDIT" | "REFERRAL" | "TOPUP" | "TOPUP_REVERSAL";
   orderId?: string | null;
   paymentId?: string | null;
   refundId?: string | null;

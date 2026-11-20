@@ -26,6 +26,7 @@ const FLAG_LABEL: Record<keyof FeatureFlags, [string, string]> = {
   newsletter: ["Newsletter sign-up", "Shows the email sign-up form (with consent text)"],
   feedback: ["Feedback after delivery", "Ask customers to rate delivered lunches"],
   nepaliDates: ["Bikram Sambat dates", "Leave off until a tested BS calendar library is added"],
+  walletTopup: ["Wallet top-up", "Customers can add money to their Dabba Bela credit (store credit, spendable only here). Leave off until legal advice on e-money rules"],
 };
 
 function Status({ ok, label, note }: { ok: boolean; label: string; note?: string }) {
@@ -112,6 +113,17 @@ export default async function SettingsPage() {
                   <Textarea name="bankDetails" label="Bank transfer details" rows={4} defaultValue={s.bankDetails} />
                   <ImageField name="qrImage" label="Fonepay / bank QR" defaultValue={s.qrImage} />
                 </div>
+              </Panel>
+
+              <Panel title="Wallet top-up & approvals">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <Input name="walletTopupMin" label="Smallest top-up (Rs)" defaultValue={rupeesInput(s.walletTopupMin)} />
+                  <Input name="walletTopupMax" label="Largest top-up (Rs)" defaultValue={rupeesInput(s.walletTopupMax)} />
+                  <Input name="walletTopupDaily" label="Top-ups per customer per day (Rs)" defaultValue={rupeesInput(s.walletTopupDaily)} hint="Kathmandu day" />
+                  <Input name="walletBalanceCap" label="Wallet balance cap (Rs)" defaultValue={rupeesInput(s.walletBalanceCap)} hint="A top-up can't take the balance above this" />
+                  <Input name="approvalThreshold" label="Second approval from (Rs)" defaultValue={rupeesInput(s.approvalThreshold)} hint="Refunds and manual wallet adjustments at or above this need another staff member" />
+                </div>
+                <p className="mt-3 text-xs text-ink-mute">Top-up limits apply only while the Wallet top-up flag is on.</p>
               </Panel>
 
               <Panel title="Feature flags">

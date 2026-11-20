@@ -26,6 +26,16 @@ export async function updateSettings(_prev: ActionResult, fd: FormData): Promise
     if (flags.phoneOtp && !(process.env.SMS_PROVIDER && process.env.SMS_PROVIDER !== "console")) {
       if (process.env.NODE_ENV === "production") throw new FieldError("flag_phoneOtp", "Phone OTP needs an SMS provider (SMS_PROVIDER) first");
     }
+    const walletTopupMin = f.money(fd, "walletTopupMin", "Smallest top-up");
+    const walletTopupMax = f.money(fd, "walletTopupMax", "Largest top-up");
+    const walletTopupDaily = f.money(fd, "walletTopupDaily", "Top-ups per day");
+    const walletBalanceCap = f.money(fd, "walletBalanceCap", "Wallet balance cap");
+    const approvalThreshold = f.money(fd, "approvalThreshold", "Second approval from");
+    if (walletTopupMin <= 0) throw new FieldError("walletTopupMin", "Smallest top-up must be more than Rs 0");
+    if (walletTopupMax < walletTopupMin) throw new FieldError("walletTopupMax", "Largest top-up can't be below the smallest");
+    if (walletTopupDaily < walletTopupMax) throw new FieldError("walletTopupDaily", "The daily limit can't be below the largest single top-up");
+    if (walletBalanceCap < walletTopupMin) throw new FieldError("walletBalanceCap", "The balance cap can't be below the smallest top-up");
+    if (approvalThreshold <= 0) throw new FieldError("approvalThreshold", "Enter an amount above Rs 0");
     const patch: Partial<SiteSettings> = {
       brandName,
       brandNameNe: f.str(fd, "brandNameNe", 60),
@@ -57,6 +67,11 @@ export async function updateSettings(_prev: ActionResult, fd: FormData): Promise
       notifyEmail: f.str(fd, "notifyEmail", 120),
       maintenanceMode: f.bool(fd, "maintenanceMode"),
       maintenanceMessage: f.str(fd, "maintenanceMessage", 300),
+      walletTopupMin,
+      walletTopupMax,
+      walletTopupDaily,
+      walletBalanceCap,
+      approvalThreshold,
       flags,
     };
     const modificationCutoff = f.str(fd, "modificationCutoff", 20);

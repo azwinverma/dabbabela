@@ -13,6 +13,7 @@ export type FeatureFlags = {
   feedback: boolean;
   nepaliDates: boolean; // show Bikram Sambat dates (off until a tested library is added)
   freeDelivery: boolean; // waive every zone delivery fee (launch offer); zone fees stay configured for later
+  walletTopup: boolean; // customers can add money to their wallet (closed-loop store credit) — off until legal advice
 };
 
 export type SiteSettings = {
@@ -51,6 +52,13 @@ export type SiteSettings = {
   builderMaxQty: number;
   maintenanceMode: boolean;
   maintenanceMessage: string;
+  /** Wallet top-up limits (paisa). Only used while flags.walletTopup is on. */
+  walletTopupMin: number; // smallest single top-up
+  walletTopupMax: number; // largest single top-up
+  walletTopupDaily: number; // total top-ups per customer per Kathmandu day
+  walletBalanceCap: number; // a top-up may not take the wallet balance above this
+  /** Refunds / manual wallet adjustments at or above this (paisa) need a second staff member's approval. */
+  approvalThreshold: number;
   flags: FeatureFlags;
 };
 
@@ -65,6 +73,7 @@ export const DEFAULT_FLAGS: FeatureFlags = {
   feedback: true,
   nepaliDates: false,
   freeDelivery: true,
+  walletTopup: false,
 };
 
 export const DEFAULT_SETTINGS: SiteSettings = {
@@ -101,6 +110,11 @@ export const DEFAULT_SETTINGS: SiteSettings = {
   builderMaxQty: 3,
   maintenanceMode: false,
   maintenanceMessage: "We are restocking the kitchen. Ordering opens again shortly.",
+  walletTopupMin: 10000, // Rs 100
+  walletTopupMax: 1000000, // Rs 10,000
+  walletTopupDaily: 2000000, // Rs 20,000
+  walletBalanceCap: 2500000, // Rs 25,000
+  approvalThreshold: 200000, // Rs 2,000
   flags: DEFAULT_FLAGS,
 };
 
