@@ -8,7 +8,7 @@
  * claims we can't back, no invented numbers, no fake reviews.
  */
 
-export type FieldType = "text" | "textarea" | "markdown" | "image" | "url" | "boolean" | "number" | "list";
+export type FieldType = "text" | "textarea" | "markdown" | "image" | "url" | "boolean" | "number" | "list" | "select";
 
 export type Field = {
   name: string;
@@ -17,6 +17,7 @@ export type Field = {
   help?: string;
   fields?: Field[]; // for list items
   itemLabel?: string;
+  options?: { value: string; label: string }[]; // for select
 };
 
 export type SectionDef = {
@@ -133,6 +134,20 @@ export const SECTIONS: SectionDef[] = [
       title: "This week, day by day",
       intro: "The menu changes every week. Each day has the chef's pick and at least one vegetarian option.",
       linkLabel: "Full menu with allergens",
+    },
+  },
+  {
+    key: "home.featured",
+    label: "Featured dabbas",
+    group: "Home page",
+    description: "Live dabbas marked “Featured” in Dabbas (prices and photos stay current). Hidden when none are featured.",
+    fields: [t("eyebrow", "Small line"), t("title", "Title"), ta("intro", "Intro"), { name: "count", label: "How many dabbas (1–6)", type: "number" }, t("linkLabel", "Link label")],
+    defaults: {
+      eyebrow: "Favourites",
+      title: "Dabbas people come back for",
+      intro: "A few of the lunches our regulars order again and again.",
+      count: 3,
+      linkLabel: "See this week's menu",
     },
   },
   {

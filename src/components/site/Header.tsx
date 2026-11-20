@@ -4,6 +4,9 @@ import { getSection } from "@/lib/cms";
 import { getCurrentUser, isStaff, activeCompany } from "@/lib/auth";
 import { getI18n } from "@/lib/i18n/server";
 import { db } from "@/lib/db";
+import { getSettings } from "@/lib/settings";
+import { getNav } from "@/lib/cms/nav";
+import { COLOR_PRESETS, FONT_PRESETS, getBranding } from "@/lib/cms/branding";
 import { HeaderClient } from "./HeaderClient";
 
 async function topBanner(locale: string) {
@@ -20,22 +23,31 @@ async function topBanner(locale: string) {
 
 export async function Header() {
   const { locale, t } = await getI18n();
-  const [bar, user, banner] = await Promise.all([getSection("announcement", locale), getCurrentUser(), topBanner(locale)]);
-  const strip = banner ?? (bar.enabled && bar.text ? { text: String(bar.text), link: String(bar.linkHref || ""), linkLabel: String(bar.linkLabel || ""), tone: "charcoal" } : null);
-  const links = [
-    { href: "/menu", label: t.nav.menu },
-    { href: "/build", label: t.nav.build },
-    { href: "/plans", label: t.nav.plans },
-    { href: "/corporate", label: t.nav.teams },
-    { href: "/delivery-areas", label: t.nav.coverage },
-  ];
+  const [bar, user, banner, nav, brand, s] = await Promise.all([getSection("announcement", locale), getCurrentUser(), topBanner(locale), getNav("HEADER", locale), getBranding(), getSettings()]);
+  const preset = COLOR_PRESETS[brand.colorPreset];
+  const strip = banner ?? (bar.enabled && bar.text ? { text: String(bar.text), link: String(bar.linkHref || ""), linkLabel: String(bar.linkLabel || ""), tone: "preset" } : null);
+  // Navigation comes from Admin → Navigation (NavItem); the built-in links are only a fallback for an empty database.
+  const links = nav
+    ? nav.map((l) => ({ href: l.href, label: l.label }))
+    : [
+        { href: "/menu", label: t.nav.menu },
+        { href: "/build", label: t.nav.build },
+        { href: "/plans", label: t.nav.plans },
+        { href: "/corporate", label: t.nav.teams },
+        { href: "/delivery-areas", label: t.nav.coverage },
+      ];
+  const brandName = locale === "ne" ? s.brandNameNe : s.brandName;
+  const fontCss = FONT_PRESETS[brand.fontPreset].css;
   return (
     <header className="relative z-30">
+      {/* Branding slots (Admin → Navigation & branding). React hoists <link> into <head>; CSS comes from a fixed preset map. */}
+      {brand.faviconUrl && <link rel="icon" href={brand.faviconUrl} />}
+      {fontCss && <style>{fontCss}</style>}
       <a href="#main" className="sr-only-focusable absolute left-3 top-3 z-50 rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-paper">
         {t.nav.skip}
       </a>
       {strip && (
-        <div className={strip.tone === "turmeric" ? "bg-besar text-ink" : strip.tone === "achar" ? "bg-sindoor text-paper" : "bg-ink text-paper"}>
+        <div className={strip.tone === "preset" ? preset.bar : strip.tone === "turmeric" ? "bg-besar text-ink" : strip.tone === "achar" ? "bg-sindoor text-paper" : "bg-ink text-paper"}>
           <div className="container flex flex-wrap items-center justify-center gap-x-3 gap-y-1 py-2 text-center text-[0.84rem]">
             <span>{strip.text}</span>
             {strip.link && strip.linkLabel && (
@@ -48,7 +60,8 @@ export async function Header() {
       )}
       <div className="relative border-b-2 border-ink bg-paper/95 backdrop-blur supports-[backdrop-filter]:bg-paper/85">
         <HeaderClient
-          logo={<Logo size="md" />}
+          // eslint-disable-next-line @next/next/no-img-element
+          logo={brand.logoUrl ? <img src={brand.logoUrl} alt={brandName} className="h-10 w-auto" /> : <Logo size="md" />}
           links={links}
           locale={locale}
           labels={{ login: t.nav.login, account: t.nav.account, admin: t.nav.admin, team: t.nav.team, cart: t.nav.cart, open: t.nav.openMenu, close: t.nav.closeMenu, language: t.common.language, home: t.nav.home }}
