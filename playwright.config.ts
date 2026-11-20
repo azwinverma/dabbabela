@@ -15,7 +15,14 @@ export default defineConfig({
   workers: 1,
   retries: process.env.CI ? 1 : 0,
   reporter: [["list"], ["html", { open: "never" }]],
-  use: { baseURL: BASE, trace: "retain-on-failure", screenshot: "only-on-failure" },
+  use: {
+    baseURL: BASE,
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+    // Answer the attribution consent bar up front (it sits above the header until answered); applies to
+    // browser.newContext() contexts too. "denied" = no attribution cookies are written during E2E.
+    storageState: { cookies: [{ name: "dabba_consent", value: "denied", domain: new URL(BASE).hostname, path: "/", expires: -1, httpOnly: false, secure: false, sameSite: "Lax" }], origins: [] },
+  },
   // Started after globalSetup so the server reads the E2E settings fresh. Build first: `npm run build`.
   webServer: process.env.E2E_BASE_URL
     ? undefined
