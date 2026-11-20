@@ -16,7 +16,7 @@ export const ADMIN_NAV_ALL: NavGroup[] = [
     items: [
       { href: "/admin", label: "Dashboard", icon: "LayoutDashboard", perm: "dashboard.view" },
       { href: "/admin/analytics", label: "Analytics", icon: "ChartNoAxesCombined", perm: "analytics.view", owner: "WP-02" },
-      { href: "/admin/alerts", label: "Alerts", icon: "Siren", perm: "alerts.view", ready: false, owner: "WP-16" },
+      { href: "/admin/alerts", label: "Alerts", icon: "Siren", perm: "alerts.view", ready: true, owner: "WP-16" },
       { href: "/admin/reports", label: "Reports & exports", icon: "LineChart", perm: "reports.view" },
     ],
   },
@@ -95,7 +95,7 @@ export const ADMIN_NAV_ALL: NavGroup[] = [
       { href: "/admin/staff", label: "Staff", icon: "ShieldCheck", perm: "staff.view" },
       { href: "/admin/roles", label: "Roles & permissions", icon: "KeyRound", perm: "roles.view" },
       { href: "/admin/notifications", label: "Notifications", icon: "BellRing", perm: "notifications.view" },
-      { href: "/admin/jobs", label: "Scheduled jobs", icon: "Timer", perm: "settings.view", ready: false, owner: "WP-16" },
+      { href: "/admin/jobs", label: "Scheduled jobs", icon: "Timer", perm: "settings.view", ready: true, owner: "WP-16" },
       { href: "/admin/settings", label: "Settings & flags", icon: "Settings", perm: "settings.view" },
       { href: "/admin/privacy", label: "Privacy requests", icon: "UserX", perm: "privacy.view" },
       { href: "/admin/audit", label: "Audit log", icon: "History", perm: "audit.view" },

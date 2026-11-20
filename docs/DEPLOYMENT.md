@@ -31,13 +31,25 @@ Hosting: **Vercel** (functions pinned to `sin1`, Singapore) + **Neon Postgres** 
 | Schedule (UTC) | Kathmandu | Path |
 |---|---|---|
 | `0 4 * * *` | 09:45 | `/api/cron/daily?job=cutoff` — lock today, expire unpaid |
-| `15 0 * * *` | 06:00 | `/api/cron/daily?job=housekeeping` — reconcile gateways, finish plans, reminders, retry outbox |
+| `15 0 * * *` | 06:00 | `/api/cron/daily?job=housekeeping` — reconcile gateways, finish plans + reminders, scheduled plan prices, publish scheduled menus and CMS pages, settle referral rewards, alert detectors, alert escalation, send/retry the outbox |
+
+The cut-off job also re-runs the capacity/production/unpaid/missing-selection detectors after locking the day.
+Every step runs under its own `JobRun` key (`housekeeping.<step>:<Kathmandu date>`), so calling the cron again the
+same day only retries the steps that failed; one failing step doesn't stop the others, and the response is 500 when
+any step failed. Runs, failures and manual re-runs are in Admin → Scheduled jobs (`/admin/jobs`); failed runs also
+raise an alert in Admin → Alerts.
 
 If you change the order cut-off in Settings, move the `cutoff` cron to a few minutes after it.
 Hobby plans run each cron once a day and only within the scheduled hour (any minute), so the cut-off job is
 scheduled at 04:00 UTC: on Hobby it lands between 09:45 and 10:44 Kathmandu, always after the 09:30 cut-off
-(an early run would do nothing). On Pro it runs at 09:45 exactly; add `*/10 * * * *` housekeeping for quicker retries.
+(an early run would do nothing). On Pro it runs at 09:45 exactly.
 Staff can always lock a day by hand in Admin → Kitchen.
+
+**On Hobby, time-sensitive alerts (delayed production, delayed deliveries) and escalation only run once a day**
+(plus whenever someone presses "Run detectors now" in Admin → Alerts, or "Run now" in Admin → Scheduled jobs).
+**On Pro**, add `{ "path": "/api/cron/daily?job=frequent", "schedule": "*/15 * * * *" }` to `vercel.json`: it
+publishes scheduled menus/pages, runs detectors and escalation, and sends the outbox every 15 minutes (each
+quarter-hour is its own idempotency bucket). `?job=alerts` runs only detectors + escalation.
 
 ## Migrations & rollback
 * Schema changes: `npx prisma migrate dev --name <change>` locally → commit → deploy runs
