@@ -18,6 +18,7 @@ import { done, fail, type ActionResult } from "@/lib/action";
 import { str } from "@/lib/utils";
 import { readAttribution } from "@/lib/attribution";
 import { storeUserAttribution } from "@/server/crm";
+import { claimReferral } from "@/server/marketing";
 
 /** Only same-site relative paths are allowed as ?next= targets. */
 function safeNext(next: string | null | undefined) {
@@ -169,6 +170,13 @@ export async function registerAction(_: ActionResult, fd: FormData): Promise<Act
   await captureAttribution(userId);
   if (company) {
     await db.companyMember.create({ data: { companyId: company.id, userId, status: company.requireApproval ? "PENDING" : "ACTIVE" } }).catch(() => null);
+  }
+  // ?ref=CODE on the sign-up link: claim the friend's referral (best effort — a bad code never blocks sign-up;
+  // the customer can still enter one in Account → Refer a friend).
+  const ref = str(fd.get("ref")).slice(0, 20);
+  if (ref) {
+    const r = await claimReferral(userId, ref).catch((e) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }));
+    if (!r.ok) log.info("register.referral_not_claimed", { userId, error: r.error });
   }
   const next = safeNext(str(fd.get("next")));
   return done("Account created", next ?? "/account?welcome=1");

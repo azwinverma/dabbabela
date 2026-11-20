@@ -121,6 +121,7 @@ export const en = {
   days: { SUN: "Sunday", MON: "Monday", TUE: "Tuesday", WED: "Wednesday", THU: "Thursday", FRI: "Friday", SAT: "Saturday" },
   daysShort: { SUN: "Sun", MON: "Mon", TUE: "Tue", WED: "Wed", THU: "Thu", FRI: "Fri", SAT: "Sat" },
   site: {
+    cookieChoices: "Cookie choices",
     chefPick: "Chef's pick",
     alsoToday: "Also today",
     vegOption: "Veg option",
@@ -161,6 +162,8 @@ export const en = {
     notCovered: "Not on our route yet",
     fee: "Delivery fee",
     freeAbove: "free on orders from",
+    distanceBands: "By distance (saved map pin)",
+    upToKm: "up to {km} km",
     lunchWindow: "Lunch window",
     requestArea: "Ask us to add your area",
     draftNotice: "Draft — this page is under legal review and may change before launch.",

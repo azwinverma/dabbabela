@@ -6,21 +6,12 @@ import { rs } from "@/lib/money";
 import { walletBalance } from "@/server/ledger";
 import { getLocale } from "@/lib/i18n/server";
 import { dashboardDict } from "@/lib/i18n/dashboard";
-
-const REASON: Record<string, string> = {
-  SKIP_CREDIT: "Skipped plan meal",
-  REFUND: "Refund",
-  ADJUSTMENT: "Adjustment",
-  SPEND: "Spent on an order",
-  REVERSAL: "Reversal",
-  GOODWILL: "Goodwill credit",
-  CANCEL_CREDIT: "Cancelled order",
-  DISRUPTION_CREDIT: "Kitchen closed",
-};
+import { walletReasonLabel } from "../_lib/wallet";
 
 export default async function WalletPage() {
   const user = await requireUser("/account/wallet");
-  const payments = dashboardDict(await getLocale()).home.payments;
+  const dict = dashboardDict(await getLocale());
+  const payments = dict.home.payments;
   const [balance, rows] = await Promise.all([walletBalance(user.id), db.creditLedger.findMany({ where: { userId: user.id }, orderBy: { createdAt: "desc" }, take: 100 })]);
   return (
     <div className="max-w-3xl">
@@ -40,7 +31,7 @@ export default async function WalletPage() {
           {rows.map((r) => (
             <li key={r.id} className="flex items-center justify-between gap-4 px-4 py-3">
               <div>
-                <p className="font-semibold">{REASON[r.reason] ?? r.reason}</p>
+                <p className="font-semibold">{walletReasonLabel(r.reason, dict)}</p>
                 <p className="text-xs text-ink-mute">
                   {formatStamp(r.createdAt)}
                   {r.note ? ` · ${r.note}` : ""}

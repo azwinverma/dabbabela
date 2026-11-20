@@ -88,6 +88,16 @@ export const TEMPLATES = {
     email: { subject: "{{company}} invited you to team lunches", body: "<p>{{inviter}} added you to {{company}} on {{brand}}.</p><p><a href=\"{{link}}\">Accept the invite</a> (valid 14 days).</p>" },
     sms: null,
   },
+  "alert.escalation": {
+    // Staff-only: sent by escalateAlerts (src/server/alerts) with its own per-occurrence dedupe.
+    topic: "SECURITY",
+    inApp: { title: "[{{severity}}] {{message}}", body: "Open for {{minutes}} min, not acknowledged." },
+    email: {
+      subject: "[{{severity}}] {{message}}",
+      body: "<p><strong>{{message}}</strong></p><p>Open for {{minutes}} minutes and not acknowledged yet ({{source}}).</p><p><a href=\"{{link}}\">Open the alerts center</a></p>",
+    },
+    sms: null,
+  },
 } as const;
 
 export type TemplateKey = keyof typeof TEMPLATES;
@@ -110,6 +120,25 @@ async function override(key: string, channel: string, locale: string) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Render one channel of a template (staff override from Admin → Notifications first, else the code default) without
+ * sending anything — for callers that write their own outbox rows (e.g. alert escalation with its own dedupe).
+ * Email bodies are HTML-escaped and wrapped in the brand shell. null when the template has no such channel.
+ */
+export async function renderTemplate(key: TemplateKey, channel: "IN_APP" | "EMAIL", vars: Vars, opts: { link?: string; locale?: string } = {}) {
+  const s = await getSettings();
+  const t = TEMPLATES[key];
+  const allVars: Vars = { brand: s.brandName, link: opts.link ?? "", ...vars };
+  const o = await override(key, channel, opts.locale ?? "en");
+  if (channel === "IN_APP") {
+    if (!t.inApp) return null;
+    return { subject: fill(o?.subject ?? t.inApp.title, allVars, false), body: fill(o?.body ?? t.inApp.body, allVars, false) };
+  }
+  if (!t.email) return null;
+  const subject = fill(o?.subject ?? t.email.subject, allVars, false);
+  return { subject, body: emailShell(s.brandName, subject, fill(o?.body ?? t.email.body, allVars, true)) };
 }
 
 async function prefEnabled(userId: string, topic: string, channel: string) {

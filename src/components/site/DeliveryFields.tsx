@@ -55,7 +55,7 @@ export function AddressForm({
 }) {
   const [state, action] = useActionState(saveAddressAction, { ok: false } as AddressResult);
   const [type, setType] = useState<AddressType>(address?.type ?? "OFFICE");
-  const [geo, setGeo] = useState<{ lat: number; lng: number } | null>(address?.lat != null && address?.lng != null ? { lat: address.lat, lng: address.lng } : null);
+  const [geo, setGeo] = useState({ lat: address?.lat != null ? String(address.lat) : "", lng: address?.lng != null ? String(address.lng) : "" });
   const [geoMsg, setGeoMsg] = useState<string | null>(null);
   const handled = useRef<AddressResult | null>(null);
 
@@ -71,7 +71,7 @@ export function AddressForm({
     setGeoMsg("Finding you…");
     navigator.geolocation.getCurrentPosition(
       (p) => {
-        setGeo({ lat: Number(p.coords.latitude.toFixed(6)), lng: Number(p.coords.longitude.toFixed(6)) });
+        setGeo({ lat: p.coords.latitude.toFixed(6), lng: p.coords.longitude.toFixed(6) });
         setGeoMsg("Pin saved. It helps the rider; we still go by your area and landmark.");
       },
       () => setGeoMsg("Couldn't get your location — that's fine, the landmark is enough."),
@@ -85,12 +85,6 @@ export function AddressForm({
   return (
     <form action={action} className="space-y-4">
       {address && <input type="hidden" name="id" value={address.id} />}
-      {geo && (
-        <>
-          <input type="hidden" name="lat" value={geo.lat} />
-          <input type="hidden" name="lng" value={geo.lng} />
-        </>
-      )}
       <fieldset>
         <legend className="label">Where is this?</legend>
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
@@ -119,10 +113,17 @@ export function AddressForm({
       <Textarea label="Notes for the rider" name="instructions" rows={2} defaultValue={address?.instructions ?? ""} placeholder="e.g. leave at reception, call on arrival" />
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" onClick={locate} className="rounded-full border-2 border-ink px-3 py-1 text-sm font-semibold hover:bg-ink hover:text-paper">
-          {geo ? "Update map pin" : "Add map pin (optional)"}
+          {geo.lat && geo.lng ? "Update map pin" : "Add map pin (optional)"}
         </button>
         {geoMsg && <span className="text-xs text-ink-mute" role="status">{geoMsg}</span>}
       </div>
+      <details className="text-sm" open={Boolean(e.lat || e.lng)}>
+        <summary className="cursor-pointer select-none font-semibold text-ink-soft">Or type the pin (latitude / longitude)</summary>
+        <div className="mt-2 grid gap-4 sm:grid-cols-2">
+          <Input label="Latitude" name="lat" inputMode="decimal" autoComplete="off" placeholder="e.g. 27.7172" value={geo.lat} onChange={(ev) => setGeo((g) => ({ ...g, lat: ev.target.value }))} error={e.lat} hint="optional, Nepal 26–31" />
+          <Input label="Longitude" name="lng" inputMode="decimal" autoComplete="off" placeholder="e.g. 85.3240" value={geo.lng} onChange={(ev) => setGeo((g) => ({ ...g, lng: ev.target.value }))} error={e.lng} hint="optional, Nepal 80–89" />
+        </div>
+      </details>
       <Checkbox name="isDefault" label="Make this my default address" defaultChecked={address?.isDefault} />
       <div className="flex flex-wrap gap-3">
         <SubmitButton>{address ? "Save address" : "Add address"}</SubmitButton>

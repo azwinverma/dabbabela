@@ -7,7 +7,9 @@ import { requirePermission } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { done, fail, type ActionResult } from "@/lib/action";
 import { dateOnly, isValidISODate } from "@/lib/dates";
+import { log } from "@/lib/logger";
 import { lockDay, setOrderStatus } from "@/server/orders";
+import { CUTOFF_DETECTORS, runDetectors } from "@/server/alerts";
 import { advanceBatch, markTicketsPrinted, planBatches, recordPacking, requirements, requirementsHorizon, setKitchenStatus, forecast, suggestQty } from "@/server/kitchen";
 import type { KitchenStatus } from "@/server/capacity";
 import { createPurchaseOrder } from "@/server/inventory";
@@ -27,6 +29,8 @@ export async function lockDayAction(_p: ActionResult, fd: FormData): Promise<Act
     assertKitchen(user, kitchenId);
     const r = await lockDay(kitchenId, date, user.id);
     await audit({ actorId: user.id, action: "kitchen.lock_day", entity: "DayLock", entityId: `${kitchenId}:${date}`, summary: `Locked ${date}: ${r.confirmed} orders confirmed`, after: r });
+    // Same detectors the cut-off job runs after its lock; a detector failure never undoes the lock.
+    await runDetectors({ only: CUTOFF_DETECTORS }).catch((e) => log.error("kitchen.lock_day.detectors_failed", { error: e }));
     revalidatePath("/admin/kitchen");
     return done(r.alreadyLocked ? `Already locked — ${r.confirmed} late orders confirmed` : `Day locked. ${r.confirmed} orders confirmed for the kitchen.`);
   });

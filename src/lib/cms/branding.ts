@@ -13,11 +13,12 @@ import { isSafeHref, isSafeImage } from "./urls";
  * Contact, hours and socials stay in the site settings record (same fields /admin/settings edits).
  */
 
+// `theme` = browser theme colour (<meta name="theme-color">), from the approved palette (tailwind.config.ts).
 export const COLOR_PRESETS = {
-  classic: { label: "Classic — charcoal bar, charcoal footer", bar: "bg-ink text-paper", footer: "" },
-  turmeric: { label: "Turmeric bar, charcoal footer", bar: "bg-besar text-ink", footer: "" },
-  achar: { label: "Achar red bar, charcoal footer", bar: "bg-sindoor text-paper", footer: "" },
-  saag: { label: "Saag green bar and footer", bar: "bg-saag text-paper", footer: "!bg-saag-dark" },
+  classic: { label: "Classic — charcoal bar, charcoal footer", bar: "bg-ink text-paper", footer: "", theme: "#8B2923" },
+  turmeric: { label: "Turmeric bar, charcoal footer", bar: "bg-besar text-ink", footer: "", theme: "#E3A83B" },
+  achar: { label: "Achar red bar, charcoal footer", bar: "bg-sindoor text-paper", footer: "", theme: "#8B2923" },
+  saag: { label: "Saag green bar and footer", bar: "bg-saag text-paper", footer: "!bg-saag-dark", theme: "#3B6245" },
 } as const;
 export type ColorPreset = keyof typeof COLOR_PRESETS;
 

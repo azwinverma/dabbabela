@@ -93,7 +93,7 @@ export async function Footer() {
               <LinkList links={about} />
               <LinkList links={legalLinks} />
               <li>
-                <CookieChoicesButton className="link-underline text-left" label={locale === "ne" ? "कुकी छनोट" : "Cookie choices"} />
+                <CookieChoicesButton className="link-underline text-left" label={t.site.cookieChoices} />
               </li>
             </ul>
           </div>

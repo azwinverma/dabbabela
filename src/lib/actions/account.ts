@@ -12,6 +12,7 @@ import { LOCALE_COOKIE, isLocale } from "@/lib/i18n";
 import { done, fail, type ActionResult } from "@/lib/action";
 import { str, bool } from "@/lib/utils";
 import { findZone } from "@/server/coverage";
+import { parsePin, PinError } from "@/server/customer-dashboard";
 import { createTicket, replyTicket, TICKET_CATEGORIES } from "@/server/support";
 import { cancelOrder, OrderError } from "@/server/orders";
 import { skipMeal, unskipMeal, pauseSubscription, resumeSubscription, cancelSubscription, changePlanAddress } from "@/server/subscriptions";
@@ -110,8 +111,6 @@ const addressSchema = z.object({
   city: z.string().trim().min(2).max(60).default("Kathmandu"),
   landmark: z.string().trim().max(160).optional(),
   instructions: z.string().trim().max(300).optional(),
-  lat: z.coerce.number().min(26).max(31).optional(),
-  lng: z.coerce.number().min(80).max(89).optional(),
 });
 
 export type AddressResult = ActionResult & { addressId?: string; covered?: boolean; zoneName?: string | null };
@@ -132,13 +131,21 @@ export async function saveAddressAction(_: AddressResult, fd: FormData): Promise
     city: opt("city") ?? "Kathmandu",
     landmark: opt("landmark"),
     instructions: opt("instructions"),
-    lat: opt("lat"),
-    lng: opt("lng"),
   });
-  if (!parsed.success) {
+  // Optional map pin: both or neither, inside Nepal (same rule as Account → Addresses → map pin).
+  let pin: { lat: number; lng: number } | null = null;
+  let pinError: string | null = null;
+  try {
+    pin = parsePin(fd.get("lat"), fd.get("lng"));
+  } catch (err) {
+    if (!(err instanceof PinError)) throw err;
+    pinError = err.message;
+  }
+  if (!parsed.success || pinError) {
     const errors: Record<string, string> = {};
-    for (const i of parsed.error.issues) errors[String(i.path[0])] ??= i.message;
-    return fail("Check the highlighted fields", errors);
+    for (const i of parsed.success ? [] : parsed.error.issues) errors[String(i.path[0])] ??= i.message;
+    if (pinError) errors.lat = errors.lng = pinError;
+    return fail(pinError && parsed.success ? pinError : "Check the highlighted fields", errors);
   }
   const d = parsed.data;
   const zone = await findZone({ area: d.area, ward: d.ward ?? null, municipality: d.municipality ?? null, city: d.city });
@@ -152,8 +159,8 @@ export async function saveAddressAction(_: AddressResult, fd: FormData): Promise
     municipality: d.municipality ?? null,
     landmark: d.landmark ?? null,
     instructions: d.instructions ?? null,
-    lat: d.lat ?? null,
-    lng: d.lng ?? null,
+    lat: pin?.lat ?? null,
+    lng: pin?.lng ?? null,
     zoneId: zone?.id ?? null,
   };
   let addressId = id;

@@ -14,6 +14,7 @@ export function AccountNav({ labels, unread }: { labels: AccountDict["nav"]; unr
     { href: "/account/boxes", label: labels.boxes },
     { href: "/account/addresses", label: labels.addresses },
     { href: "/account/wallet", label: labels.wallet },
+    { href: "/account/referrals", label: labels.referrals },
     { href: "/account/payments", label: labels.payments },
     { href: "/account/notifications", label: labels.notifications, badge: unread },
     { href: "/account/support", label: labels.support },

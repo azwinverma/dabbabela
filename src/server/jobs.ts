@@ -13,7 +13,7 @@ import { completeAndRemind, syncPlanPriceMirrors } from "./subscriptions";
 import { processOutbox } from "./notify";
 import { publishDueMenus } from "./menu";
 import { settleReferralRewards } from "./marketing";
-import { escalateAlerts, runDetectors } from "./alerts";
+import { CUTOFF_DETECTORS, escalateAlerts, runDetectors } from "./alerts";
 
 /**
  * Run a job at most once per idempotency key. A crashed run (RUNNING for > 15 min) may be retried, and so may a
@@ -45,8 +45,6 @@ export async function runOnce<T>(name: string, key: string, fn: () => Promise<T>
 type StepCtx = { now: Date };
 export type JobStep = { name: string; label: string; run: (ctx: StepCtx) => Promise<unknown> };
 
-/** Detectors that react to the day lock (run right after the cut-off job). */
-const CUTOFF_DETECTORS = ["unpaid-orders", "missing-selections", "over-capacity", "production"];
 
 async function detectorsStep({ now }: StepCtx) {
   const r = await runDetectors({ now });

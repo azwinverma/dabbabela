@@ -6,6 +6,7 @@ import { rs } from "@/lib/money";
 import { PageHeader } from "@/components/admin/ui";
 import { PrintButton } from "@/components/admin/ops/PrintButton";
 import { piiFor, inScope } from "@/components/admin/ops/scope";
+import { companyDropInfo, dropKey } from "@/server/dispatch";
 
 export const metadata = { title: "Route manifest" };
 
@@ -15,6 +16,17 @@ export default async function ManifestPage({ searchParams }: { searchParams: Pro
   const r = id ? await db.deliveryRoute.findUnique({ where: { id }, include: { rider: { select: { name: true, phoneNumber: true } }, kitchen: { select: { name: true } }, slot: { select: { label: true } }, assignments: { orderBy: { sequence: "asc" }, include: { order: { include: { items: true, payment: { select: { method: true } } } } } } } }) : null;
   if (!r || !inScope(user, r.kitchenId)) notFound();
   const pii = piiFor(user);
+  // Company drops: one block per company office location (in route order of the first stop), with the company's
+  // delivery instructions; other stops stay one row each in sequence.
+  const info = await companyDropInfo(r.assignments.map((a) => a.order));
+  const blocks: { key: string; company: { name: string; deliveryInstructions: string | null } | null; office: string | null; rows: typeof r.assignments }[] = [];
+  for (const a of r.assignments) {
+    const key = a.order.companyId ? dropKey(a.order) : a.id;
+    const b = blocks.find((x) => x.key === key);
+    if (b) b.rows.push(a);
+    else blocks.push({ key, company: a.order.companyId ? (info.companies.get(a.order.companyId) ?? null) : null, office: a.order.officeLocationId ? (info.locations.get(a.order.officeLocationId)?.name ?? null) : null, rows: [a] });
+  }
+  let n = 0;
   const cash = r.assignments.filter((a) => a.order.payment?.method === "CASH" && a.order.paymentStatus !== "PAID").reduce((s, a) => s + a.order.customerShare, 0);
   return (
     <div>
@@ -25,10 +37,19 @@ export default async function ManifestPage({ searchParams }: { searchParams: Pro
             <th className="p-2">#</th><th className="p-2">Code</th><th className="p-2">Drop</th><th className="p-2">Receiver</th><th className="p-2">Dabbas</th><th className="p-2 text-right">Cash</th><th className="p-2">Signed</th>
           </tr>
         </thead>
-        <tbody>
-          {r.assignments.map((a, i) => (
+        {blocks.map((b) => (
+        <tbody key={b.key}>
+          {b.company && (
+            <tr className="border-b border-ink bg-besar-light/60">
+              <td colSpan={7} className="p-2">
+                <b>{b.company.name}</b> — {b.office ?? b.rows[0].order.placeName ?? b.rows[0].order.addressLine} · {b.rows.length} order{b.rows.length > 1 ? "s" : ""}, {b.rows.reduce((s, a) => s + a.order.items.reduce((q, it) => q + it.quantity, 0), 0)} dabbas
+                {b.company.deliveryInstructions && <div className="text-xs italic">{b.company.deliveryInstructions}</div>}
+              </td>
+            </tr>
+          )}
+          {b.rows.map((a) => (
             <tr key={a.id} className="border-b border-ink-line align-top">
-              <td className="p-2">{i + 1}</td>
+              <td className="p-2">{++n}</td>
               <td className="p-2 font-mono font-bold">#{a.order.code}</td>
               <td className="p-2"><b>{a.order.placeName ?? a.order.addressLine}</b><div className="text-xs">{a.order.area}{a.order.landmark ? ` · ${a.order.landmark}` : ""}</div>{a.order.instructions && <div className="text-xs italic">{a.order.instructions}</div>}</td>
               <td className="p-2">{a.order.contactName}<div className="text-xs">{pii.phone(a.order.contactPhone)}</div></td>
@@ -38,6 +59,7 @@ export default async function ManifestPage({ searchParams }: { searchParams: Pro
             </tr>
           ))}
         </tbody>
+        ))}
       </table>
     </div>
   );

@@ -43,6 +43,7 @@ const en = {
     boxes: "Saved dabbas",
     addresses: "Addresses",
     wallet: "Credit",
+    referrals: "Refer a friend",
     payments: "Payments",
     notifications: "Notifications",
     support: "Help",
@@ -85,6 +86,7 @@ const en = {
     payWith: "Pay with",
     billedToCompany: "Billed to {company} — nothing to pay now",
     coupon: "Coupon code",
+    couponReferralHint: "A friend's referral code works here too.",
     apply: "Apply",
     youPay: "You pay",
     companyPays: "{company} pays",
@@ -174,6 +176,7 @@ const ne: AccountDict = {
     boxes: "सेभ गरिएका डब्बा",
     addresses: "ठेगानाहरू",
     wallet: "क्रेडिट",
+    referrals: "साथीलाई सिफारिस गर्नुहोस्", // NE: needs native review
     payments: "भुक्तानी", // NE: needs native review
     notifications: "सूचनाहरू",
     support: "सहायता",
@@ -216,6 +219,7 @@ const ne: AccountDict = {
     payWith: "भुक्तानी माध्यम",
     billedToCompany: "{company} लाई बिल गरिन्छ — अहिले तिर्नु पर्दैन",
     coupon: "कुपन कोड",
+    couponReferralHint: "साथीको रेफरल कोड पनि यहाँ चल्छ।", // NE: needs native review
     apply: "लागू गर्नुहोस्",
     youPay: "तपाईंले तिर्ने",
     companyPays: "{company} ले तिर्ने",

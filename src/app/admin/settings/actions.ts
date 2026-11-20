@@ -5,6 +5,7 @@ import { audit } from "@/lib/audit";
 import { done, type ActionResult } from "@/lib/action";
 import { getSettings, saveSettings, DEFAULT_FLAGS, type FeatureFlags, type SiteSettings } from "@/lib/settings";
 import { WEEKDAYS } from "@/lib/dates";
+import { OrderAdminError, setModificationWindow } from "@/server/orders-admin";
 import { guarded } from "../_kit/guard";
 import { f, FieldError } from "../_kit/form";
 
@@ -58,6 +59,15 @@ export async function updateSettings(_prev: ActionResult, fd: FormData): Promise
       maintenanceMessage: f.str(fd, "maintenanceMessage", 300),
       flags,
     };
+    const modificationCutoff = f.str(fd, "modificationCutoff", 20);
+    if (modificationCutoff && !TIME.test(modificationCutoff)) throw new FieldError("modificationCutoff", "Use HH:MM, e.g. 10:30 — or leave it empty");
+    let mod: { changed: boolean };
+    try {
+      mod = await setModificationWindow(user, modificationCutoff); // own audit row (settings.modification_window)
+    } catch (e) {
+      if (e instanceof OrderAdminError) throw new FieldError("modificationCutoff", e.message);
+      throw e;
+    }
     const after = await saveSettings(patch);
     const changed = Object.keys(patch).filter((k) => JSON.stringify((before as Record<string, unknown>)[k]) !== JSON.stringify((after as Record<string, unknown>)[k]));
     await audit({
@@ -69,6 +79,7 @@ export async function updateSettings(_prev: ActionResult, fd: FormData): Promise
       before: Object.fromEntries(changed.map((k) => [k, (before as Record<string, unknown>)[k]])),
       after: Object.fromEntries(changed.map((k) => [k, (after as Record<string, unknown>)[k]])),
     });
-    return done(changed.length ? `Saved (${changed.length} change${changed.length > 1 ? "s" : ""})` : "Nothing changed");
+    const n = changed.length + (mod.changed ? 1 : 0);
+    return done(n ? `Saved (${n} change${n > 1 ? "s" : ""})` : "Nothing changed");
   }, ["/admin/settings", "/"]);
 }

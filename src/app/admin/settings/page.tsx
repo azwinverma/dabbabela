@@ -12,6 +12,7 @@ import { ActionForm, SubmitButton } from "@/components/ui/ActionForm";
 import { Input, Textarea, Checkbox, Select } from "@/components/ui/Fields";
 import { Badge } from "@/components/ui/Badge";
 import { ImageField } from "@/components/admin/ImageField";
+import { modificationCutoff } from "@/server/orders-admin";
 import { updateSettings } from "./actions";
 
 const FLAG_LABEL: Record<keyof FeatureFlags, [string, string]> = {
@@ -41,6 +42,7 @@ function Status({ ok, label, note }: { ok: boolean; label: string; note?: string
 export default async function SettingsPage() {
   await requirePermission("settings.view");
   const s = await getSettings();
+  const modCutoff = await modificationCutoff();
   const dbOk = await db.$queryRaw`SELECT 1`.then(() => true).catch(() => false);
   const sandbox = !process.env.ESEWA_SECRET_KEY;
   const configured: Record<PaymentMethod, { ok: boolean; note: string }> = {
@@ -79,6 +81,7 @@ export default async function SettingsPage() {
               <Panel title="Ordering rules">
                 <div className="grid gap-4 md:grid-cols-3">
                   <Input name="orderCutoff" label="Same-day cut-off" defaultValue={s.orderCutoff} placeholder="09:30" hint="Kathmandu time. Also when the day locks." />
+                  <Input name="modificationCutoff" label="Staff can edit orders until" defaultValue={modCutoff ?? ""} placeholder={s.orderCutoff} hint="Kathmandu time, on the delivery day. Empty = the order cut-off. Never after the day is locked." />
                   <Input name="advanceDays" type="number" min={1} label="Book up to (days ahead)" defaultValue={s.advanceDays} />
                   <Input name="minOrderAmount" label="Minimum order per day (Rs)" defaultValue={rupeesInput(s.minOrderAmount)} />
                   <Input name="freeDeliveryAbove" label="Free delivery above (Rs/day)" defaultValue={rupeesInput(s.freeDeliveryAbove)} hint="0 = never by amount; zones can override" />

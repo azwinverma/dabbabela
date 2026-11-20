@@ -31,7 +31,8 @@ export default async function ReferralsPage() {
   }
   const { settings } = data;
   const offer = settings.refereeType === "PERCENT" ? `${settings.refereeValue}% off` : `${rs(settings.refereeValue)} off`;
-  const share = data.code ? `Try Dabba Bela lunch boxes — use my code ${data.code} for ${offer} your first order.` : "";
+  const site = (process.env.NEXT_PUBLIC_SITE_URL ?? "").replace(/\/$/, "");
+  const share = data.code ? `Try Dabba Bela lunch boxes — use my code ${data.code} for ${offer} your first order.${site ? ` Sign up: ${site}/register?ref=${data.code}` : ""}` : "";
 
   return (
     <div className="max-w-3xl space-y-8">

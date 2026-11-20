@@ -6,7 +6,8 @@ import { ktmNow } from "@/lib/dates";
 import { log } from "@/lib/logger";
 import { can, isStaffRole } from "@/lib/permissions";
 import { getSettings } from "@/lib/settings";
-import { emailConfigured, emailShell, escapeHtml } from "@/server/notify/email";
+import { emailConfigured } from "@/server/notify/email";
+import { renderTemplate } from "@/server/notify";
 import { SEVERITY_PRIORITY, type AlertStatus, type Detector, type DetectorCtx, type Finding, type Severity } from "./types";
 import { missingSelections, planRenewals, unpaidOrders } from "./detectors/orders";
 import { overCapacity, production } from "./detectors/kitchen";
@@ -135,6 +136,9 @@ export async function applyFindings(detector: Pick<Detector, "name" | "mode">, f
 }
 
 export type DetectorRun = ApplyResult & { name: string; error?: string };
+
+/** Detectors that react to a day lock (run right after the cut-off job and after a manual lock in Admin → Kitchen). */
+export const CUTOFF_DETECTORS = ["unpaid-orders", "missing-selections", "over-capacity", "production"];
 
 /**
  * Run detectors (all, or `only`) and persist their findings. A detector that throws is reported and its alerts
@@ -365,9 +369,13 @@ export async function escalateAlerts(opts: { now?: Date } = {}) {
     if (rules.notifyEmail && settings.notifyEmail && !a.ownerId && !emails.has(settings.notifyEmail.toLowerCase())) emails.set(settings.notifyEmail.toLowerCase(), null);
 
     const link = `${(process.env.NEXT_PUBLIC_SITE_URL ?? "").replace(/\/$/, "")}/admin/alerts?status=OPEN&q=${encodeURIComponent(a.id)}`;
-    const subject = `[${a.severity}] ${a.message.slice(0, 120)}`;
     const mins = Math.round((now.getTime() - occurrence) / 60_000);
-    const html = emailShell(settings.brandName, "Alert needs attention", `<p><strong>${escapeHtml(a.message)}</strong></p><p>Open for ${mins} minutes and not acknowledged yet (${escapeHtml(a.source)}).</p><p><a href="${escapeHtml(link || "/admin/alerts")}">Open the alerts center</a></p>`);
+    // Template "alert.escalation" (overridable in Admin → Notifications); outbox rows below keep their own dedupe.
+    const vars = { severity: a.severity, message: a.message.slice(0, 120), minutes: mins, source: a.source };
+    const email = (await renderTemplate("alert.escalation", "EMAIL", vars, { link: link || "/admin/alerts" }))!;
+    const inApp = (await renderTemplate("alert.escalation", "IN_APP", vars, { link: "/admin/alerts" }))!;
+    const subject = email.subject;
+    const html = email.body;
     const sentTo: string[] = [];
     for (const [to, userId] of emails) {
       try {
@@ -375,7 +383,7 @@ export async function escalateAlerts(opts: { now?: Date } = {}) {
         result.queued++;
         sentTo.push(to);
         if (userId) {
-          await db.notification.create({ data: { userId, type: "alert.escalation", title: subject.slice(0, 200), body: `Open for ${mins} min, not acknowledged.`, link: "/admin/alerts" } });
+          await db.notification.create({ data: { userId, type: "alert.escalation", title: inApp.subject.slice(0, 200), body: inApp.body, link: "/admin/alerts" } });
           result.notified++;
         }
       } catch (e) {

@@ -13,7 +13,7 @@ import { csv, money } from "./reports";
 import { changeWindowOpen } from "./calendar";
 import { combineDiet, getOffersForDates } from "./menu";
 import { companyShareFor, priceDays, type CompanySpec } from "./pricing";
-import { companyMenuBoxIds, companySpecFor, departmentBudgetRemaining } from "./corporate";
+import { COMPANY_SHARE_PREFIX, companyMenuBoxIds, companySpecFor, departmentBudgetRemaining } from "./corporate";
 import { assertCustomerCanOrder, CrmError } from "./crm";
 import { assertDayCapacity, CapacityError, lockKitchenDay, slotBooked } from "./capacity";
 import { addCredit, spendCredit, walletBalance } from "./ledger";
@@ -97,10 +97,34 @@ export async function loadCustomer(userId: string): Promise<CurrentUser> {
 /** Setting row holding the staff modification window: `{ "cutoff": "HH:MM" }`. Absent = the order cut-off. */
 export const MODIFICATION_WINDOW_KEY = "orders.modificationWindow";
 
-async function modificationCutoff(): Promise<string | null> {
+export async function modificationCutoff(): Promise<string | null> {
   const row = await db.setting.findUnique({ where: { key: MODIFICATION_WINDOW_KEY } });
   const v = row?.value as { cutoff?: unknown } | null;
   return typeof v?.cutoff === "string" && /^\d{2}:\d{2}$/.test(v.cutoff) ? v.cutoff : null;
+}
+
+/**
+ * Set (HH:MM, Kathmandu time) or clear ("" → back to the order cut-off) the staff modification window. Needs
+ * `settings.edit`; audited as `settings.modification_window` when it changes. Returns whether anything changed.
+ */
+export async function setModificationWindow(actor: Actor, raw: string) {
+  need(actor, "settings.edit");
+  const cutoff = raw.trim();
+  if (cutoff && !/^([01]\d|2[0-3]):[0-5]\d$/.test(cutoff)) throw new OrderAdminError("Use HH:MM (24-hour), e.g. 10:30 — or leave it empty to use the order cut-off");
+  const before = await modificationCutoff();
+  if ((before ?? "") === cutoff) return { changed: false, cutoff: before };
+  if (cutoff) await db.setting.upsert({ where: { key: MODIFICATION_WINDOW_KEY }, create: { key: MODIFICATION_WINDOW_KEY, value: { cutoff } }, update: { value: { cutoff } } });
+  else await db.setting.deleteMany({ where: { key: MODIFICATION_WINDOW_KEY } });
+  await audit({
+    actorId: actor.id,
+    action: "settings.modification_window",
+    entity: "Setting",
+    entityId: MODIFICATION_WINDOW_KEY,
+    summary: cutoff ? `Staff modification window: until ${cutoff}` : "Staff modification window cleared (order cut-off applies)",
+    before: { cutoff: before },
+    after: { cutoff: cutoff || null },
+  });
+  return { changed: true, cutoff: cutoff || null };
 }
 
 /**
@@ -1029,15 +1053,18 @@ export async function exportOrdersCsv(actor: Actor, sp: Record<string, string | 
   const where = orderWhere(actor, f);
   const full = can(actor, "customers.pii");
   const [rows, matched] = await Promise.all([
-    db.order.findMany({ where, include: { ...orderListInclude, user: { select: { name: true, email: true } } }, orderBy: orderOrderBy("deliveryDate", "asc"), take: EXPORT_CAP }),
+    db.order.findMany({ where, include: { ...orderListInclude, user: { select: { name: true, email: true } }, adjustments: { select: { amount: true, reason: true } } }, orderBy: orderOrderBy("deliveryDate", "asc"), take: EXPORT_CAP }),
     db.order.count({ where }),
   ]);
   const phone = (p: string | null | undefined) => (full ? formatNepalPhone(p) || p || "" : maskPhone(p));
   const email = (e: string | null | undefined) => (full ? (e ?? "") : maskEmail(e));
   const out: (string | number | null)[][] = [
-    ["Order", "Code", "Delivery date", "Slot", "Kitchen", "Status", "Payment status", "Method", "Source", "Customer", "Email", "Receiver", "Phone", "Area", "Zone", "Company", "Dabbas", "Meals", "Subtotal", "Delivery", "Discount", "Tax", "Total", "Company share", "Customer share", "Refunded", "Created"],
+    ["Order", "Code", "Delivery date", "Slot", "Kitchen", "Status", "Payment status", "Method", "Source", "Customer", "Email", "Receiver", "Phone", "Area", "Zone", "Company", "Dabbas", "Meals", "Subtotal", "Delivery", "Discount", "Tax", "Total", "Company share", "Customer share", "Customer adjustments", "Company adjustments", "Refunded", "Created"],
   ];
   for (const o of rows) {
+    // Staff edit adjustments (compensating rows): company-share ones are billed on the next invoice, the rest are the customer's.
+    const coAdj = o.adjustments.filter((a) => a.reason.startsWith(COMPANY_SHARE_PREFIX)).reduce((a, x) => a + x.amount, 0);
+    const custAdj = o.adjustments.reduce((a, x) => a + x.amount, 0) - coAdj;
     out.push([
       o.number,
       o.code,
@@ -1064,6 +1091,8 @@ export async function exportOrdersCsv(actor: Actor, sp: Record<string, string | 
       money(o.total),
       money(o.companyShare),
       money(o.customerShare),
+      money(custAdj),
+      money(coAdj),
       money(o.refundedAmount),
       o.createdAt.toISOString(),
     ]);

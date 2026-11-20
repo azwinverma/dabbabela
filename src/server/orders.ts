@@ -665,7 +665,11 @@ export async function cancelOrder(
   if (!order || (opts.userId && order.userId !== opts.userId)) throw new OrderError("Order not found");
   if (!actor.isStaff) {
     if (!EDITABLE_STATUSES.includes(order.status)) throw new OrderError("This order is already being prepared");
-    if (!(await changeWindowOpen(isoDate(order.deliveryDate), order.kitchenId, settings))) throw new OrderError(`Changes for that day closed at ${settings.orderCutoff}`);
+    const date = isoDate(order.deliveryDate);
+    const offer = (await getOffersForDates([date], order.kitchenId)).get(date);
+    const company = order.companyId ? await db.company.findUnique({ where: { id: order.companyId }, select: { cutoffOverride: true } }) : null;
+    const cutoff = dayCutoff(offer?.cutoff, company?.cutoffOverride);
+    if (!(await changeWindowOpen(date, order.kitchenId, settings, cutoff))) throw new OrderError(`Changes for that day closed at ${cutoff ?? settings.orderCutoff}`);
   }
   assertTransition(order.status, "CANCELLED");
   if (actor.isStaff && !opts.reason.trim()) throw new OrderError("Give a reason");

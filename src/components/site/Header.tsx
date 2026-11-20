@@ -40,8 +40,7 @@ export async function Header() {
   const fontCss = FONT_PRESETS[brand.fontPreset].css;
   return (
     <header className="relative z-30">
-      {/* Branding slots (Admin → Navigation & branding). React hoists <link> into <head>; CSS comes from a fixed preset map. */}
-      {brand.faviconUrl && <link rel="icon" href={brand.faviconUrl} />}
+      {/* Branding slots (Admin → Navigation & branding); the favicon is set in the root layout metadata. CSS comes from a fixed preset map. */}
       {fontCss && <style>{fontCss}</style>}
       <a href="#main" className="sr-only-focusable absolute left-3 top-3 z-50 rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-paper">
         {t.nav.skip}

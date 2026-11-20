@@ -5,7 +5,8 @@ import { getSection } from "@/lib/cms";
 import { getI18n } from "@/lib/i18n/server";
 import { getSettings } from "@/lib/settings";
 import { rs } from "@/lib/money";
-import { searchCoverage } from "@/server/coverage";
+import { parseZoneRules, searchCoverage } from "@/server/coverage";
+import { format } from "@/lib/i18n";
 import { PageHero } from "@/components/site/Section";
 import { AreaRequestForm } from "./AreaRequestForm";
 
@@ -27,6 +28,12 @@ export default async function CoveragePage({ searchParams }: { searchParams: Pro
     query.length >= 2 ? searchCoverage(query) : Promise.resolve(null),
   ]);
   const windows = [...new Set(slots.map((x) => x.label))];
+  // Distance fee bands (read-only): they apply only when the zone has an origin and the customer's address has a map pin.
+  const bandsText = (z: { distanceRules?: unknown }) => {
+    const r = parseZoneRules(z.distanceRules);
+    if (!r.origin || !r.bands.length) return null;
+    return r.bands.map((b) => `${format(t.site.upToKm, { km: b.maxKm })} ${b.fee ? rs(b.fee) : t.common.free}`).join(" · ");
+  };
   const freeAbove = (z: (typeof zones)[number]) => z.freeAbove ?? (s.freeDeliveryAbove || null);
   // Kitchens that aren't taking orders (WP-07 status): say so next to the areas they serve.
   const pausedNote = new Map(
@@ -66,6 +73,11 @@ export default async function CoveragePage({ searchParams }: { searchParams: Pro
                         {zone.fee && (zone.freeAbove ?? s.freeDeliveryAbove) ? ` · ${t.site.freeAbove} ${rs(zone.freeAbove ?? s.freeDeliveryAbove)}` : ""}
                         {zone.etaNote ? ` · ${t.site.lunchWindow}: ${zone.etaNote}` : ""}
                       </span>
+                      {bandsText(zone) && (
+                        <span className="block text-sm">
+                          {t.site.distanceBands}: {bandsText(zone)}
+                        </span>
+                      )}
                       {pausedNote.get(zone.id) && <span className="mt-1 block text-sm font-semibold text-sindoor-dark">{pausedNote.get(zone.id)}</span>}
                     </li>
                   ))}
@@ -108,6 +120,12 @@ export default async function CoveragePage({ searchParams }: { searchParams: Pro
                   <dt className="text-xs text-ink-mute">{t.site.fee}</dt>
                   <dd className="font-semibold">{z.fee ? rs(z.fee) : t.common.free}</dd>
                 </div>
+                {bandsText(z) && (
+                  <div className="col-span-2">
+                    <dt className="text-xs text-ink-mute">{t.site.distanceBands}</dt>
+                    <dd className="font-semibold">{bandsText(z)}</dd>
+                  </div>
+                )}
                 {z.fee > 0 && freeAbove(z) ? (
                   <div>
                     <dt className="text-xs text-ink-mute">{t.common.free}</dt>

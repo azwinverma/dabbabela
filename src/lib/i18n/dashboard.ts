@@ -96,6 +96,9 @@ const en = {
     retry: "Try again",
     home: "Back to my account",
   },
+  wallet: {
+    referral: "Referral reward",
+  },
 };
 
 type Widen<T> = { [K in keyof T]: T[K] extends string ? string : Widen<T[K]> };
@@ -193,6 +196,9 @@ const ne: DashboardDict = {
     errorBody: "फेरि प्रयास गर्नुहोस्। बारम्बार भइरहे हामीलाई सम्पर्क गर्नुहोस्{code}।",
     retry: "फेरि प्रयास गर्नुहोस्",
     home: "मेरो खातामा फर्कनुहोस्",
+  },
+  wallet: {
+    referral: "रेफरल पुरस्कार",
   },
 };
 

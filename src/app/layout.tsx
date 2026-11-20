@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import { getLocale } from "@/lib/i18n/server";
 import { RoughFilter } from "@/components/art/Graffiti";
 import { getSettings } from "@/lib/settings";
+import { COLOR_PRESETS, getBranding } from "@/lib/cms/branding";
 import "./globals.css";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ const marker = localFont({ src: "./fonts/permanent-marker-latin-400-normal.woff2
 const deva = localFont({ src: "./fonts/noto-sans-devanagari-devanagari-wght-normal.woff2", weight: "100 900", variable: "--font-deva", display: "swap", preload: false, adjustFontFallback: false, fallback: [] });
 
 export async function generateMetadata(): Promise<Metadata> {
-  const s = await getSettings();
+  const [s, brand] = await Promise.all([getSettings(), getBranding()]);
   const base = process.env.NEXT_PUBLIC_SITE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
   return {
     metadataBase: new URL(base),
@@ -32,10 +33,15 @@ export async function generateMetadata(): Promise<Metadata> {
       ...(s.ogImage ? { images: [s.ogImage] } : {}),
     },
     twitter: { card: "summary_large_image" },
+    // Branding favicon (Admin → Navigation & branding), else the bundled mark (public/icon.svg).
+    icons: { icon: brand.faviconUrl || "/icon.svg" },
   };
 }
 
-export const viewport: Viewport = { themeColor: "#8B2923", width: "device-width", initialScale: 1 };
+export async function generateViewport(): Promise<Viewport> {
+  const brand = await getBranding();
+  return { themeColor: COLOR_PRESETS[brand.colorPreset]?.theme ?? COLOR_PRESETS.classic.theme, width: "device-width", initialScale: 1 };
+}
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const locale = await getLocale();

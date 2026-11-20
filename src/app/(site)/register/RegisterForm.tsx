@@ -6,12 +6,13 @@ import { Input } from "@/components/ui/Fields";
 import { registerAction } from "@/lib/actions/auth";
 import type { AccountDict } from "@/lib/i18n/account";
 
-export function RegisterForm({ next, code, t }: { next: string; code: string; t: AccountDict["auth"] }) {
+export function RegisterForm({ next, code, referral, t }: { next: string; code: string; referral: string; t: AccountDict["auth"] }) {
   return (
     <ActionForm action={registerAction} className="space-y-4">
       {(state) => (
         <>
           <input type="hidden" name="next" value={next} />
+          {referral && <input type="hidden" name="ref" value={referral} />}
           <Input label={t.name} name="name" autoComplete="name" required error={state.errors?.name} />
           <div className="grid gap-4 sm:grid-cols-2">
             <Input label={t.email} name="email" type="email" autoComplete="email" required error={state.errors?.email} />

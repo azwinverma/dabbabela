@@ -9,7 +9,7 @@ import { RegisterForm } from "./RegisterForm";
 
 export const metadata: Metadata = { title: "Create an account", robots: { index: false } };
 
-export default async function RegisterPage({ searchParams }: { searchParams: Promise<{ next?: string; code?: string }> }) {
+export default async function RegisterPage({ searchParams }: { searchParams: Promise<{ next?: string; code?: string; ref?: string }> }) {
   const sp = await searchParams;
   if (await getCurrentUser()) redirect("/account");
   const t = accountDict(await getLocale()).auth;
@@ -25,7 +25,7 @@ export default async function RegisterPage({ searchParams }: { searchParams: Pro
         </>
       }
     >
-      <RegisterForm next={next} code={sp.code?.slice(0, 20) ?? ""} t={t} />
+      <RegisterForm next={next} code={sp.code?.slice(0, 20) ?? ""} referral={/^[A-Za-z0-9-]{3,20}$/.test(sp.ref ?? "") ? sp.ref!.toUpperCase() : ""} t={t} />
       <p className="mt-6 text-sm text-ink-soft">
         {t.haveAccount}{" "}
         <Link href={`/login${next ? `?next=${encodeURIComponent(next)}` : ""}`} className="font-semibold text-sindoor underline underline-offset-2">

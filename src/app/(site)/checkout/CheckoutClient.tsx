@@ -257,6 +257,7 @@ export function CheckoutClient({ t, addresses, slots, zoneSlotIds = {}, kitchenN
               {t.apply}
             </button>
           </form>
+          {!coupon && <p className="mt-1 text-xs text-ink-mute">{t.couponReferralHint}</p>}
           {quote?.couponError && coupon && <p className="mt-1 text-xs font-semibold text-sindoor">{quote.couponError}</p>}
           {quote?.couponCode && <p className="mt-1 text-xs font-semibold text-saag-dark">{quote.couponCode} applied</p>}
 

@@ -12,9 +12,31 @@ export class DispatchError extends Error {}
 /** Orders ready to go out (or already out) for a kitchen-day. */
 const DISPATCH_STATUSES = ["SCHEDULED", "CONFIRMED", "PREPARING", "PACKED", "OUT_FOR_DELIVERY", "DELIVERED", "FAILED_DELIVERY"] as const;
 
+/** Company drop details for orders: the company's delivery instructions and the order's office location (WP-12). */
+export async function companyDropInfo(orders: { companyId: string | null; officeLocationId: string | null }[]) {
+  const companyIds = [...new Set(orders.map((o) => o.companyId).filter((x): x is string => Boolean(x)))];
+  const locationIds = [...new Set(orders.map((o) => o.officeLocationId).filter((x): x is string => Boolean(x)))];
+  const [companies, locations] = await Promise.all([
+    companyIds.length ? db.company.findMany({ where: { id: { in: companyIds } }, select: { id: true, name: true, deliveryInstructions: true } }) : [],
+    locationIds.length ? db.officeLocation.findMany({ where: { id: { in: locationIds } }, select: { id: true, name: true, receiverName: true } }) : [],
+  ]);
+  return { companies: new Map(companies.map((c) => [c.id, c])), locations: new Map(locations.map((l) => [l.id, l])) };
+}
+
 /**
- * Manifest grouped by slot → zone → hand-off point (office/shop/college name + area), so one rider
- * can hand a whole office its dabbas at reception. Plain grouping, no route optimisation.
+ * Hand-off key for an order: company drops group by company + office location (else company + place), so the rider
+ * hands a whole office its dabbas at once; everyone else by place name/address + area.
+ */
+export function dropKey(o: { companyId: string | null; officeLocationId: string | null; placeName: string | null; addressLine: string; area: string }) {
+  const place = `${(o.placeName ?? o.addressLine).toLowerCase().trim()}|${o.area.toLowerCase().trim()}`;
+  if (!o.companyId) return place;
+  return `co:${o.companyId}|${o.officeLocationId ?? place}`;
+}
+
+/**
+ * Manifest grouped by slot → zone → hand-off point (company office location, or office/shop/college name + area), so
+ * one rider can hand a whole office its dabbas at reception. Company drops carry the company's delivery
+ * instructions. Plain grouping, no route optimisation.
  */
 export async function manifest(kitchenId: string, date: string, slotId?: string | null) {
   const orders = await db.order.findMany({
@@ -22,13 +44,16 @@ export async function manifest(kitchenId: string, date: string, slotId?: string 
     include: { zone: { select: { id: true, name: true } }, items: { select: { quantity: true, name: true } }, assignment: { include: { route: { select: { id: true, name: true } } } }, payment: { select: { method: true } } },
     orderBy: [{ slotLabel: "asc" }, { area: "asc" }, { placeName: "asc" }, { contactName: "asc" }],
   });
-  type Stop = { key: string; placeName: string | null; area: string; landmark: string | null; orders: typeof orders; meals: number; cash: number };
+  const info = await companyDropInfo(orders);
+  type Stop = { key: string; placeName: string | null; area: string; landmark: string | null; company: string | null; office: string | null; instructions: string | null; orders: typeof orders; meals: number; cash: number };
   const groups = new Map<string, { slot: string; zoneId: string | null; zone: string; stops: Map<string, Stop> }>();
   for (const o of orders) {
     const gk = `${o.slotLabel ?? "Any time"}|${o.zoneId ?? "none"}`;
     const g = groups.get(gk) ?? { slot: o.slotLabel ?? "Any time", zoneId: o.zoneId, zone: o.zone?.name ?? "No zone", stops: new Map() };
-    const sk = `${(o.placeName ?? o.addressLine).toLowerCase().trim()}|${o.area.toLowerCase().trim()}`;
-    const st = g.stops.get(sk) ?? { key: sk, placeName: o.placeName, area: o.area, landmark: o.landmark, orders: [], meals: 0, cash: 0 };
+    const sk = dropKey(o);
+    const co = o.companyId ? info.companies.get(o.companyId) : undefined;
+    const loc = o.officeLocationId ? info.locations.get(o.officeLocationId) : undefined;
+    const st = g.stops.get(sk) ?? { key: sk, placeName: o.placeName, area: o.area, landmark: o.landmark, company: co?.name ?? null, office: loc?.name ?? null, instructions: co?.deliveryInstructions ?? null, orders: [], meals: 0, cash: 0 };
     st.orders.push(o);
     st.meals += o.items.reduce((a, i) => a + i.quantity, 0);
     if (o.payment?.method === "CASH" && o.paymentStatus !== "PAID" && !["CANCELLED", "SKIPPED"].includes(o.status)) st.cash += o.customerShare;

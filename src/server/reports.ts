@@ -211,17 +211,9 @@ export async function lowStock(kitchenId?: string | null | string[]) {
   return ings.filter((i) => onHand.has(i.id) && (onHand.get(i.id) ?? 0) < i.safetyStock).map((i) => ({ ...i, onHand: onHand.get(i.id) ?? 0 }));
 }
 
-export async function alerts() {
-  const dayAgo = new Date(Date.now() - 86400000);
-  const [failedJobs, failedMessages, stuckPending, transfers, low, openTickets] = await Promise.all([
-    db.jobRun.count({ where: { status: "FAILED", startedAt: { gte: dayAgo } } }),
-    db.outboundMessage.count({ where: { status: "FAILED" } }),
-    db.order.count({ where: { status: "PENDING_PAYMENT", createdAt: { lt: new Date(Date.now() - 2 * 3600_000) } } }),
-    db.payment.count({ where: { method: "BANK_TRANSFER", status: "PENDING", proofUrl: { not: null } } }),
-    lowStock(),
-    db.supportTicket.count({ where: { status: { in: ["OPEN", "PENDING"] } } }),
-  ]);
-  return { failedJobs, failedMessages, stuckPending, transfers, lowStock: low.length, openTickets };
+/** Open support tickets (dashboard "Needs attention" + KPI). The other old computed rows are Alert detectors now (WP-16). */
+export async function openTicketCount() {
+  return db.supportTicket.count({ where: { status: { in: ["OPEN", "PENDING"] } } });
 }
 
 /** Legacy per-month spend Setting. Read only by the one-off import into a campaign (marketing.importLegacySpend). */

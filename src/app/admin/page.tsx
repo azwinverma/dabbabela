@@ -7,12 +7,13 @@ import { addDays, formatDay, todayKTM } from "@/lib/dates";
 import { PageHeader, Panel, RankBars } from "@/components/admin/ui";
 import { Kpi, pct, Empty, Growth } from "@/components/admin/finance/kit";
 import { LinkBars } from "@/components/admin/charts";
-import { KPI_FORMULAS as F, actualFoodCost, alerts, cac, cohorts, customerMetrics, deliveryMetrics, mealsDue, popularBoxes, popularDishes, wasteRate } from "@/server/reports";
+import { KPI_FORMULAS as F, actualFoodCost, cac, cohorts, customerMetrics, deliveryMetrics, mealsDue, openTicketCount, popularBoxes, popularDishes, wasteRate } from "@/server/reports";
 import { parseFilters, qs, type AnalyticsFilters } from "@/server/analytics/filters";
 import { METRICS as M } from "@/server/analytics/metrics";
 import { bookedByDelivery, bookings, cash, deferred, periodTiles, receivables, recognised, trendSeries } from "@/server/analytics/revenue";
 import { delayedCount } from "@/server/analytics/orders";
 import { churn, planStatusCounts, runRate } from "@/server/analytics/subscriptions";
+import { SEVERITIES } from "@/server/alerts/types";
 import { AnalyticsFilterBar, filterOptions } from "./analytics/_components/FilterBar";
 
 export const metadata = { title: "Dashboard" };
@@ -28,7 +29,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const today = todayKTM();
   const r = { from: f.from, to: f.to, kitchenIds: f.kitchenIds };
 
-  const [cust, waste, delivery, boxes, dishes, today_, tomorrow, al, coh, plans, ch, delayed, openAlerts] = await Promise.all([
+  const [cust, waste, delivery, boxes, dishes, today_, tomorrow, openTickets, coh, plans, ch, delayed, openAlerts] = await Promise.all([
     customerMetrics(r),
     wasteRate(r),
     deliveryMetrics(r),
@@ -36,12 +37,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     popularDishes(r),
     mealsDue(today, f.kitchenIds ?? undefined),
     mealsDue(addDays(today, 1), f.kitchenIds ?? undefined),
-    alerts(),
+    openTicketCount(),
     cohorts(6, f.kitchenIds),
     planStatusCounts(f),
     churn(f),
     delayedCount(f),
-    // WP-16 hand-off: open Alert rows (empty until the alerts center lands).
+    // Open Alert rows (WP-16 detectors: payments, transfers, stock, jobs, messages, …) by severity.
     db.alert.groupBy({ by: ["severity"], where: { status: { not: "RESOLVED" } }, _count: { _all: true } }),
   ]);
   const [book, cashR, rec, def, booked, recv, cost, periods, run, series, acq] = money
@@ -63,15 +64,14 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const expected = expectedCost?._sum.costTotal ?? 0;
   const ordersByDay = money ? null : await trendSeries(f, "day");
 
+  // Computed checks now covered by Alert detectors (failed jobs/messages, stuck payments, bank transfers, low stock) come
+  // through the open-Alert counts; only what has no detector stays computed here.
   const alertRows = [
-    al.transfers && { n: al.transfers, text: "bank transfers waiting for verification", href: "/admin/payments?view=verify", show: can(user, "payments.view") },
-    al.stuckPending && { n: al.stuckPending, text: "orders stuck awaiting payment for 2h+", href: "/admin/payments?status=PENDING", show: can(user, "payments.view") },
-    al.lowStock && { n: al.lowStock, text: "ingredients below safety stock", href: "/admin/inventory", show: can(user, "inventory.view") },
+    ...openAlerts
+      .sort((a, b) => (SEVERITIES as readonly string[]).indexOf(a.severity) - (SEVERITIES as readonly string[]).indexOf(b.severity))
+      .map((a) => ({ n: a._count._all, text: `open ${a.severity.toLowerCase()} alerts`, href: `/admin/alerts?severity=${a.severity}`, show: can(user, "alerts.view") })),
     delayed && { n: delayed, text: "orders delayed past their slot", href: money ? drill(f, "delayed") : "/admin/dispatch", show: money || can(user, "dispatch.view") },
-    al.failedJobs && { n: al.failedJobs, text: "scheduled jobs failed in the last 24h", href: "/admin/audit", show: true },
-    al.failedMessages && { n: al.failedMessages, text: "emails/SMS failed after retries", href: "/admin/notifications", show: true },
-    al.openTickets && { n: al.openTickets, text: "open support tickets", href: "/admin/support", show: can(user, "support.view") },
-    ...openAlerts.map((a) => ({ n: a._count._all, text: `open ${a.severity.toLowerCase()} alerts`, href: "/admin/alerts", show: can(user, "alerts.view") })),
+    openTickets && { n: openTickets, text: "open support tickets", href: "/admin/support", show: can(user, "support.view") },
   ].filter((x): x is { n: number; text: string; href: string; show: boolean } => Boolean(x) && Boolean((x as { show: boolean }).show));
 
   const capTone = (m: { meals: number; capacity: number }) => (m.capacity && m.meals / m.capacity > 0.9 ? "warn" : "default");
@@ -118,7 +118,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         <Kpi label="Meals due today" value={`${today_.meals} / ${today_.capacity}`} formula={F.meals} sub={formatDay(today)} tone={capTone(today_)} />
         <Kpi label="Meals due tomorrow" value={`${tomorrow.meals} / ${tomorrow.capacity}`} formula={F.meals} sub={formatDay(addDays(today, 1))} tone={capTone(tomorrow)} />
         <Kpi label="Active meal plans" value={plans.active} formula={F.activePlans} sub={`${plans.paused} paused`} />
-        <Kpi label="Open support tickets" value={al.openTickets} formula={F.tickets} tone={al.openTickets ? "warn" : "default"} />
+        <Kpi label="Open support tickets" value={openTickets} formula={F.tickets} tone={openTickets ? "warn" : "default"} />
       </div>
 
       {money && book && cashR && rec && def && booked && recv && cost && periods && run && (

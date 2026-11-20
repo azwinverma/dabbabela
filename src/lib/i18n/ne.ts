@@ -126,6 +126,7 @@ export const ne: Dictionary = {
   days: { SUN: "आइतबार", MON: "सोमबार", TUE: "मङ्गलबार", WED: "बुधबार", THU: "बिहीबार", FRI: "शुक्रबार", SAT: "शनिबार" },
   daysShort: { SUN: "आइत", MON: "सोम", TUE: "मङ्गल", WED: "बुध", THU: "बिही", FRI: "शुक्र", SAT: "शनि" },
   site: {
+    cookieChoices: "कुकी छनोट",
     chefPick: "सेफको रोजाइ",
     alsoToday: "आज अरू पनि",
     vegOption: "शाकाहारी विकल्प",
@@ -166,6 +167,8 @@ export const ne: Dictionary = {
     notCovered: "अहिले हाम्रो रुटमा छैन",
     fee: "डेलिभरी शुल्क",
     freeAbove: "यति वा बढीको अर्डरमा निःशुल्क",
+    distanceBands: "दूरी अनुसार (सेभ गरिएको नक्सा पिन)",
+    upToKm: "{km} कि.मी. सम्म",
     lunchWindow: "खाना आइपुग्ने समय",
     requestArea: "आफ्नो क्षेत्र थप्न अनुरोध गर्नुहोस्",
     draftNotice: "मस्यौदा — यो पृष्ठ कानुनी समीक्षामा छ र सुरु हुनुअघि परिवर्तन हुन सक्छ।",

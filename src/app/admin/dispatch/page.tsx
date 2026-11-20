@@ -87,8 +87,9 @@ export default async function DispatchPage({ searchParams }: { searchParams: Pro
                     <li key={st.key} className="rounded-lg border border-ink-line p-3">
                       <div className="flex justify-between gap-2">
                         <div>
-                          <p className="font-semibold">{st.placeName ?? st.orders[0].addressLine}</p>
+                          <p className="font-semibold">{st.company ? `${st.company} — ${st.office ?? st.placeName ?? st.orders[0].addressLine}` : (st.placeName ?? st.orders[0].addressLine)}</p>
                           <p className="text-xs text-ink-mute">{st.area}{st.landmark ? ` · near ${st.landmark}` : ""}</p>
+                          {st.instructions && <p className="mt-1 text-xs italic text-ink-soft">Company instructions: {st.instructions}</p>}
                         </div>
                         <div className="text-right text-xs">
                           <b>{st.meals} meals</b>
