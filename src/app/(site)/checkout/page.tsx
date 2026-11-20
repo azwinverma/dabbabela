@@ -6,6 +6,7 @@ import { getLocale } from "@/lib/i18n/server";
 import { accountDict } from "@/lib/i18n/account";
 import { availableMethods } from "@/server/payments/methods";
 import { walletBalance } from "@/server/ledger";
+import { topupEnabled } from "@/server/wallet-topup";
 import { zoneSlots } from "@/server/coverage";
 import { toAddressViews } from "../account/_lib/view";
 import { CheckoutClient } from "./CheckoutClient";
@@ -45,6 +46,7 @@ export default async function CheckoutPage() {
         kitchenNotes={kitchenNotes}
         methods={methods}
         walletBalance={balance}
+        canTopup={topupEnabled(settings)}
         user={{ name: user.name, phone: user.phoneNumber ?? "", allergies: user.allergies }}
         company={company ? { name: company.name } : null}
       />

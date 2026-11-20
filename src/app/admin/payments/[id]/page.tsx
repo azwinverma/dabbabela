@@ -5,7 +5,9 @@ import { can } from "@/lib/permissions";
 import { db } from "@/lib/db";
 import { rs } from "@/lib/money";
 import { formatDay, formatStamp, isoDate } from "@/lib/dates";
-import { METHOD_LABEL, REFUND_STATUS } from "@/lib/labels";
+import { METHOD_LABEL, PURPOSE_LABEL, REFUND_STATUS } from "@/lib/labels";
+import { ledgerReasonLabel } from "@/lib/ledger-labels";
+import { topupRefundable } from "@/server/wallet-topup";
 import { PageHeader, Panel, KV, Table, Th, Td, EmptyRow, PaymentBadge, OrderBadge } from "@/components/admin/ui";
 import { Badge } from "@/components/ui/Badge";
 import { VerifyForms } from "../VerifyForms";
@@ -27,7 +29,11 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
     },
   });
   if (!p) notFound();
-  const available = p.amount - p.refundedAmount - p.refunds.filter((r) => r.status === "REQUESTED" || r.status === "APPROVED").reduce((a, r) => a + r.amount, 0);
+  const topup = p.purpose === "WALLET_TOPUP";
+  const [ledger, unspent] = topup ? await Promise.all([db.creditLedger.findMany({ where: { paymentId: p.id }, orderBy: { createdAt: "asc" } }), topupRefundable(p.id)]) : [[], null];
+  const availableRaw = p.amount - p.refundedAmount - p.refunds.filter((r) => r.status === "REQUESTED" || r.status === "APPROVED").reduce((a, r) => a + r.amount, 0);
+  // A top-up can only be refunded up to what the customer hasn't spent (the wallet never goes negative).
+  const available = unspent == null ? availableRaw : Math.min(availableRaw, unspent);
 
   return (
     <div>
@@ -38,6 +44,7 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
             items={[
               ["Customer", can(user, "customers.view") ? <Link className="text-sindoor underline" href={`/admin/customers/${p.user.id}`}>{p.user.name}</Link> : p.user.name],
               ["Method", METHOD_LABEL[p.method]],
+              ["Purpose", PURPOSE_LABEL[p.purpose]],
               ["Amount", rs(p.amount)],
               ["Refunded", rs(p.refundedAmount)],
               ["Paid at", p.paidAt ? formatStamp(p.paidAt) : "—"],
@@ -61,7 +68,26 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
             </div>
           )}
         </Panel>
-        <Panel title="Orders on this payment" className="lg:col-span-2" bodyClass="p-0">
+        {topup && (
+          <Panel title="Wallet credit from this top-up" className="lg:col-span-2">
+            <p className="mb-2 text-sm text-ink-mute">
+              Credit is written once, only after the payment is verified (gateway status check or a staff bank check). Unspent and refundable now: <b className="text-ink">{rs(unspent ?? 0)}</b>.
+            </p>
+            <ul className="divide-y divide-ink-line/50 text-sm">
+              {ledger.map((l) => (
+                <li key={l.id} className="flex justify-between gap-2 py-1.5">
+                  <span>
+                    {ledgerReasonLabel(l.reason)} · {formatStamp(l.createdAt)}
+                    {l.note ? <span className="text-ink-mute"> · {l.note}</span> : null}
+                  </span>
+                  <span className={`tabular-nums ${l.amount < 0 ? "text-sindoor" : "text-saag"}`}>{rs(l.amount)}</span>
+                </li>
+              ))}
+              {!ledger.length && <li className="py-1.5 text-ink-mute">No credit yet — the payment isn&apos;t verified.</li>}
+            </ul>
+          </Panel>
+        )}
+        <Panel title="Orders on this payment" className={topup ? "hidden" : "lg:col-span-2"} bodyClass="p-0">
           <Table className="rounded-none border-0 shadow-none">
             <thead>
               <tr>
@@ -170,7 +196,7 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
             <p className="mb-3 text-sm text-ink-mute">None.</p>
           )}
           {can(user, "refunds.create") && ["PAID", "PARTIALLY_REFUNDED"].includes(p.status) && available > 0 && (
-            <RefundRequestForm paymentId={p.id} max={available} orders={p.orders.map((o) => ({ id: o.id, label: `${o.number} · ${formatDay(isoDate(o.deliveryDate))}` }))} />
+            <RefundRequestForm paymentId={p.id} max={available} topup={topup} orders={p.orders.map((o) => ({ id: o.id, label: `${o.number} · ${formatDay(isoDate(o.deliveryDate))}` }))} />
           )}
         </Panel>
       </div>

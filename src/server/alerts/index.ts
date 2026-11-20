@@ -17,6 +17,7 @@ import { duplicatePayments, reconciliation } from "./detectors/finance";
 import { corporateAccounts, corporateInvoices, corporateShortfall } from "./detectors/corporate";
 import { integrations, paymentMismatch } from "./detectors/integrations";
 import { security } from "./detectors/security";
+import { walletTopups, walletTopupVelocity } from "./detectors/wallet";
 
 export * from "./types";
 
@@ -39,6 +40,8 @@ export const DETECTORS: Detector[] = [
   reconciliation,
   integrations,
   paymentMismatch,
+  walletTopups,
+  walletTopupVelocity,
   security,
 ];
 

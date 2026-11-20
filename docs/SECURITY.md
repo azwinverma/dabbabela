@@ -54,6 +54,31 @@
   receipt before they can be marked processed.
 * Unconfigured gateways are hidden (feature flag + credential check).
 
+## Wallet (store credit) and top-ups (Phase 2A)
+* The wallet is the append-only `CreditLedger`; balance = Σ rows. Rows are never edited — corrections are new rows. Spending locks the
+  user's ledger (`pg_advisory_xact_lock`) so two checkouts can't overspend; manual staff adjustments are audited and can't take a balance
+  below zero.
+* **Top-ups are closed-loop store credit** (spendable only on Dabba Bela meals, not cash, not transferable, no interest) behind
+  `flags.walletTopup` — **off by default** until legal advice on NRB e-money rules. Off = no form, `startTopup` / `startPayment` /
+  method switch refuse; money already sent is still credited once verified (we never keep money without crediting it).
+* A top-up is a `Payment { purpose: WALLET_TOPUP }` with no orders, paid through the **same** eSewa/Khalti start/verify code as checkout
+  (HMAC + attempt + amount + server-side status API) or a bank-transfer proof that finance verifies with the bank reference. Credit is
+  written **only** inside `markPaymentPaid` (the single place money is accepted, dispatching by purpose), after the guarded status flip,
+  as exactly one `TOPUP` ledger row — guarded again by a per-payment advisory lock + existence check, so callbacks, replays, the
+  reconcile cron and a staff verification racing each other can't double-credit (concurrency test in `tests/integration/wallet-topup.test.ts`).
+* A verified amount that differs from the top-up is **never credited**: the payment stays unpaid, a `MISMATCH` provider event is stored
+  and a CRITICAL `GATEWAY_MISMATCH` alert is raised immediately (same dedupe key as the detector sweep).
+* Limits are server-side, under the customer's lock: min / max per top-up, daily total (PAID + PENDING top-ups created in the Kathmandu
+  day) and balance cap (balance + today's pending top-ups + amount). Idempotency key per submit; a key belonging to another customer is
+  refused (never returns their payment). Only eSewa / Khalti / bank can buy credit (never wallet or cash).
+* Refunds of a top-up go to the source only (no wallet-credit refund), only up to the unspent part (re-checked under the user's lock at
+  processing, so a spend since the request can't push the balance negative), and post a negative `TOPUP_REVERSAL` row. Staff actions
+  (bank verification → `wallet.topup_verify`, refund request/approve/process) are audited. Maker-checker for refunds above the
+  approval threshold is Phase 2B (TODO hook in `requestRefund`).
+* Detectors: stuck pending top-ups, paid top-ups without a credit row, balances above the cap, more than 5 top-ups per customer per day,
+  gateway mismatches. Unpaid top-ups are not receivables; paid top-ups are cash in but a liability (`liability.customer_credit` in the
+  journal), recognised as sales only when the credit pays for orders.
+
 ## Web security
 * Security headers (`next.config.ts`): CSP (`default-src 'self'`, form-action limited to eSewa, no
   objects, frame-ancestors self), HSTS, nosniff, referrer policy, permissions policy.

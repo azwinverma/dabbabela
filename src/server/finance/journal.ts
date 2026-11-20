@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { addDays, daysBetween, isValidISODate, ktmNow } from "@/lib/dates";
 import { csv, money } from "@/server/reports";
+import { topupCreditUsed } from "@/server/wallet-topup";
 import { ACCOUNT_KEYS, assertCan, day, FinanceError, getFinanceConfig, iso, type Actor } from "./common";
 
 /**
@@ -15,6 +16,11 @@ import { ACCOUNT_KEYS, assertCan, day, FinanceError, getFinanceConfig, iso, type
  *
  * Sources: payments received (cash methods), gateway fees (actual else estimate), refunds paid out, approved / paid
  * expenses (reversals post the opposite way), supplier invoices and supplier payments.
+ *
+ * Wallet top-ups (Phase 2A) are customer credit, a liability — not sales: the receipt credits
+ * `liability.customer_credit`, a refunded top-up debits it, and top-up credit spent on orders moves from the liability
+ * to `revenue.sales` (one TOPUP_USED entry per period, dated the last day: opening + net top-ups − closing top-up
+ * liability, see wallet-topup.topupLiability). Other wallet credit (refunds, goodwill) is unchanged: it never left sales.
  */
 
 export type JournalLine = { date: string; journal: string; entry: string; key: string; debit: number; credit: number; memo: string };
@@ -37,22 +43,26 @@ export async function buildJournal(from: string, to: string) {
   const dates = { gte: day(from), lte: day(to) };
   const [payments, refunds, expenses, invoices, supplierPays] = await Promise.all([
     db.payment.findMany({ where: { status: { in: ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"] }, paidAt: stamp, method: { in: [...CASH_METHODS] } }, orderBy: { paidAt: "asc" } }),
-    db.refund.findMany({ where: { status: "PROCESSED", processedAt: stamp, method: { not: "WALLET_CREDIT" } }, include: { payment: { select: { reference: true, method: true } } }, orderBy: { processedAt: "asc" } }),
+    db.refund.findMany({ where: { status: "PROCESSED", processedAt: stamp, method: { not: "WALLET_CREDIT" } }, include: { payment: { select: { reference: true, method: true, purpose: true } } }, orderBy: { processedAt: "asc" } }),
     db.expense.findMany({ where: { status: { in: ["APPROVED", "PAID"] }, date: dates }, include: { category: { select: { key: true } } }, orderBy: [{ date: "asc" }, { number: "asc" }] }),
     db.supplierInvoice.findMany({ where: { status: { not: "VOID" }, date: dates }, include: { supplier: { select: { name: true } } }, orderBy: { date: "asc" } }),
     db.supplierPayment.findMany({ where: { paidAt: stamp }, include: { invoice: { select: { number: true, supplier: { select: { name: true } } } } }, orderBy: { paidAt: "asc" } }),
   ]);
   const out: JournalLine[] = [];
   for (const p of payments) {
-    const base = { date: ktmNow(p.paidAt!).date, journal: "RECEIPTS", entry: p.reference, memo: `Payment ${p.reference} (${p.method})` };
-    pair(out, base, `cash.${p.method}`, "revenue.sales", p.amount);
+    const topup = p.purpose === "WALLET_TOPUP";
+    const base = { date: ktmNow(p.paidAt!).date, journal: "RECEIPTS", entry: p.reference, memo: `${topup ? "Wallet top-up" : "Payment"} ${p.reference} (${p.method})` };
+    pair(out, base, `cash.${p.method}`, topup ? "liability.customer_credit" : "revenue.sales", p.amount);
     const fee = p.feeActual ?? p.gatewayFee;
     pair(out, { ...base, journal: "GATEWAY_FEES", memo: `${p.method} fee on ${p.reference}${p.feeActual == null ? " (estimate)" : ""}` }, "expense.GATEWAY_FEES", `cash.${p.method}`, fee);
   }
   for (const r of refunds) {
     const cashKey = r.method === "ORIGINAL" ? `cash.${r.payment.method}` : (REFUND_ACCOUNT[r.method] ?? "cash.OTHER");
-    pair(out, { date: ktmNow(r.processedAt!).date, journal: "REFUNDS", entry: r.providerRef || r.id, memo: `Refund on ${r.payment.reference}` }, "revenue.refunds", cashKey, r.amount);
+    const topup = r.payment.purpose === "WALLET_TOPUP";
+    pair(out, { date: ktmNow(r.processedAt!).date, journal: "REFUNDS", entry: r.providerRef || r.id, memo: `${topup ? "Top-up refund" : "Refund"} on ${r.payment.reference}` }, topup ? "liability.customer_credit" : "revenue.refunds", cashKey, r.amount);
   }
+  const used = await topupCreditUsed(stamp.gte, stamp.lt);
+  pair(out, { date: to, journal: "TOPUP_USED", entry: `TOPUP-USED-${from}-${to}`, memo: `Wallet top-up credit spent on orders ${from} → ${to}` }, "liability.customer_credit", "revenue.sales", used.used);
   for (const e of expenses) {
     const base = { date: iso(e.date), journal: "EXPENSES", entry: e.number, memo: e.description };
     pair(out, base, `expense.${e.category.key}`, "payable.expenses", e.amount);

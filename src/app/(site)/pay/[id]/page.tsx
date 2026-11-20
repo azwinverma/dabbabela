@@ -28,6 +28,8 @@ export default async function PayPage({ params, searchParams }: { params: Promis
     },
   });
   if (!payment) notFound();
+  // Wallet top-ups have no orders; their own page shows the result and the ways to pay.
+  if (payment.purpose === "WALLET_TOPUP") redirect(`/account/wallet/topup/${payment.id}${sp.status ? `?status=${encodeURIComponent(sp.status)}${sp.reason ? `&reason=${encodeURIComponent(sp.reason)}` : ""}` : ""}`);
   if (payment.status === "PAID") redirect(`/thank-you/${payment.id}`);
   const [settings, locale, balance] = await Promise.all([getSettings(), getLocale(), walletBalance(user.id)]);
   const t = accountDict(locale).pay;

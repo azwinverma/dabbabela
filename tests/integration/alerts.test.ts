@@ -97,6 +97,13 @@ beforeAll(async () => {
   ids.dupA = a.id;
   ids.dupB = b.id;
 
+  // wallet top-ups (Phase 2A): a paid top-up with no credit row; 6 top-ups by one customer today
+  const topup = (status: "PAID" | "CANCELLED", amount: number) => db.payment.create({ data: { reference: `WP16-${T}-${++n}`, userId: custId, method: "ESEWA", purpose: "WALLET_TOPUP", status, amount, paidAt: status === "PAID" ? ago(90) : null, createdAt: ago(90) } });
+  const ghost = await topup("PAID", 12_300);
+  made.payments.push(ghost.id);
+  ids.ghostTopup = ghost.id;
+  for (let i = 0; i < 5; i++) made.payments.push((await topup("CANCELLED", 10_000 + i)).id);
+
   // corporate: overdue invoice + contract ending in 5 days with an unmet monthly minimum
   ids.company = (await db.company.create({ data: { name: `WP16 Co ${T}`, slug: `wp16-co-${T}` } })).id;
   ids.invoice = (await db.invoice.create({ data: { number: `INV-WP16-${T}`, companyId: ids.company, status: "ISSUED", periodStart: dateOnly(addDays(today, -40)), periodEnd: dateOnly(addDays(today, -20)), billingName: "WP16 Co", subtotal: 100_000, total: 100_000, dueDate: dateOnly(addDays(todayKTM(), -10)) } })).id;
@@ -150,6 +157,8 @@ const EXPECTED = () => ({
   reconciliation: `reconciliation:settlement:${ids.settlement}`,
   integrations: `integrations:job:housekeeping.plans:wp16-${T}`,
   "payment-mismatch": `payment-mismatch:${ids.event}`,
+  "wallet-topups": `wallet-topups:uncredited:${ids.ghostTopup}`,
+  "wallet-topup-velocity": `wallet-topup-velocity:${custId}:${today}`,
   security: `security:logins:attacker-${T}@test.local:${ids.hour}`,
 });
 

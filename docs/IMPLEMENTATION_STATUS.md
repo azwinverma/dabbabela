@@ -113,12 +113,13 @@ section is in [FEATURE_AUDIT.md](FEATURE_AUDIT.md#final-status-2026-11-20). Each
 | Checkout & payments | ✅ sandbox | eSewa sandbox verified (signature, replay and tamper tests). Khalti tested with a mocked lookup only (no key) |
 | Meal plans (calendar picks, versioned prices, swap, add a meal, skip, pause/resume, cancel with credit, one-click renewal) | ✅ | Auto-renewal deliberately not built (needs gateway tokenisation) |
 | Capacity & races (day, slot, box, dish; wallet; coupons) | ✅ | Advisory locks. Dish capacity time-zone bug fixed in WP-20 |
+| Wallet top-up (Phase 2A: eSewa / Khalti / bank, limits, ledger, history, admin, report, reconciliation, alerts) | ✅ sandbox, **flag off** | `flags.walletTopup` stays off until legal advice on NRB e-money rules. Credit only after server-side verification; one TOPUP ledger row per payment (concurrency-tested). Refunds to source only, capped at unspent credit (TOPUP_REVERSAL). Wallet + gateway split at checkout is refused with a clear message (not built). Refunds above the approval threshold still use the plain flow until Phase 2B maker-checker (TODO hook in `requestRefund`) |
 | Kitchen (lock, production dashboard, BOM requirements, batches → stock, prep sheets, KOT, QR labels, packing, QC, pause/shut) | ✅ | |
 | Inventory (ledger, lots + FEFO, units, locations, transfers, suppliers, POs, receiving, returns, valuation, alerts) | ✅ | Transfers are single-step |
 | Dispatch & rider (routes, distance bands, OTP proof, photo option, cash custody, failures, performance) | ✅ | Grouping only, no route optimisation (by design) |
 | Finance (payments, reconciliation, refunds with proof, expenses, payables, settlement, period close, cash flow, journal CSV, profitability, invoices) | ✅ | Gateway refunds are recorded manually. Journal accounts await the accountant's chart |
 | Corporate (contracts, budgets, eligibility, company menus, team orders, invoices with adjustments, portal) | ✅ | |
-| Analytics & reports (metric registry, drill-down, 27 reports, CSV/XLSX, kitchen-scoped, PII-masked, audited) | ✅ | |
+| Analytics & reports (metric registry, drill-down, 27 reports + wallet top-ups, CSV/XLSX, kitchen-scoped, PII-masked, audited) | ✅ | |
 | CMS (blocks, pages draft/publish/schedule/restore, nav, branding, SEO, policies with revisions, banners, testimonials, FAQ, media) | ✅ | |
 | CRM, promotions, referrals, campaigns (tracking only), alerts center + jobs, audit log, global search | ✅ | Campaign messages aren't sent (no provider) |
 | Notifications: in-app, email (Resend), SMS (Sparrow/Aakash) | 🟡 | In-app works. Email and SMS adapters are built but untested against real providers (no keys) |

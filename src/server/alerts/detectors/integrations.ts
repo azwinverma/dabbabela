@@ -53,16 +53,24 @@ export const paymentMismatch: Detector = {
   label: "Gateway verification mismatches",
   mode: "event",
   async run({ now }) {
-    const rows = await db.paymentProviderEvent.findMany({ where: { outcome: "MISMATCH", createdAt: { gte: new Date(now.getTime() - 7 * DAY) } }, select: { id: true, provider: true, paymentId: true, createdAt: true }, take: 100 });
-    return rows.map((e) => ({
-      type: "GATEWAY_MISMATCH",
-      severity: "CRITICAL",
-      entity: e.paymentId ? "Payment" : "PaymentProviderEvent",
-      entityId: e.paymentId ?? e.id,
-      key: e.id,
-      message: `${e.provider} verification didn't match our payment record (${e.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC)`,
-      href: e.paymentId ? `/admin/payments/${e.paymentId}` : "/admin/payments",
-      data: { provider: e.provider, eventId: e.id },
-    }));
+    const rows = await db.paymentProviderEvent.findMany({ where: { outcome: "MISMATCH", createdAt: { gte: new Date(now.getTime() - 7 * DAY) } }, select: MISMATCH_SELECT, take: 100 });
+    return rows.map(mismatchFinding);
   },
 };
+
+export const MISMATCH_SELECT = { id: true, provider: true, paymentId: true, createdAt: true, payment: { select: { purpose: true, reference: true } } } as const;
+
+/** One finding per MISMATCH provider event (payments also raise it immediately via ../raise.ts — same key). */
+export function mismatchFinding(e: { id: string; provider: string; paymentId: string | null; createdAt: Date; payment: { purpose: string; reference: string } | null }): Finding {
+  const topup = e.payment?.purpose === "WALLET_TOPUP";
+  return {
+    type: "GATEWAY_MISMATCH",
+    severity: "CRITICAL",
+    entity: e.paymentId ? "Payment" : "PaymentProviderEvent",
+    entityId: e.paymentId ?? e.id,
+    key: e.id,
+    message: `${e.provider} verification didn't match our payment record${e.payment ? ` ${e.payment.reference}` : ""}${topup ? " (wallet top-up — not credited)" : ""} (${e.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC)`,
+    href: e.paymentId ? `/admin/payments/${e.paymentId}` : "/admin/payments",
+    data: { provider: e.provider, eventId: e.id, purpose: e.payment?.purpose ?? null },
+  };
+}

@@ -18,9 +18,11 @@ type Props = {
   qrImage: string;
   awaitingCheck: boolean;
   t: AccountDict["pay"];
+  /** Wallet top-up (no orders): wording says credit instead of order. */
+  topup?: boolean;
 };
 
-export function PayClient({ paymentId, method, methods, bankDetails, qrImage, awaitingCheck, t }: Props) {
+export function PayClient({ paymentId, method, methods, bankDetails, qrImage, awaitingCheck, t, topup = false }: Props) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const [esewa, setEsewa] = useState<{ action: string; fields: Record<string, string> } | null>(null);
@@ -87,7 +89,7 @@ export function PayClient({ paymentId, method, methods, bankDetails, qrImage, aw
             <>
               {bankDetails ? <p className="mt-2 whitespace-pre-line text-sm">{bankDetails}</p> : <p className="mt-2 text-sm text-ink-mute">Bank details will be shared by our team.</p>}
               {qrImage && <img src={qrImage} alt="Payment QR code" className="mt-3 h-52 w-52 rounded-lg border-2 border-ink object-contain" />}
-              <p className="mt-3 text-sm text-ink-soft">Use your payment reference in the remarks. Your order is confirmed once our finance team sees the money in our account.</p>
+              <p className="mt-3 text-sm text-ink-soft">Use your payment reference in the remarks. {topup ? "Your credit is added once our finance team sees the money in our account." : "Your order is confirmed once our finance team sees the money in our account."}</p>
               <ActionForm action={uploadProofAction} className="mt-4 space-y-3">
                 <input type="hidden" name="paymentId" value={paymentId} />
                 <Input label={t.reference} name="reference" required maxLength={120} />

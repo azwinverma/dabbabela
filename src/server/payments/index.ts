@@ -1,7 +1,7 @@
 import "server-only";
-import type { PaymentMethod, Prisma, RefundMethod } from "@prisma/client";
+import type { Payment, PaymentMethod, Prisma, RefundMethod } from "@prisma/client";
 import { db } from "@/lib/db";
-import { getSettings } from "@/lib/settings";
+import { getSettings, type SiteSettings } from "@/lib/settings";
 import { dateOnly, isoDate, ktmNow } from "@/lib/dates";
 import { rs } from "@/lib/money";
 import { log } from "@/lib/logger";
@@ -13,6 +13,8 @@ import { estimateGatewayFee } from "../finance/common";
 import { availableMethods } from "./methods";
 import { decodeEsewa, esewaFormFields, esewaSignatureValid, esewaStatus, toPaisa } from "./esewa";
 import { khaltiInitiate, khaltiLookup } from "./khalti";
+import { creditTopupPayment, isTopupMethod, topupEnabled, topupRefundable } from "../wallet-topup";
+import { lockUser } from "../capacity";
 
 type Tx = Prisma.TransactionClient;
 
@@ -22,86 +24,144 @@ const json = (v: unknown) => JSON.parse(JSON.stringify(v ?? null)) as Prisma.Inp
 
 // ───────────── provider event log (dedupe) ─────────────
 
-/** Record a provider event once. Returns false when this exact event was already processed. */
-async function recordEvent(provider: string, eventKey: string, paymentId: string | null, payload: unknown, verified: boolean, outcome: string) {
+/** Record a provider event once. Returns its id, or null when this exact event was already processed. */
+async function recordEvent(provider: string, eventKey: string, paymentId: string | null, payload: unknown, verified: boolean, outcome: string): Promise<string | null> {
   try {
-    await db.paymentProviderEvent.create({ data: { provider, eventKey, paymentId, payload: json(payload), verified, outcome } });
-    return true;
+    const e = await db.paymentProviderEvent.create({ data: { provider, eventKey, paymentId, payload: json(payload), verified, outcome }, select: { id: true } });
+    return e.id;
   } catch (e) {
-    if (e instanceof Error && e.message.includes("Unique constraint")) return false;
+    if (e instanceof Error && e.message.includes("Unique constraint")) return null;
     throw e;
   }
 }
 
 // ───────────── marking paid (idempotent) ─────────────
 
+type PayingPayment = Prisma.PaymentGetPayload<{ include: { orders: true } }>;
+type PaidOpts = { amount?: number | null; attemptId?: string | null; actorId?: string | null; note?: string | null };
+
 /**
- * Mark a payment paid exactly once and release its orders. Safe to call repeatedly / concurrently:
+ * Mark a payment paid exactly once and fulfil what it pays for. Safe to call repeatedly / concurrently:
  * the status flip is a guarded update on (status, version), so only one caller fulfils.
- * Late money (orders already cancelled, or the day already closed) becomes wallet credit.
+ *
+ * This is THE single place money is accepted. What happens next depends on `purpose` (see `fulfil`).
  */
-export async function markPaymentPaid(paymentId: string, opts: { amount?: number | null; attemptId?: string | null; actorId?: string | null; note?: string | null } = {}) {
+export async function markPaymentPaid(paymentId: string, opts: PaidOpts = {}) {
   const settings = await getSettings();
   const result = await db.$transaction(async (tx) => {
     const p = await tx.payment.findUnique({ where: { id: paymentId }, include: { orders: true } });
     if (!p) throw new PaymentError("Payment not found");
-    if (p.status === "PAID" || p.status === "PARTIALLY_REFUNDED" || p.status === "REFUNDED") return { already: true, payment: p, credited: 0 };
+    if (p.status === "PAID" || p.status === "PARTIALLY_REFUNDED" || p.status === "REFUNDED") return { already: true, payment: p, credited: 0, mismatch: false };
+    // Store credit is sold at face value: a verified amount that differs from the top-up is never credited.
+    if (p.purpose === "WALLET_TOPUP" && opts.amount != null && opts.amount !== p.amount) return { already: false, payment: p, credited: 0, mismatch: true };
     // WP-09: estimated gateway fee from the configured rate for the method; the statement import fills feeActual.
     const gatewayFee = await estimateGatewayFee(p.method, opts.amount ?? p.amount, tx);
     const flipped = await tx.payment.updateMany({
       where: { id: p.id, status: p.status, version: p.version },
       data: { status: "PAID", paidAt: new Date(), verifiedById: opts.actorId ?? null, note: opts.note ?? p.note, gatewayFee, version: { increment: 1 } },
     });
-    if (!flipped.count) return { already: true, payment: p, credited: 0 };
+    if (!flipped.count) return { already: true, payment: p, credited: 0, mismatch: false };
     if (opts.attemptId) await tx.paymentAttempt.update({ where: { id: opts.attemptId }, data: { status: "SUCCESS" } });
-
-    const now = ktmNow();
-    let credited = 0;
-    for (const o of p.orders) {
-      const date = isoDate(o.deliveryDate);
-      if (o.status === "PENDING_PAYMENT") {
-        const lock = await tx.dayLock.findUnique({ where: { kitchenId_date: { kitchenId: o.kitchenId, date: o.deliveryDate } } });
-        const late = date < now.date || (date === now.date && (now.time >= settings.orderCutoff || Boolean(lock)));
-        if (late) {
-          await tx.order.update({ where: { id: o.id }, data: { status: "CANCELLED", cancelledAt: new Date(), paymentStatus: "REFUNDED", refundedAmount: o.customerShare, version: { increment: 1 } } });
-          await tx.orderStatusEvent.create({ data: { orderId: o.id, fromStatus: "PENDING_PAYMENT", toStatus: "CANCELLED", note: "Payment arrived after the cut-off — credited", actorId: opts.actorId ?? null } });
-          if (o.customerShare > 0) {
-            await addCredit(tx, { userId: p.userId, amount: o.customerShare, reason: "REFUND", orderId: o.id, paymentId: p.id, note: "Payment arrived after the day closed" });
-            credited += o.customerShare;
-          }
-        } else {
-          await tx.order.update({ where: { id: o.id }, data: { status: "SCHEDULED", paymentStatus: "PAID", version: { increment: 1 } } });
-          await tx.orderStatusEvent.create({ data: { orderId: o.id, fromStatus: "PENDING_PAYMENT", toStatus: "SCHEDULED", note: "Payment received", actorId: opts.actorId ?? null } });
-        }
-      } else if (o.status === "CANCELLED" && o.paymentStatus !== "REFUNDED" && o.customerShare > 0) {
-        // Order expired before the money arrived.
-        await tx.order.update({ where: { id: o.id }, data: { paymentStatus: "REFUNDED", refundedAmount: o.customerShare } });
-        await addCredit(tx, { userId: p.userId, amount: o.customerShare, reason: "REFUND", orderId: o.id, paymentId: p.id, note: "Paid after the order had expired" });
-        credited += o.customerShare;
-      } else if (o.paymentStatus === "UNPAID" || o.paymentStatus === "PENDING") {
-        await tx.order.update({ where: { id: o.id }, data: { paymentStatus: "PAID" } });
-      }
-    }
-    // Overpayment (amount changed after the gateway session started).
-    if (opts.amount != null && opts.amount > p.amount) {
-      await addCredit(tx, { userId: p.userId, amount: opts.amount - p.amount, reason: "REFUND", paymentId: p.id, note: "Paid more than the order total" });
-      credited += opts.amount - p.amount;
-    }
-    if (p.subscriptionId) {
-      await tx.subscription.updateMany({ where: { id: p.subscriptionId, status: "PENDING_PAYMENT" }, data: { status: "ACTIVE" } });
-    }
-    if (credited > 0) {
-      await tx.payment.update({ where: { id: p.id }, data: { refundedAmount: { increment: credited }, status: credited >= p.amount ? "REFUNDED" : "PARTIALLY_REFUNDED" } });
-    }
-    return { already: false, payment: p, credited };
+    const credited = await fulfil(tx, p, opts, settings);
+    return { already: false, payment: p, credited, mismatch: false };
   });
+  if (result.mismatch) {
+    await amountMismatch(result.payment, opts.amount ?? 0, "verify");
+    return result;
+  }
   if (!result.already) {
+    const topup = result.payment.purpose === "WALLET_TOPUP";
     void notify("payment.received", { userId: result.payment.userId }, { amount: rs(opts.amount ?? result.payment.amount), reference: result.payment.reference }, { dedupeKey: `paid:${paymentId}` });
-    if (opts.actorId) await audit({ actorId: opts.actorId, action: "payment.mark_paid", entity: "Payment", entityId: paymentId, summary: `${result.payment.reference} marked paid`, reason: opts.note });
+    if (opts.actorId)
+      await audit({
+        actorId: opts.actorId,
+        action: topup ? "wallet.topup_verify" : "payment.mark_paid",
+        entity: "Payment",
+        entityId: paymentId,
+        summary: topup ? `Wallet top-up ${result.payment.reference} verified · ${rs(result.payment.amount)} credited` : `${result.payment.reference} marked paid`,
+        reason: opts.note,
+      });
     // WP-15: payment may be the last condition for a referral reward (idempotent; never blocks payment).
-    void import("../marketing").then((m) => m.settleReferralFor(result.payment.userId)).catch((error) => log.error("referral.settle_failed", { paymentId, error }));
+    if (!topup) void import("../marketing").then((m) => m.settleReferralFor(result.payment.userId)).catch((error) => log.error("referral.settle_failed", { paymentId, error }));
   }
   return result;
+}
+
+/**
+ * Dispatch a freshly-paid payment by purpose. Runs inside markPaymentPaid's transaction, after the guarded flip.
+ * Returns wallet credit given back as REFUND (late / over-payment) — not top-up credit, which is the purchase itself.
+ * Phase 2C adds SWAP_DIFFERENCE and INVOICE cases here.
+ */
+async function fulfil(tx: Tx, p: PayingPayment, opts: PaidOpts, settings: SiteSettings): Promise<number> {
+  switch (p.purpose) {
+    case "WALLET_TOPUP":
+      await creditTopupPayment(tx, p, opts.actorId);
+      return 0;
+    case "ORDER":
+    case "SUBSCRIPTION":
+    default:
+      return fulfilOrders(tx, p, opts, settings);
+  }
+}
+
+/** Release the payment's orders (and plan). Late money (orders already cancelled, or the day closed) becomes wallet credit. */
+async function fulfilOrders(tx: Tx, p: PayingPayment, opts: PaidOpts, settings: SiteSettings): Promise<number> {
+  const now = ktmNow();
+  let credited = 0;
+  for (const o of p.orders) {
+    const date = isoDate(o.deliveryDate);
+    if (o.status === "PENDING_PAYMENT") {
+      const lock = await tx.dayLock.findUnique({ where: { kitchenId_date: { kitchenId: o.kitchenId, date: o.deliveryDate } } });
+      const late = date < now.date || (date === now.date && (now.time >= settings.orderCutoff || Boolean(lock)));
+      if (late) {
+        await tx.order.update({ where: { id: o.id }, data: { status: "CANCELLED", cancelledAt: new Date(), paymentStatus: "REFUNDED", refundedAmount: o.customerShare, version: { increment: 1 } } });
+        await tx.orderStatusEvent.create({ data: { orderId: o.id, fromStatus: "PENDING_PAYMENT", toStatus: "CANCELLED", note: "Payment arrived after the cut-off — credited", actorId: opts.actorId ?? null } });
+        if (o.customerShare > 0) {
+          await addCredit(tx, { userId: p.userId, amount: o.customerShare, reason: "REFUND", orderId: o.id, paymentId: p.id, note: "Payment arrived after the day closed" });
+          credited += o.customerShare;
+        }
+      } else {
+        await tx.order.update({ where: { id: o.id }, data: { status: "SCHEDULED", paymentStatus: "PAID", version: { increment: 1 } } });
+        await tx.orderStatusEvent.create({ data: { orderId: o.id, fromStatus: "PENDING_PAYMENT", toStatus: "SCHEDULED", note: "Payment received", actorId: opts.actorId ?? null } });
+      }
+    } else if (o.status === "CANCELLED" && o.paymentStatus !== "REFUNDED" && o.customerShare > 0) {
+      // Order expired before the money arrived.
+      await tx.order.update({ where: { id: o.id }, data: { paymentStatus: "REFUNDED", refundedAmount: o.customerShare } });
+      await addCredit(tx, { userId: p.userId, amount: o.customerShare, reason: "REFUND", orderId: o.id, paymentId: p.id, note: "Paid after the order had expired" });
+      credited += o.customerShare;
+    } else if (o.paymentStatus === "UNPAID" || o.paymentStatus === "PENDING") {
+      await tx.order.update({ where: { id: o.id }, data: { paymentStatus: "PAID" } });
+    }
+  }
+  // Overpayment (amount changed after the gateway session started).
+  if (opts.amount != null && opts.amount > p.amount) {
+    await addCredit(tx, { userId: p.userId, amount: opts.amount - p.amount, reason: "REFUND", paymentId: p.id, note: "Paid more than the order total" });
+    credited += opts.amount - p.amount;
+  }
+  if (p.subscriptionId) {
+    await tx.subscription.updateMany({ where: { id: p.subscriptionId, status: "PENDING_PAYMENT" }, data: { status: "ACTIVE" } });
+  }
+  if (credited > 0) {
+    await tx.payment.update({ where: { id: p.id }, data: { refundedAmount: { increment: credited }, status: credited >= p.amount ? "REFUNDED" : "PARTIALLY_REFUNDED" } });
+  }
+  return credited;
+}
+
+/**
+ * A gateway (or verification) amount that doesn't match our payment: record a MISMATCH provider event (unless the
+ * caller already did) and raise the GATEWAY_MISMATCH alert right away — same dedupe key the payment-mismatch
+ * detector uses, so its sweep won't duplicate it. Never credits anything.
+ */
+async function amountMismatch(p: Pick<Payment, "id" | "method">, got: number, source: string, eventId?: string | null) {
+  const provider = p.method.toLowerCase();
+  const id = eventId ?? (await recordEvent(provider, `${provider}:${p.id}:amount:${got}:${source}`, p.id, { source, got }, false, "MISMATCH"));
+  if (!id) return;
+  try {
+    const { raiseMismatchAlert } = await import("../alerts/raise");
+    await raiseMismatchAlert(id);
+  } catch (error) {
+    log.error("payment.mismatch_alert_failed", { paymentId: p.id, error });
+  }
 }
 
 async function markAttemptFailed(attemptId: string, paymentId: string, response: unknown) {
@@ -123,6 +183,7 @@ export async function startPayment(paymentId: string, userId: string, origin: st
   if (p.status === "PAID") return { kind: "done" };
   if (p.status === "CANCELLED") throw new PaymentError("This order expired — please order again");
   if (p.amount <= 0) throw new PaymentError("Nothing to pay");
+  if (p.purpose === "WALLET_TOPUP" && !topupEnabled(await getSettings())) throw new PaymentError("Adding credit isn't available right now");
   const n = p.attempts.length + 1;
   const providerRef = `${p.reference}-${n}`;
   if (p.method === "ESEWA") {
@@ -176,7 +237,8 @@ export async function handleEsewaReturn(paymentId: string, dataB64: string): Pro
     return { ok: false, reason: "Signature mismatch" };
   }
   if (toPaisa(payload.total_amount) !== attempt.amount) {
-    await recordEvent("esewa", `${eventKey}:amount`, paymentId, payload, false, "MISMATCH");
+    const ev = await recordEvent("esewa", `${eventKey}:amount`, paymentId, payload, false, "MISMATCH");
+    if (ev) await amountMismatch({ id: paymentId, method: "ESEWA" }, toPaisa(payload.total_amount), "esewa-callback", ev);
     return { ok: false, reason: "Amount mismatch" };
   }
   return confirmEsewa(attempt.id, paymentId, attempt.providerRef, attempt.amount, eventKey, payload);
@@ -187,7 +249,7 @@ async function confirmEsewa(attemptId: string, paymentId: string, uuid: string, 
   if (s.status === "COMPLETE") {
     const fresh = await recordEvent("esewa", `${eventKey}:status:COMPLETE`, paymentId, { callback: payload, status: s.raw }, true, "PAID");
     await db.paymentAttempt.update({ where: { id: attemptId }, data: { response: json({ callback: payload, status: s.raw }) } });
-    if (fresh) await markPaymentPaid(paymentId, { amount, attemptId });
+    if (fresh && (await markPaymentPaid(paymentId, { amount, attemptId })).mismatch) return { ok: false, reason: "Amount mismatch — contact us" };
     return { ok: true };
   }
   if (s.status === null || s.status === "PENDING" || s.status === "AMBIGUOUS") {
@@ -213,11 +275,12 @@ async function confirmKhalti(attemptId: string, paymentId: string, pidx: string,
   if (r.ok && r.status === "Completed" && r.total_amount === amount) {
     const fresh = await recordEvent("khalti", `khalti:${pidx}:Completed`, paymentId, r, true, "PAID");
     await db.paymentAttempt.update({ where: { id: attemptId }, data: { response: json(r) } });
-    if (fresh) await markPaymentPaid(paymentId, { amount, attemptId });
+    if (fresh && (await markPaymentPaid(paymentId, { amount, attemptId })).mismatch) return { ok: false, reason: "Amount mismatch — contact us" };
     return { ok: true };
   }
   if (r.ok && r.status === "Completed") {
-    await recordEvent("khalti", `khalti:${pidx}:amount`, paymentId, r, false, "MISMATCH");
+    const ev = await recordEvent("khalti", `khalti:${pidx}:amount`, paymentId, r, false, "MISMATCH");
+    if (ev) await amountMismatch({ id: paymentId, method: "KHALTI" }, r.total_amount ?? 0, "khalti-lookup", ev);
     return { ok: false, reason: "Amount mismatch — contact us" };
   }
   if (!r.ok || r.status === "Pending" || r.status === "Initiated") return { ok: false, pending: true, reason: "Khalti hasn't confirmed yet" };
@@ -257,6 +320,15 @@ export async function switchPaymentMethod(paymentId: string, userId: string, met
   if (!p || !["PENDING", "FAILED"].includes(p.status)) throw new PaymentError("Nothing to pay here");
   const methods = await availableMethods(settings, { hasCompany: Boolean(p.companyId), customerShare: p.amount });
   if (!methods.includes(method)) throw new PaymentError("That payment method isn't available");
+  if (p.purpose === "WALLET_TOPUP") {
+    // Credit is bought with eSewa / Khalti / bank only (never with credit or cash at the door).
+    if (!topupEnabled(settings)) throw new PaymentError("Adding credit isn't available right now");
+    if (!isTopupMethod(method)) throw new PaymentError("Top-ups can be paid with eSewa, Khalti or bank transfer");
+    if (p.proofUrl) throw new PaymentError("Your transfer proof is being checked — wait for finance to confirm it");
+    if (method === p.method && p.status === "PENDING") return p;
+    await db.payment.update({ where: { id: p.id }, data: { method, status: "PENDING", version: { increment: 1 } } });
+    return p;
+  }
   if (method === p.method && p.status === "PENDING") return p;
   if (method === "WALLET") {
     if ((await walletBalance(userId)) < p.amount) throw new PaymentError("Not enough credit");
@@ -286,6 +358,7 @@ export async function switchPaymentMethod(paymentId: string, userId: string, met
 export async function submitTransferProof(paymentId: string, userId: string, proofUrl: string, reference: string) {
   const p = await db.payment.findFirst({ where: { id: paymentId, userId, method: "BANK_TRANSFER" } });
   if (!p || p.status === "PAID") throw new PaymentError("Nothing to confirm");
+  if (p.purpose === "WALLET_TOPUP" && p.status === "CANCELLED") throw new PaymentError("This top-up was cancelled — start a new one");
   await db.payment.update({ where: { id: p.id }, data: { proofUrl, note: reference.slice(0, 120) || p.note, status: "PENDING" } });
   await db.paymentAttempt.create({ data: { paymentId: p.id, method: "BANK_TRANSFER", providerRef: `${p.reference}-proof-${Date.now()}`, amount: p.amount, request: json({ proofUrl, reference }) } });
 }
@@ -334,6 +407,16 @@ export async function requestRefund(input: { paymentId: string; orderId?: string
     const { p, available } = await refundable(tx, input.paymentId);
     if (!["PAID", "PARTIALLY_REFUNDED"].includes(p.status)) throw new PaymentError("Only paid payments can be refunded");
     if (input.amount > available) throw new PaymentError(`At most ${rs(available)} can be refunded`);
+    if (p.purpose === "WALLET_TOPUP") {
+      // A top-up goes back to its source, and only the part the customer hasn't spent (wallet never goes negative).
+      if (input.method === "WALLET_CREDIT") throw new PaymentError("A top-up is refunded to the customer's eSewa / Khalti / bank, not to credit");
+      if (input.orderId) throw new PaymentError("A top-up has no orders — refund the whole payment");
+      await lockUser(tx, p.userId);
+      const unspent = (await topupRefundable(p.id, tx)) ?? 0;
+      if (input.amount > unspent) throw new PaymentError(unspent > 0 ? `Only ${rs(unspent)} of this top-up is unspent — at most that can be refunded` : "The customer has already spent this credit — nothing left to refund");
+    }
+    // TODO(Phase 2B maker-checker): refunds at or above settings.approvalThreshold go through an ApprovalRequest
+    // (kind REFUND) instead of the plain REQUESTED → APPROVED steps below. Hook here; top-up refunds need no change.
     return tx.refund.create({ data: { paymentId: p.id, orderId: input.orderId ?? null, amount: input.amount, reason: input.reason, method: input.method, requestedById: input.actorId } });
   });
   await audit({ actorId: input.actorId, action: "refund.request", entity: "Refund", entityId: r.id, summary: `${rs(r.amount)} via ${r.method}`, reason: input.reason });
@@ -366,6 +449,15 @@ export async function processRefund(refundId: string, actorId: string, proof: { 
       data: { status: "PROCESSED", processedById: actorId, processedAt: new Date(), providerRef: proof.providerRef?.trim() || null, proofUrl: proof.proofUrl || null, note: proof.note || r.note },
     });
     if (!u.count) throw new PaymentError("Refund changed — reload");
+    if (r.payment.purpose === "WALLET_TOPUP") {
+      // Take the refunded credit back out of the wallet (TOPUP_REVERSAL), re-checked under the user's ledger lock so a
+      // spend since the request can't push the balance below zero.
+      if (r.method === "WALLET_CREDIT") throw new PaymentError("A top-up is refunded to its source, not to credit");
+      await lockUser(tx, r.payment.userId);
+      const unspent = (await topupRefundable(r.paymentId, tx, { excludeRefundId: r.id })) ?? 0;
+      if (r.amount > unspent) throw new PaymentError(unspent > 0 ? `The customer has spent part of this credit since the request — at most ${rs(unspent)} can be refunded now. Reject this refund and request a smaller one.` : "The customer has spent this credit since the request — reject this refund");
+      await tx.creditLedger.create({ data: { userId: r.payment.userId, amount: -r.amount, reason: "TOPUP_REVERSAL", paymentId: r.paymentId, refundId: r.id, actorId, note: `Top-up ${r.payment.reference} refunded` } });
+    }
     if (r.method === "WALLET_CREDIT") await addCredit(tx, { userId: r.payment.userId, amount: r.amount, reason: "REFUND", paymentId: r.paymentId, refundId: r.id, orderId: r.orderId, actorId });
     await bumpPaymentRefund(tx, r.paymentId, r.amount);
     if (r.orderId) {
@@ -375,7 +467,7 @@ export async function processRefund(refundId: string, actorId: string, proof: { 
     }
     return r;
   });
-  await audit({ actorId, action: "refund.process", entity: "Refund", entityId: refundId, summary: `${rs(out.amount)} via ${out.method}`, after: proof });
+  await audit({ actorId, action: "refund.process", entity: "Refund", entityId: refundId, summary: `${rs(out.amount)} via ${out.method}${out.payment.purpose === "WALLET_TOPUP" ? ` · top-up ${out.payment.reference}: ${rs(out.amount)} taken out of the wallet` : ""}`, after: proof });
   void notify("refund.processed", { userId: out.payment.userId }, { amount: rs(out.amount), method: out.method === "WALLET_CREDIT" ? "added to your Dabba Bela credit" : out.method.toLowerCase() }, { dedupeKey: `refund:${refundId}` });
   return out;
 }

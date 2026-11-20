@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ledgerReasonLabel } from "@/lib/ledger-labels";
 import { notFound } from "next/navigation";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
@@ -104,6 +105,7 @@ export default async function CustomerDetail({ params }: { params: Promise<{ id:
               ["Orders", c.orderCount],
               ["Paid by them (live orders)", rs(c.spent)],
               ["Credit balance", <span key="b" className="font-bold">{rs(c.balance)}</span>],
+              ["Wallet top-ups (net)", c.topupsNet ? <Link key="t" className="text-sindoor underline" href={`/admin/payments?purpose=WALLET_TOPUP&q=${encodeURIComponent(c.name)}`}>{rs(c.topupsNet)}</Link> : "—"],
             ]}
           />
           {live && can(staff, "refunds.create") && (
@@ -132,8 +134,16 @@ export default async function CustomerDetail({ params }: { params: Promise<{ id:
             {c.credits.map((l) => (
               <li key={l.id} className="flex justify-between gap-2">
                 <span className="text-ink-mute">
-                  {formatStamp(l.createdAt)} · {l.reason.replace(/_/g, " ").toLowerCase()}
+                  {formatStamp(l.createdAt)} · {ledgerReasonLabel(l.reason)}
                   {l.note ? ` · ${l.note}` : ""}
+                  {l.paymentId && can(staff, "payments.view") && (
+                    <>
+                      {" · "}
+                      <Link href={`/admin/payments/${l.paymentId}`} className="text-sindoor underline">
+                        payment
+                      </Link>
+                    </>
+                  )}
                 </span>
                 <span className={`tabular-nums ${l.amount < 0 ? "text-sindoor" : "text-saag"}`}>{rs(l.amount)}</span>
               </li>

@@ -24,11 +24,13 @@ type Props = {
   kitchenNotes?: Record<string, string>;
   methods: PaymentMethod[];
   walletBalance: number;
+  /** Wallet top-up is on: offer "Add credit" when credit doesn't cover the order. */
+  canTopup?: boolean;
   user: { name: string; phone: string; allergies: string[] };
   company: { name: string } | null;
 };
 
-export function CheckoutClient({ t, addresses, slots, zoneSlotIds = {}, kitchenNotes = {}, methods, walletBalance, user, company }: Props) {
+export function CheckoutClient({ t, addresses, slots, zoneSlotIds = {}, kitchenNotes = {}, methods, walletBalance, canTopup = false, user, company }: Props) {
   const cart = useCart();
   const router = useRouter();
   const [addressId, setAddressId] = useState<string | null>(addresses.find((a) => a.isDefault && a.zoneId)?.id ?? addresses.find((a) => a.zoneId)?.id ?? addresses[0]?.id ?? null);
@@ -234,7 +236,11 @@ export function CheckoutClient({ t, addresses, slots, zoneSlotIds = {}, kitchenN
             ) : (
               <PaymentPicker methods={methods} value={method} onChange={setMethod} walletBalance={walletBalance} />
             )}
-            {walletShort && <p className="mt-2 text-sm text-sindoor">Your credit ({rs(walletBalance)}) doesn't cover this order — pick another method.</p>}
+            {walletShort && (
+              <p className="mt-2 text-sm text-sindoor">
+                Your credit ({rs(walletBalance)}) doesn't cover this order, and credit can't be combined with another method yet — pick another method{canTopup ? <> or <Link href="/account/wallet" className="font-semibold underline">add credit</Link> first</> : null}.
+              </p>
+            )}
           </div>
         </section>
       </div>

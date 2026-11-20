@@ -57,6 +57,7 @@ export const ACCOUNT_KEYS = {
   "cash.OTHER": "Other payment accounts",
   "revenue.sales": "Sales receipts",
   "revenue.refunds": "Sales refunds",
+  "liability.customer_credit": "Customer credit — wallet top-ups not yet spent (liability)",
   "tax.input": "Input VAT",
   "payable.expenses": "Expense payables",
   "payable.suppliers": "Supplier payables (trade creditors)",

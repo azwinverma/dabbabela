@@ -1,3 +1,4 @@
+import { ledgerReasonLabel } from "@/lib/ledger-labels";
 import Link from "next/link";
 import type { RefundStatus } from "@prisma/client";
 import { requirePermission } from "@/lib/auth";
@@ -170,7 +171,7 @@ function LedgerTable({ rows }: { rows: { id: string; createdAt: Date; amount: nu
             <tr key={e.id}>
               <Td className="whitespace-nowrap text-xs text-ink-mute">{formatStamp(e.createdAt)}</Td>
               {e.who && <Td>{e.who}</Td>}
-              <Td className="text-xs font-semibold">{e.reason.replace(/_/g, " ").toLowerCase()}</Td>
+              <Td className="text-xs font-semibold">{ledgerReasonLabel(e.reason)}</Td>
               <Td className="text-xs">
                 {e.note}
                 {e.orderId && (

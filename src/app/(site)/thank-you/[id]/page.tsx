@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
@@ -24,6 +24,7 @@ export default async function ThankYou({ params }: { params: Promise<{ id: strin
     },
   });
   if (!payment) notFound();
+  if (payment.purpose === "WALLET_TOPUP") redirect(`/account/wallet/topup/${payment.id}`);
   const [t, settings] = [accountDict(await getLocale()).thanks, await getSettings()];
   const settled = payment.status === "PAID" || payment.method === "CASH" || payment.method === "COMPANY_INVOICE";
   const waiting = !settled;

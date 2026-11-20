@@ -329,10 +329,10 @@ describe("pagination, filters, permissions, export", () => {
     expect(await db.auditLog.count({ where: { action: "report.export", actorId: o.id, entityId: "revenue-by-meal" } })).toBeGreaterThan(0);
   });
 
-  it("every one of the 27 reports runs and exports for the owner", async () => {
+  it("every one of the 28 reports (27 + wallet top-ups) runs and exports for the owner", async () => {
     const u = await owner();
-    expect(REPORT_LIST).toHaveLength(27);
-    expect(new Set(REPORT_LIST.map((r) => r.key)).size).toBe(27);
+    expect(REPORT_LIST).toHaveLength(28);
+    expect(new Set(REPORT_LIST.map((r) => r.key)).size).toBe(28);
     for (const def of REPORT_LIST) {
       for (const c of def.choices ?? [{ name: "_", options: [{ value: "" }] }]) {
         for (const opt of c.options) {

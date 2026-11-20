@@ -255,7 +255,7 @@ export async function customerProfile(actor: Staff, id: string) {
       },
       subscriptions: { orderBy: { createdAt: "desc" }, select: { id: true, reference: true, status: true, startDate: true, endDate: true, total: true, plan: { select: { name: true } } } },
       payments: { orderBy: { createdAt: "desc" }, take: 15, select: { id: true, reference: true, method: true, status: true, amount: true, refundedAmount: true, createdAt: true } },
-      credits: { orderBy: { createdAt: "desc" }, take: 20, select: { id: true, amount: true, reason: true, note: true, createdAt: true, actorId: true } },
+      credits: { orderBy: { createdAt: "desc" }, take: 20, select: { id: true, amount: true, reason: true, note: true, createdAt: true, actorId: true, paymentId: true } },
       tickets: { orderBy: { createdAt: "desc" }, take: 10, select: { id: true, number: true, subject: true, status: true, priority: true, createdAt: true } },
       feedback: { orderBy: { createdAt: "desc" }, take: 10, select: { id: true, rating: true, comment: true, createdAt: true, order: { select: { id: true, number: true } } } },
       dataRequests: { orderBy: { createdAt: "desc" }, take: 5, select: { id: true, type: true, status: true, note: true, createdAt: true } },
@@ -265,13 +265,14 @@ export async function customerProfile(actor: Staff, id: string) {
   });
   if (!c || c.role !== "CUSTOMER") return null;
 
-  const [balance, spent, refunds, prefsRows, timeline, pending] = await Promise.all([
+  const [balance, spent, refunds, prefsRows, timeline, pending, topups] = await Promise.all([
     db.creditLedger.aggregate({ where: { userId: id }, _sum: { amount: true } }),
     db.order.aggregate({ where: { userId: id, status: { in: [...LIVE_STATUSES] } }, _sum: { customerShare: true } }),
     db.refund.findMany({ where: { payment: { userId: id } }, orderBy: { createdAt: "desc" }, take: 10, select: { id: true, amount: true, status: true, method: true, reason: true, createdAt: true } }),
     db.notificationPreference.findMany({ where: { userId: id } }),
     customerTimeline(actor, id),
     pendingCreditRequests(id),
+    db.creditLedger.aggregate({ where: { userId: id, reason: { in: ["TOPUP", "TOPUP_REVERSAL"] } }, _sum: { amount: true } }),
   ]);
 
   const prefs: Record<string, boolean> = {};
@@ -320,6 +321,8 @@ export async function customerProfile(actor: Staff, id: string) {
     orderCount: c._count.orders,
     spent: spent._sum.customerShare ?? 0,
     balance: balance._sum.amount ?? 0,
+    /** Net wallet top-ups ever (TOPUP − TOPUP_REVERSAL). */
+    topupsNet: topups._sum.amount ?? 0,
     orders: c.orders,
     subscriptions: c.subscriptions,
     payments: c.payments,

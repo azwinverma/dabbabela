@@ -96,6 +96,13 @@ All metrics live in `src/server/analytics/metrics.ts` as `{ key, label, definiti
 | **Scheduled (future) revenue** | Same formula for SCHEDULED/CONFIRMED/PREPARING/PACKED/OUT_FOR_DELIVERY orders | Informational |
 | **Deferred revenue (liability)** | Recognised-basis value of paid, not-yet-delivered orders + wallet `CreditLedger` balance | Snapshot at date |
 
+**Wallet top-ups (Phase 2A).** A paid top-up (`Payment.purpose = WALLET_TOPUP`) counts in *Cash collected* (real money in) and sits in
+*Deferred* as wallet credit (a liability — deferred customer credit). It is **never revenue by itself**: when the credit pays for an order
+(method WALLET, excluded from cash so nothing is counted twice), that order is recognised on delivery like any other. Unpaid top-ups are
+not receivables. The journal posts top-up receipts to `liability.customer_credit` and moves the spent part to `revenue.sales` per period
+(unspent top-up credit = Σ per customer min(net top-ups, balance)). Report: *Wallet top-ups* (reports center); reconciliation panel on
+Payments → Reconciliation (money received = Σ TOPUP ledger rows).
+
 **Prepaid plans.** A plan purchase creates one order per meal, each carrying its share of the plan price (`Order.subtotal/discount/tax/total`
 allocated with `allocate()` in `src/lib/money.ts`). So:
 * the sale shows up **once** in *Bookings* and *Cash* when paid;
