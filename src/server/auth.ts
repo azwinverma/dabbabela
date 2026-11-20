@@ -4,6 +4,7 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
 import { twoFactor } from "better-auth/plugins/two-factor";
 import { phoneNumber } from "better-auth/plugins/phone-number";
+import { bearer } from "better-auth/plugins/bearer";
 import { db } from "@/lib/db";
 import { isNepalMobile, normalizeNepalPhone } from "@/lib/phone";
 import { createAuthMiddleware } from "better-auth/api";
@@ -109,6 +110,9 @@ export const auth = betterAuth({
         getTempName: () => "New member",
       },
     }),
+    // Mobile API (/api/v1): `Authorization: Bearer <session token>` resolves the same DB session as the cookie.
+    // Only active when the header is present; /api/v1 strips cookies so it never authenticates by cookie.
+    bearer(),
     nextCookies(), // must be last
   ],
 });
