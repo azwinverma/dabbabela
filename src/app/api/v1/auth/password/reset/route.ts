@@ -12,7 +12,7 @@ const schema = z.object({ token: z.string().min(8).max(500), password: z.string(
 /** Set a new password with the token from the reset email. Every session of the account is revoked. */
 export const POST = apiRoute({ auth: "public" }, async ({ req, ip }) => {
   const body = await readJson(req, schema);
-  if (!(await hit("reset", `submit:${ip}`))) throw tooMany();
+  if (!(await hit("resetSubmit", ip))) throw tooMany();
   try {
     await auth.api.resetPassword({ body: { newPassword: body.password, token: body.token }, headers: bearerHeaders(req) });
   } catch (e) {

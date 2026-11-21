@@ -346,6 +346,8 @@ describe("kitchen day lock & disruption", () => {
     expect(k.confirmed).toBeGreaterThanOrEqual(1);
     expect((await db.order.findUniqueOrThrow({ where: { id: res.orders[0].id } })).status).toBe("CONFIRMED");
     await expect(placeCartOrder(user, { lines: [{ kind: "box", id: b.id, date: d, qty: 1 }], addressId, method: "CASH" })).rejects.toThrow(/locked/);
+    // Unlock again: on some weekdays serviceDay(8, 0) is the same date later files book (e.g. serviceDay(5, 2)).
+    await db.dayLock.deleteMany({ where: { kitchenId: res.orders[0].kitchenId, date: dateOnly(d) } });
   });
 
   it("moves orders to the next service day on a bandh and closes the date", async () => {

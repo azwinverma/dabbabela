@@ -1,10 +1,23 @@
 # Implementation status
 
-_Last updated: 2026-11-20 (Phase 2C business gaps; earlier: WP-20 acceptance, security and performance pass)._ This is an honest status.
+_Last updated: 2026-11-21 (Phase 3 mobile API; Phase 2C business gaps; earlier: WP-20 acceptance, security and performance pass)._ This is an honest status.
 "Done" means the flow works against a real Postgres database and the checks listed below cover it.
 **This is not a production-readiness claim.** The app is deployed to Vercel (https://dabbabela.vercel.app) in
 sandbox mode only. There is no production domain, no live payment merchant keys, and no SMS or email provider.
 The external blockers listed further down are still open.
+
+## Production readiness Phase 3 — mobile REST API (2026-11-21)
+| Item | Status | Notes |
+|---|---|---|
+| `/api/v1` bearer auth | ✅ | Better Auth `bearer` plugin, same DB sessions as the web; cookies never read on v1. Email/password, sign-up, phone OTP (flag), reset request/submit, sign-out, `GET /me` (role, permissions, kitchen scope, app sections, 2FA state, flags), sessions list/revoke, push device register/remove (`DeviceToken`) |
+| Staff 2FA for bearer clients | ✅ | Sign-in returns a single-use `challengeToken` (Better Auth's two-factor cookie, replayed server-side) → `/auth/two-factor/verify`; unenrolled staff get `403 TWO_FACTOR_SETUP_REQUIRED` on staff endpoints and can enrol in-app (`enable`/`confirm`, token rotates). Staff session lifetime (2B) enforced |
+| Customer endpoints | ✅ | menu by date/week (+company menu), box, plans, coverage, settings (public); profile, addresses (zone linking), cart quote, place order (all methods), orders list/detail/timeline/cancel/skip/swap/feedback, payments list/status/start (eSewa form / Khalti URL)/method/proof, subscriptions quote/create/pause/resume/cancel/renew/address/add meal, wallet balance/ledger/top-up (flag), notifications, referrals, support tickets, saved boxes (read), privacy export/deletion request |
+| Rider / Kitchen / Dispatcher | ✅ | Rider routes by date, route detail, deliver (OTP, cash, photo), fail with reason, finish. Kitchen production list, bulk start/pack, batches, QC, stock alerts (read-only). Dispatch board (slot × zone), create route, assign orders/rider, dispatch, reassign, unassign, auto-group, failed list/resolve |
+| Shared logic | ✅ | Web actions now call the same new server modules: `src/server/addresses.ts`, `profile.ts`, `registration.ts`, `rider.ts` (rider actor rule), `privacy.ts#customerSelfExport` |
+| Idempotency / limits / errors | ✅ | `Idempotency-Key` required on every money-moving POST (24 h replay, in-progress 409, reuse 422; multipart compared by fields + file hash); 2B limiter for auth, checkout, payment start, uploads, writes; one error envelope |
+| OpenAPI | ✅ | `docs/api/openapi.yaml` (95 paths), `GET /api/v1/openapi.json`, `docs/api/README.md` |
+| Tests | ✅ | `api-auth` (10), `api-customer` (16), `api-ops` (11), `api-public` (9), `tests/unit/api-guards` (8: every v1 handler uses `apiRoute({auth})`, public allow-list, runtime 401 sweep, spec covers every handler, JSON in sync) |
+| Not mirrored | — | Build-a-Dabba create/edit (web builder), checkout attribution (cookie-based), dispatch route cost / cash hand-in / stop reorder / change acknowledge, kitchen day lock / draft POs / open-pause / ticket printing (desktop tools). Push sending itself (FCM) is not wired — tokens are stored only |
 
 ## Production readiness Phase 2C (2026-11-20)
 - **Swap "pay the difference":** a dearer swap of a paid plan meal can be paid from credit or online (eSewa/Khalti, `SWAP_DIFFERENCE` payment); the swap is applied once on verified payment, credited to the wallet if it can no longer be applied, and cancelled if unpaid at the cut-off. Cheaper swaps credit the wallet (paid) or reduce what's owed (unpaid). Integration-tested (4).

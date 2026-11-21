@@ -86,7 +86,7 @@ export function apiRoute<A extends AuthSpec, P = Record<string, string>>(opts: R
           const buf = new Uint8Array(await req.arrayBuffer());
           const replayable = new Request(req.url, { method: req.method, headers: req.headers, body: buf.byteLength ? buf : undefined });
           const scope = `${req.method} ${new URL(req.url).pathname}`;
-          return await withIdempotency(user.id, scope, key, bodyHash(buf), async () => {
+          return await withIdempotency(user.id, scope, key, await requestFingerprint(replayable.clone(), buf), async () => {
             try {
               return wrap(await fn({ req: replayable, user: user as UserFor<A>, params, idempotencyKey: key, ip }));
             } catch (e) {
@@ -100,6 +100,25 @@ export function apiRoute<A extends AuthSpec, P = Record<string, string>>(opts: R
       }
     });
   };
+}
+
+/**
+ * What "the same request" means for Idempotency-Key reuse checks. JSON/raw bodies: the bytes. Multipart: the parsed
+ * fields + a hash of each file — clients (Dart's MultipartRequest) pick a new random boundary on every retry, so the
+ * raw bytes of an identical form differ.
+ */
+async function requestFingerprint(req: Request, buf: Uint8Array) {
+  if (!(req.headers.get("content-type") ?? "").toLowerCase().startsWith("multipart/form-data")) return bodyHash(buf);
+  try {
+    const fd = await req.formData();
+    const parts: string[] = [];
+    for (const [k, v] of fd.entries()) {
+      parts.push(typeof v === "string" ? `${k}=${v}` : `${k}=file:${v.size}:${bodyHash(new Uint8Array(await v.arrayBuffer()))}`);
+    }
+    return bodyHash(parts.sort().join("\u0000"));
+  } catch {
+    return bodyHash(buf);
+  }
 }
 
 function wrap(out: unknown): Response {

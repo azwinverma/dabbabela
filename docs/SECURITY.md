@@ -92,6 +92,34 @@
   proves another company's data can't be read).
 * PII (phone/email) masked without `customers.pii`; CSV exports follow the same rule and are audited.
 
+## Mobile API (`/api/v1`, Phase 3)
+* **Bearer sessions only.** `Authorization: Bearer <token>` is resolved by Better Auth's `bearer` plugin to the same
+  `Session` row the website uses (expiry, revocation, deactivation, password-reset revocation, staff 24 h absolute
+  lifetime). `/api/v1` builds the auth headers from the bearer token, IP and user agent only — **cookies are never
+  forwarded**, so a browser holding a web session can't drive the API (no CSRF), and no CORS headers are ever sent
+  (cross-origin `Origin` → `403 CORS_FORBIDDEN`; `API_ALLOWED_ORIGINS` to allow one).
+* **Staff 2FA** = the web rule (`staffTwoFactorOk`). Enrolled accounts get no token until TOTP/backup code is verified:
+  sign-in returns a single-use, attempt-limited `challengeToken` (Better Auth's signed two-factor cookie, replayed
+  server-side; format-checked). Unenrolled staff can sign in but every permission-guarded endpoint returns
+  `403 TWO_FACTOR_SETUP_REQUIRED` until they enrol (`/auth/two-factor/enable|confirm`; the session rotates).
+* **Guards.** Every handler is `apiRoute({ auth })`: `"user"` (own records only — another customer's id answers 404),
+  `{ permission }` (= `requirePermission`: permission + 2FA), or allow-listed `"public"`/`"optional"`. Kitchen scope
+  is checked before any service call (out of scope → 404). `tests/unit/api-guards.test.ts` fails if a v1 handler
+  isn't built this way, a public one isn't allow-listed, or any protected handler doesn't answer 401 without a token.
+  IDOR tests: customer A vs B (addresses, orders, payments, plans, tickets, idempotency keys), rider vs another rider's
+  stops/routes, staff vs another kitchen's orders/routes.
+* **Idempotency.** Money-moving POSTs require `Idempotency-Key`; the first successful response is replayed for 24 h
+  (stored in `Verification`, claim under an advisory lock), same key + different body → 422, keys are per user and
+  endpoint, and services with their own key (checkout, plans, add meal, renew, top-up) receive it too.
+* **Rate limits** use the 2B Postgres limiter: auth endpoints per IP and per email/phone (they call `auth.api.*`, which
+  bypasses Better Auth's own limiter), checkout 12/min, payment start 15/min, uploads 10/10 min, writes 60/min per user,
+  public reads 300/min per IP.
+* **Responses** are explicit DTOs (no Prisma row spreading): no session tokens in session lists, push tokens shown as a
+  6-char suffix, delivery OTP only to the customer while out for delivery and never to riders, internal ticket notes and
+  actor ids omitted, dispatcher phones masked without `customers.pii`. Unknown errors are logged and returned as
+  `INTERNAL` without details. Uploads reuse `storeUpload` (sniffed types, 5 MB, no SVG).
+* No refund / wallet-adjustment endpoints exist in v1 (staff money tools stay on the web behind maker-checker).
+
 ## Maker-checker approvals (Phase 2B)
 * `src/server/approvals.ts`, UI `/admin/approvals` (queue with status/kind/mine filters, detail with requested-vs-now "diff",
   approve with note / reject with required note / withdraw / retry), sidebar badge = pending requests the viewer could decide.

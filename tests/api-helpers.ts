@@ -16,8 +16,10 @@ export type CallOpts = {
   ip?: string;
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- tests read loosely-typed JSON
 export type CallResult<T = any> = { status: number; body: { data?: T; meta?: any; error?: { code: string; message: string; fields?: Record<string, string> } }; headers: Headers };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- tests read loosely-typed JSON
 export async function call<T = any>(handler: unknown, method: string, path: string, o: CallOpts = {}): Promise<CallResult<T>> {
   const url = new URL(`http://localhost:3100/api/v1${path}`);
   for (const [k, v] of Object.entries(o.query ?? {})) if (v !== undefined) url.searchParams.set(k, String(v));

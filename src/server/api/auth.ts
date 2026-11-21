@@ -1,6 +1,6 @@
 import "server-only";
 import { db } from "@/lib/db";
-import { getSettings, type SiteSettings } from "@/lib/settings";
+import { staffSessionExpired, staffTwoFactorOk } from "@/lib/auth";
 import { CURRENT_USER_INCLUDE, toCurrentUser } from "@/lib/user-context";
 import { can, isStaffRole, type Permission } from "@/lib/permissions";
 import { auth } from "@/server/auth";
@@ -46,6 +46,11 @@ export async function getApiUser(req: Request): Promise<ApiUser | null> {
   if (!session) return null;
   const user = await db.user.findUnique({ where: { id: session.user.id }, include: CURRENT_USER_INCLUDE });
   if (!user || !user.isActive || user.deletedAt) return null;
+  // Phase 2B: staff sessions have an absolute lifetime (STAFF_SESSION_MAX_HOURS) — same rule as getCurrentUser.
+  if (isStaffRole(user.role) && staffSessionExpired(session.session.createdAt)) {
+    await db.session.deleteMany({ where: { id: session.session.id } }).catch(() => null);
+    return null;
+  }
   return toCurrentUser(user, session.session.id);
 }
 
@@ -54,14 +59,12 @@ export async function getApiUser(req: Request): Promise<ApiUser | null> {
  * enabled may sign in but can't use any staff feature until it enrols. Bearer sessions for accounts that do have
  * TOTP only exist after the second factor was verified (Better Auth issues no session before that).
  */
-export function staffNeeds2fa(user: Pick<ApiUser, "role" | "twoFactorEnabled">, settings: Pick<SiteSettings, "flags">) {
-  if (!isStaffRole(user.role) || user.twoFactorEnabled) return false;
-  if (process.env.DISABLE_STAFF_2FA === "true" && process.env.NODE_ENV !== "production") return false;
-  return Boolean(settings.flags.staff2fa);
+export async function staffNeeds2fa(user: Pick<ApiUser, "role" | "twoFactorEnabled">) {
+  return !(await staffTwoFactorOk(user));
 }
 
 export async function assertStaff2fa(user: ApiUser) {
-  if (staffNeeds2fa(user, await getSettings()))
+  if (await staffNeeds2fa(user))
     throw new ApiError(403, "TWO_FACTOR_SETUP_REQUIRED", "Turn on two-step sign-in (authenticator app) before using staff features");
 }
 

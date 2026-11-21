@@ -18,7 +18,7 @@ import { done, fail, type ActionResult } from "@/lib/action";
 import { str } from "@/lib/utils";
 import { readAttribution } from "@/lib/attribution";
 import { storeUserAttribution } from "@/server/crm";
-import { claimReferral } from "@/server/marketing";
+import { afterRegister, preRegisterCheck, registerSchema } from "@/server/registration";
 import { authLimitsOn, LIMITS, rateLimit, requestIp } from "@/lib/rate-limit";
 import { checkTurnstile, TURNSTILE_FAILED } from "@/lib/turnstile";
 
@@ -151,14 +151,6 @@ export async function verifyOtpAction(_: ActionResult, fd: FormData): Promise<Ac
 
 // ───────── sign up ─────────
 
-const registerSchema = z.object({
-  name: z.string().trim().min(2, "Enter your name").max(80),
-  email: z.string().trim().toLowerCase().email("Enter a valid email"),
-  phone: z.string().trim().refine((p) => isNepalMobile(p), "Enter a Nepal mobile number (98/97/96…)"),
-  password: z.string().min(8, "Use at least 8 characters").max(128),
-  companyCode: z.string().trim().max(20).optional(),
-});
-
 export async function registerAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
   const parsed = registerSchema.safeParse({
     name: str(fd.get("name")),
@@ -175,10 +167,8 @@ export async function registerAction(_: ActionResult, fd: FormData): Promise<Act
   const d = parsed.data;
   if (await limited("signUp")) return fail(TOO_MANY);
   if (!(await checkTurnstile(fd, "register")).ok) return fail(TURNSTILE_FAILED);
-  const phone = normalizeNepalPhone(d.phone)!;
-  if (await db.user.findUnique({ where: { phoneNumber: phone } })) return fail("That mobile number is already on another account", { phone: "Already registered" });
-  const company = d.companyCode ? await db.company.findFirst({ where: { joinCode: d.companyCode.toUpperCase(), isActive: true } }) : null;
-  if (d.companyCode && !company) return fail("We don't recognise that company code", { companyCode: "Check with your office admin" });
+  const check = await preRegisterCheck(d);
+  if (!check.ok) return fail(check.message, { [check.field]: check.hint });
 
   let userId: string;
   try {
@@ -187,22 +177,9 @@ export async function registerAction(_: ActionResult, fd: FormData): Promise<Act
   } catch (e) {
     return fail(authMessage(e, "We couldn't create your account"));
   }
-  try {
-    await db.user.update({ where: { id: userId }, data: { phoneNumber: phone } });
-  } catch {
-    // race on the unique phone — account still created, ask them to add it later
-  }
+  // phone, company membership, ?ref=CODE referral claim — shared with the mobile API (best effort, never blocks sign-up)
+  await afterRegister(userId, { phone: check.phone, company: check.company, ref: str(fd.get("ref")) });
   await captureAttribution(userId);
-  if (company) {
-    await db.companyMember.create({ data: { companyId: company.id, userId, status: company.requireApproval ? "PENDING" : "ACTIVE" } }).catch(() => null);
-  }
-  // ?ref=CODE on the sign-up link: claim the friend's referral (best effort — a bad code never blocks sign-up;
-  // the customer can still enter one in Account → Refer a friend).
-  const ref = str(fd.get("ref")).slice(0, 20);
-  if (ref) {
-    const r = await claimReferral(userId, ref).catch((e) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }));
-    if (!r.ok) log.info("register.referral_not_claimed", { userId, error: r.error });
-  }
   const next = safeNext(str(fd.get("next")));
   return done("Account created", next ?? "/account?welcome=1");
 }

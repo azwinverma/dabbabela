@@ -17,7 +17,7 @@ export const GET = apiRoute({ auth: "user" }, async ({ user }) => {
   const staff = isStaffRole(user.role);
   const company = activeCompany(user);
   const kitchens = staff ? await scopedKitchens(user) : [];
-  const needs2fa = staffNeeds2fa(user, settings);
+  const needs2fa = await staffNeeds2fa(user);
   return {
     user: {
       id: user.id,
