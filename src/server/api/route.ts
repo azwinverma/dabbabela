@@ -70,7 +70,8 @@ async function resolveUser(req: Request, spec: AuthSpec): Promise<ApiUser | null
 
 export function apiRoute<A extends AuthSpec, P = Record<string, string>>(opts: RouteOptions<A>, fn: Handler<A, P>) {
   if (!opts || opts.auth === undefined) throw new Error("apiRoute: `auth` is required");
-  return async function handler(req: Request, context?: { params: Promise<P> }): Promise<Response> {
+  // `context` is required in the signature (Next 15 route type check); tests may still call handler(req) alone.
+  return async function handler(req: Request, context: { params: Promise<P> }): Promise<Response> {
     const rc = contextFromHeaders(req.headers);
     return runWithRequestContext(rc, async () => {
       try {
