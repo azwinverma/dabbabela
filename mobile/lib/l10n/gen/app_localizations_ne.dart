@@ -382,6 +382,697 @@ class AppLocalizationsNe extends AppLocalizations {
   }
 
   @override
+  String get tabHome => 'गृह';
+
+  @override
+  String get tabMenu => 'मेनु';
+
+  @override
+  String get tabPlans => 'योजना';
+
+  @override
+  String get tabOrders => 'अर्डर';
+
+  @override
+  String get tabAccount => 'खाता';
+
+  @override
+  String hello(Object name) {
+    return 'नमस्ते, $name';
+  }
+
+  @override
+  String get todaysLunch => 'आजको खाना';
+
+  @override
+  String get upcomingMeals => 'आउँदै गरेका खाना';
+
+  @override
+  String get noUpcoming => 'कुनै खाना बुक छैन। यो हप्ताको मेनुबाट छान्नुहोस्।';
+
+  @override
+  String get browseMenu => 'मेनु हेर्नुहोस्';
+
+  @override
+  String planProgress(int done, int total) {
+    return '$total मध्ये $done खाना पुग्यो';
+  }
+
+  @override
+  String get handOffCode => 'हस्तान्तरण कोड';
+
+  @override
+  String get handOffHelp => 'डब्बा आइपुग्दा राइडरलाई यो कोड भन्नुहोस्।';
+
+  @override
+  String companyMenu(Object company) {
+    return 'तपाईंको कम्पनीको मेनु ($company)';
+  }
+
+  @override
+  String get noMenu => 'यो हप्ताको मेनु अझै प्रकाशित भएको छैन';
+
+  @override
+  String get prevWeek => 'अघिल्लो हप्ता';
+
+  @override
+  String get nextWeek => 'अर्को हप्ता';
+
+  @override
+  String orderBy(Object time) {
+    return '$time सम्म अर्डर';
+  }
+
+  @override
+  String get orderClosed => 'अर्डर बन्द';
+
+  @override
+  String get kitchenClosed => 'भान्सा बन्द';
+
+  @override
+  String get soldOut => 'सकियो';
+
+  @override
+  String onlyLeft(int n) {
+    return '$n मात्र बाँकी';
+  }
+
+  @override
+  String get chefsPick => 'सेफको रोजाइ';
+
+  @override
+  String get addToCart => 'मेरो डब्बामा थप्नुहोस्';
+
+  @override
+  String addedToCart(Object name) {
+    return 'थपियो — $name';
+  }
+
+  @override
+  String get whatsInside => 'डब्बामा के छ';
+
+  @override
+  String get allergens => 'एलर्जी हुने तत्व';
+
+  @override
+  String get mayContain => 'मिसिन सक्छ';
+
+  @override
+  String get noAllergens => 'सूचीकृत एलर्जी तत्व छैन';
+
+  @override
+  String get sharedKitchen => 'गहुँ, दूध, अण्डा, भटमास, तिल र तोरी प्रयोग हुने साझा भान्सामा पकाइन्छ। मिसावट शून्य हुने ग्यारेन्टी गर्न सक्दैनौँ।';
+
+  @override
+  String allergyWarning(Object list) {
+    return 'तपाईंको एलर्जी सूचीको तत्व छ: $list';
+  }
+
+  @override
+  String get nutrition => 'पोषण (अनुमानित)';
+
+  @override
+  String get nutritionNote => 'हाम्रो रेसिपीबाट गरिएको अनुमान, प्रयोगशाला परीक्षण होइन।';
+
+  @override
+  String spiceLevel(int n) {
+    return 'पिरो $n/४';
+  }
+
+  @override
+  String get pickDay => 'डेलिभरी दिन';
+
+  @override
+  String get noDays => 'यो डब्बाका लागि अहिले कुनै डेलिभरी दिन खुला छैन।';
+
+  @override
+  String get offCompanyMenu => 'तपाईंको कम्पनीको मेनुमा छैन।';
+
+  @override
+  String get swaps => 'सेफले स्वीकृत गरेका साटफेर';
+
+  @override
+  String get quantity => 'संख्या';
+
+  @override
+  String get cart => 'मेरा डब्बा';
+
+  @override
+  String get cartEmpty => 'तपाईंको कार्ट खाली छ।';
+
+  @override
+  String get checkout => 'चेकआउट';
+
+  @override
+  String get deliverTo => 'कहाँ पठाउने';
+
+  @override
+  String get addAddress => 'डेलिभरी ठेगाना थप्नुहोस्';
+
+  @override
+  String get changeAddress => 'ठेगाना बदल्नुहोस्';
+
+  @override
+  String get deliverySlot => 'डेलिभरी समय';
+
+  @override
+  String get anySlot => 'सामान्य खाना समय';
+
+  @override
+  String get payWith => 'भुक्तानी माध्यम';
+
+  @override
+  String walletBalanceShort(Object amount) {
+    return 'ब्यालेन्स $amount';
+  }
+
+  @override
+  String get coupon => 'कुपन कोड';
+
+  @override
+  String get apply => 'लागू गर्नुहोस्';
+
+  @override
+  String get notesForKitchen => 'राइडरका लागि टिप्पणी';
+
+  @override
+  String companyPays(Object company) {
+    return '$company ले तिर्छ';
+  }
+
+  @override
+  String get couponDiscount => 'कुपन';
+
+  @override
+  String get youPay => 'तपाईंले तिर्ने';
+
+  @override
+  String get taxIncluded => 'मूल्यमा भ्याट समावेश';
+
+  @override
+  String get placeOrder => 'अर्डर गर्नुहोस्';
+
+  @override
+  String get fixProblems => 'अगाडि बढ्न देखाइएका कुरा मिलाउनुहोस्।';
+
+  @override
+  String get orderPlaced => 'अर्डर भयो!';
+
+  @override
+  String get orderPlacedBody => 'दिनमै पकाउन सुरु गर्छौँ। प्रत्येक डब्बा अर्डरमा देखिन्छ।';
+
+  @override
+  String get viewOrders => 'मेरा अर्डर हेर्नुहोस्';
+
+  @override
+  String get payment => 'भुक्तानी';
+
+  @override
+  String payNow(Object amount) {
+    return '$amount अहिले तिर्नुहोस्';
+  }
+
+  @override
+  String openingGateway(Object gateway) {
+    return '$gateway खुल्दैछ…';
+  }
+
+  @override
+  String get checkingPayment => 'गेटवेसँग भुक्तानी जाँच्दै…';
+
+  @override
+  String get paymentPaid => 'भुक्तानी प्राप्त भयो। धन्यवाद!';
+
+  @override
+  String get paymentFailed => 'भुक्तानी भएन। फेरि प्रयास गर्नुहोस् वा अर्को माध्यम छान्नुहोस्।';
+
+  @override
+  String get paymentStillPending => 'गेटवेबाट अझै जवाफ आएको छैन। पैसा कटेको भए छिट्टै यहाँ देखिन्छ — दोहोर्‍याएर नतिर्नुहोस्।';
+
+  @override
+  String get paymentExpired => 'यो भुक्तानी अब खुला छैन।';
+
+  @override
+  String get checkAgain => 'फेरि जाँच्नुहोस्';
+
+  @override
+  String get switchMethod => 'अर्को तरिकाले तिर्नुहोस्';
+
+  @override
+  String get bankDetails => 'बैंक विवरण';
+
+  @override
+  String get bankHelp => 'ठ्याक्कै रकम ट्रान्सफर गरी रसिदको फोटो अपलोड गर्नुहोस्।';
+
+  @override
+  String get transferReference => 'ट्रान्सफर रेफरेन्स / कारोबार नम्बर';
+
+  @override
+  String get chooseReceipt => 'रसिदको फोटो छान्नुहोस्';
+
+  @override
+  String get takeReceiptPhoto => 'फोटो खिच्नुहोस्';
+
+  @override
+  String get uploadProof => 'प्रमाण पठाउनुहोस्';
+
+  @override
+  String get proofSent => 'प्रमाण प्राप्त भयो — छिट्टै पुष्टि गर्छौँ।';
+
+  @override
+  String get awaitingVerification => 'तपाईंको ट्रान्सफर हाम्रो टोलीले जाँच्दैछ।';
+
+  @override
+  String get cashNote => 'डब्बा आइपुग्दा राइडरलाई नगद तिर्नुहोस्।';
+
+  @override
+  String get gatewayTitle => 'सुरक्षित भुक्तानी';
+
+  @override
+  String get ordersUpcoming => 'आउँदै';
+
+  @override
+  String get ordersPast => 'बितेका';
+
+  @override
+  String get noOrders => 'अहिलेसम्म अर्डर छैन।';
+
+  @override
+  String orderNumber(Object number) {
+    return 'अर्डर $number';
+  }
+
+  @override
+  String get items => 'सामान';
+
+  @override
+  String get delivery => 'डेलिभरी';
+
+  @override
+  String get timeline => 'ट्र्याकिङ';
+
+  @override
+  String changesUntil(Object time) {
+    return '$time सम्म परिवर्तन गर्न सकिन्छ';
+  }
+
+  @override
+  String get cancelOrder => 'अर्डर रद्द गर्नुहोस्';
+
+  @override
+  String get cancelOrderBody => 'तिरेको रकम नीतिअनुसार क्रेडिट वा फिर्ता हुन्छ।';
+
+  @override
+  String get skipMeal => 'यो दिन छोड्नुहोस्';
+
+  @override
+  String get unskipMeal => 'फेरि थप्नुहोस्';
+
+  @override
+  String get swapDabba => 'डब्बा साट्नुहोस्';
+
+  @override
+  String get swapTitle => 'अर्को डब्बामा साट्नुहोस्';
+
+  @override
+  String swapPayMore(Object amount) {
+    return '+$amount तिर्नुपर्ने';
+  }
+
+  @override
+  String swapCredit(Object amount) {
+    return '$amount क्रेडिट फिर्ता';
+  }
+
+  @override
+  String get swapSame => 'उही मूल्य';
+
+  @override
+  String get current => 'हालको';
+
+  @override
+  String get payDifferenceWith => 'फरक रकम यसबाट तिर्नुहोस्';
+
+  @override
+  String get rateMeal => 'यो डब्बालाई रेटिङ दिनुहोस्';
+
+  @override
+  String get comment => 'टिप्पणी';
+
+  @override
+  String get thanksFeedback => 'प्रतिक्रियाका लागि धन्यवाद!';
+
+  @override
+  String get getHelp => 'यो अर्डरमा सहायता';
+
+  @override
+  String get plansTitle => 'खाना योजना';
+
+  @override
+  String get myPlans => 'मेरा योजना';
+
+  @override
+  String get perMeal => 'प्रति खाना';
+
+  @override
+  String get popular => 'धेरैले रोजेको';
+
+  @override
+  String get deliveryIncluded => 'डेलिभरी समावेश';
+
+  @override
+  String get choosePlan => 'यो योजना छान्नुहोस्';
+
+  @override
+  String get startDate => 'सुरु मिति';
+
+  @override
+  String get deliveryDays => 'डेलिभरी दिन';
+
+  @override
+  String minDays(int n) {
+    return 'हप्तामा कम्तीमा $n दिन';
+  }
+
+  @override
+  String get weeks => 'हप्ता';
+
+  @override
+  String get vegOnly => 'शाकाहारी मात्र';
+
+  @override
+  String get chefRotation => 'डब्बा सेफको पालोअनुसार आउँछन्; कटअफअघि जुनसुकै दिन साट्न सकिन्छ।';
+
+  @override
+  String get subscribe => 'योजना सुरु गर्नुहोस्';
+
+  @override
+  String get planStarted => 'तपाईंको योजना तयार भयो!';
+
+  @override
+  String planEnds(Object date) {
+    return '$date मा सकिन्छ';
+  }
+
+  @override
+  String get savings => 'बचत';
+
+  @override
+  String get noPlans => 'तपाईंको खाना योजना छैन।';
+
+  @override
+  String get planMeals => 'खानाहरू';
+
+  @override
+  String get pausePlan => 'रोक्नुहोस्';
+
+  @override
+  String get pauseFrom => 'कहिलेदेखि रोक्ने';
+
+  @override
+  String get resumePlan => 'फेरि सुरु गर्नुहोस्';
+
+  @override
+  String get cancelPlan => 'योजना रद्द गर्नुहोस्';
+
+  @override
+  String get renewPlan => 'नवीकरण';
+
+  @override
+  String get renewalExists => 'यो योजनाको नवीकरण भइसकेको छ।';
+
+  @override
+  String get addMeal => 'खाना थप्नुहोस्';
+
+  @override
+  String get pendingSwapPayments => 'भुक्तानी बाँकी साटफेर';
+
+  @override
+  String get policies => 'नीतिहरू';
+
+  @override
+  String pausedUntil(Object date) {
+    return '$date सम्म रोकिएको';
+  }
+
+  @override
+  String get accountTitle => 'मेरो खाता';
+
+  @override
+  String get addresses => 'ठेगानाहरू';
+
+  @override
+  String get wallet => 'डब्बा क्रेडिट';
+
+  @override
+  String get payments => 'भुक्तानीहरू';
+
+  @override
+  String get notifications => 'सूचनाहरू';
+
+  @override
+  String get referrals => 'साथीलाई बोलाउनुहोस्';
+
+  @override
+  String get support => 'सहायता';
+
+  @override
+  String get profile => 'प्रोफाइल';
+
+  @override
+  String get foodPreferences => 'खानाका रुचि';
+
+  @override
+  String get notificationSettings => 'सूचना सेटिङ';
+
+  @override
+  String get privacy => 'गोपनीयता र डेटा';
+
+  @override
+  String get security => 'सुरक्षा';
+
+  @override
+  String get makeDefault => 'मुख्य बनाउनुहोस्';
+
+  @override
+  String get defaultAddress => 'मुख्य';
+
+  @override
+  String get notCovered => 'यो क्षेत्रमा अहिले डेलिभरी हुँदैन';
+
+  @override
+  String get covered => 'यहाँ डेलिभरी हुन्छ';
+
+  @override
+  String get deleteAddressConfirm => 'यो ठेगाना हटाउने?';
+
+  @override
+  String get addressLabel => 'नाम (जस्तै अफिस)';
+
+  @override
+  String get addressType => 'प्रकार';
+
+  @override
+  String get recipient => 'प्राप्तकर्ताको नाम';
+
+  @override
+  String get placeName => 'भवन / कम्पनी';
+
+  @override
+  String get line1 => 'सडक / घर';
+
+  @override
+  String get area => 'क्षेत्र (जस्तै बानेश्वर)';
+
+  @override
+  String get ward => 'वडा';
+
+  @override
+  String get municipality => 'नगरपालिका';
+
+  @override
+  String get city => 'शहर';
+
+  @override
+  String get landmark => 'चिनारी ठाउँ';
+
+  @override
+  String get instructions => 'डेलिभरी निर्देशन';
+
+  @override
+  String get checkCoverage => 'डेलिभरी क्षेत्र जाँच्नुहोस्';
+
+  @override
+  String get atHOME => 'घर';
+
+  @override
+  String get atOFFICE => 'अफिस';
+
+  @override
+  String get atSHOP => 'पसल';
+
+  @override
+  String get atCOLLEGE => 'कलेज';
+
+  @override
+  String get atSITE => 'कार्यस्थल';
+
+  @override
+  String get atOTHER => 'अन्य';
+
+  @override
+  String get walletBalance => 'ब्यालेन्स';
+
+  @override
+  String get walletHistory => 'इतिहास';
+
+  @override
+  String get topUp => 'क्रेडिट थप्नुहोस्';
+
+  @override
+  String get topUpAmount => 'रकम (रु)';
+
+  @override
+  String topUpLimits(Object min, Object max) {
+    return '$min देखि $max सम्म';
+  }
+
+  @override
+  String get invalidAmount => 'सही रकम लेख्नुहोस्';
+
+  @override
+  String get markAllRead => 'सबै पढियो';
+
+  @override
+  String get noNotifications => 'अहिलेसम्म सूचना छैन।';
+
+  @override
+  String get yourCode => 'तपाईंको कोड';
+
+  @override
+  String get friendsJoined => 'साथीहरू';
+
+  @override
+  String get rewardsEarned => 'पाएको इनाम';
+
+  @override
+  String get haveFriendCode => 'साथीको कोड छ?';
+
+  @override
+  String get claim => 'कोड प्रयोग गर्नुहोस्';
+
+  @override
+  String get referralsOff => 'रेफरल अहिले बन्द छ।';
+
+  @override
+  String get newTicket => 'नयाँ अनुरोध';
+
+  @override
+  String get subject => 'विषय';
+
+  @override
+  String get message => 'सन्देश';
+
+  @override
+  String get category => 'विषयवस्तु';
+
+  @override
+  String get send => 'पठाउनुहोस्';
+
+  @override
+  String get noTickets => 'कुनै अनुरोध छैन। प्रायः एक कार्यदिनभित्र जवाफ दिन्छौँ।';
+
+  @override
+  String get ticketClosed => 'यो कुराकानी बन्द भयो। थप सहायता चाहिए नयाँ अनुरोध खोल्नुहोस्।';
+
+  @override
+  String get replyHint => 'जवाफ लेख्नुहोस्';
+
+  @override
+  String get tcORDER => 'अर्डर';
+
+  @override
+  String get tcPAYMENT => 'भुक्तानी';
+
+  @override
+  String get tcDELIVERY => 'डेलिभरी';
+
+  @override
+  String get tcFOOD => 'खाना';
+
+  @override
+  String get tcACCOUNT => 'खाता';
+
+  @override
+  String get tcCORPORATE => 'कम्पनी';
+
+  @override
+  String get tcGENERAL => 'अन्य';
+
+  @override
+  String get marketingOptIn => 'नयाँ मेनु र अफर पठाउनुहोस्';
+
+  @override
+  String get phoneChangeNote => 'नम्बर बदले फेरि प्रमाणित गर्नुपर्छ।';
+
+  @override
+  String get diet => 'आहार';
+
+  @override
+  String get dietANY => 'जे पनि';
+
+  @override
+  String get dietEGG_OK => 'शाकाहारी + अण्डा';
+
+  @override
+  String get spiceTolerance => 'पिरो सहने क्षमता';
+
+  @override
+  String get myAllergies => 'मेरो एलर्जी (डब्बाको लेबलमा छापिन्छ)';
+
+  @override
+  String get avoidOnionGarlic => 'प्याज र लसुन नहाल्ने';
+
+  @override
+  String get dietaryNotes => 'भान्साका लागि टिप्पणी';
+
+  @override
+  String get ntORDER_UPDATES => 'अर्डर अपडेट';
+
+  @override
+  String get ntPLAN_REMINDERS => 'योजना सम्झना';
+
+  @override
+  String get ntMARKETING => 'मेनु र अफर';
+
+  @override
+  String get chIN_APP => 'एपमा';
+
+  @override
+  String get chEMAIL => 'इमेल';
+
+  @override
+  String get chSMS => 'SMS';
+
+  @override
+  String get exportData => 'मेरो डेटा डाउनलोड';
+
+  @override
+  String get exportDataBody => 'हामीसँग भएको तपाईंको सबै जानकारी, JSON मा।';
+
+  @override
+  String get deleteAccount => 'खाता मेटाउन अनुरोध';
+
+  @override
+  String get deleteAccountBody => 'हाम्रो टोलीले अनुरोध हेर्छ। खुला अर्डर, क्रेडिट र बिल पहिले मिलाइन्छ। पुष्टि गर्न DELETE लेख्नुहोस्।';
+
+  @override
+  String get privacyRequests => 'मेरा अनुरोध';
+
+  @override
+  String get typeDelete => 'DELETE लेख्नुहोस्';
+
+  @override
   String get riderRoutesTitle => 'मेरा रुट';
 
   @override

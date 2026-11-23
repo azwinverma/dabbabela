@@ -109,7 +109,7 @@ extension CodeLabels on AppLocalizations {
     return code;
   }
 
-  String diet(String code) {
+  String dietLabel(String code) {
     switch (code) {
       case 'VEG':
         return dietVEG;

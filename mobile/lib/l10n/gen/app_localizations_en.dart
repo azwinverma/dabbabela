@@ -394,6 +394,697 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get tabHome => 'Home';
+
+  @override
+  String get tabMenu => 'Menu';
+
+  @override
+  String get tabPlans => 'Plans';
+
+  @override
+  String get tabOrders => 'Orders';
+
+  @override
+  String get tabAccount => 'Account';
+
+  @override
+  String hello(Object name) {
+    return 'Namaste, $name';
+  }
+
+  @override
+  String get todaysLunch => 'Today\'s lunch';
+
+  @override
+  String get upcomingMeals => 'Coming up';
+
+  @override
+  String get noUpcoming => 'No meals booked. Pick something from this week\'s menu.';
+
+  @override
+  String get browseMenu => 'See the menu';
+
+  @override
+  String planProgress(int done, int total) {
+    return '$done of $total meals delivered';
+  }
+
+  @override
+  String get handOffCode => 'Hand-off code';
+
+  @override
+  String get handOffHelp => 'Tell this code to the rider when your dabba arrives.';
+
+  @override
+  String companyMenu(Object company) {
+    return 'Showing your company\'s lunch menu ($company)';
+  }
+
+  @override
+  String get noMenu => 'This week\'s menu isn\'t published yet';
+
+  @override
+  String get prevWeek => 'Previous week';
+
+  @override
+  String get nextWeek => 'Next week';
+
+  @override
+  String orderBy(Object time) {
+    return 'Order by $time';
+  }
+
+  @override
+  String get orderClosed => 'Ordering closed';
+
+  @override
+  String get kitchenClosed => 'Kitchen closed';
+
+  @override
+  String get soldOut => 'Sold out';
+
+  @override
+  String onlyLeft(int n) {
+    return 'Only $n left';
+  }
+
+  @override
+  String get chefsPick => 'Chef\'s pick';
+
+  @override
+  String get addToCart => 'Add to my dabbas';
+
+  @override
+  String addedToCart(Object name) {
+    return 'Added — $name';
+  }
+
+  @override
+  String get whatsInside => 'What\'s inside';
+
+  @override
+  String get allergens => 'Allergens';
+
+  @override
+  String get mayContain => 'may contain';
+
+  @override
+  String get noAllergens => 'No listed allergens';
+
+  @override
+  String get sharedKitchen => 'Cooked in a shared kitchen that uses wheat, milk, egg, soy, sesame and mustard. We can\'t guarantee zero cross-contact.';
+
+  @override
+  String allergyWarning(Object list) {
+    return 'Contains something on your allergy list: $list';
+  }
+
+  @override
+  String get nutrition => 'Nutrition (estimated)';
+
+  @override
+  String get nutritionNote => 'Estimated from our recipes, not lab-tested.';
+
+  @override
+  String spiceLevel(int n) {
+    return 'Spice $n/4';
+  }
+
+  @override
+  String get pickDay => 'Delivery day';
+
+  @override
+  String get noDays => 'No delivery days are open for this dabba right now.';
+
+  @override
+  String get offCompanyMenu => 'Not on your company\'s menu.';
+
+  @override
+  String get swaps => 'Chef-approved swaps';
+
+  @override
+  String get quantity => 'Quantity';
+
+  @override
+  String get cart => 'My dabbas';
+
+  @override
+  String get cartEmpty => 'Your cart is empty.';
+
+  @override
+  String get checkout => 'Checkout';
+
+  @override
+  String get deliverTo => 'Deliver to';
+
+  @override
+  String get addAddress => 'Add a delivery address';
+
+  @override
+  String get changeAddress => 'Change address';
+
+  @override
+  String get deliverySlot => 'Delivery time';
+
+  @override
+  String get anySlot => 'Usual lunch window';
+
+  @override
+  String get payWith => 'Pay with';
+
+  @override
+  String walletBalanceShort(Object amount) {
+    return 'Balance $amount';
+  }
+
+  @override
+  String get coupon => 'Coupon code';
+
+  @override
+  String get apply => 'Apply';
+
+  @override
+  String get notesForKitchen => 'Notes for the rider';
+
+  @override
+  String companyPays(Object company) {
+    return '$company pays';
+  }
+
+  @override
+  String get couponDiscount => 'Coupon';
+
+  @override
+  String get youPay => 'You pay';
+
+  @override
+  String get taxIncluded => 'Prices include VAT';
+
+  @override
+  String get placeOrder => 'Place order';
+
+  @override
+  String get fixProblems => 'Fix the highlighted items to continue.';
+
+  @override
+  String get orderPlaced => 'Order placed!';
+
+  @override
+  String get orderPlacedBody => 'We\'ll start cooking on the day. You\'ll see each dabba under Orders.';
+
+  @override
+  String get viewOrders => 'View my orders';
+
+  @override
+  String get payment => 'Payment';
+
+  @override
+  String payNow(Object amount) {
+    return 'Pay $amount now';
+  }
+
+  @override
+  String openingGateway(Object gateway) {
+    return 'Opening $gateway…';
+  }
+
+  @override
+  String get checkingPayment => 'Checking your payment with the gateway…';
+
+  @override
+  String get paymentPaid => 'Payment received. Thank you!';
+
+  @override
+  String get paymentFailed => 'The payment didn\'t go through. You can try again or pick another method.';
+
+  @override
+  String get paymentStillPending => 'We haven\'t heard from the gateway yet. If money left your account it will show here shortly — don\'t pay twice.';
+
+  @override
+  String get paymentExpired => 'This payment is no longer open.';
+
+  @override
+  String get checkAgain => 'Check again';
+
+  @override
+  String get switchMethod => 'Pay another way';
+
+  @override
+  String get bankDetails => 'Bank details';
+
+  @override
+  String get bankHelp => 'Transfer the exact amount, then upload a screenshot or photo of the receipt.';
+
+  @override
+  String get transferReference => 'Transfer reference / transaction ID';
+
+  @override
+  String get chooseReceipt => 'Choose receipt photo';
+
+  @override
+  String get takeReceiptPhoto => 'Take a photo';
+
+  @override
+  String get uploadProof => 'Send proof';
+
+  @override
+  String get proofSent => 'Proof received — we\'ll confirm it shortly.';
+
+  @override
+  String get awaitingVerification => 'Waiting for our team to verify your transfer.';
+
+  @override
+  String get cashNote => 'Pay the rider in cash when your dabba arrives.';
+
+  @override
+  String get gatewayTitle => 'Secure payment';
+
+  @override
+  String get ordersUpcoming => 'Upcoming';
+
+  @override
+  String get ordersPast => 'Past';
+
+  @override
+  String get noOrders => 'No orders here yet.';
+
+  @override
+  String orderNumber(Object number) {
+    return 'Order $number';
+  }
+
+  @override
+  String get items => 'Items';
+
+  @override
+  String get delivery => 'Delivery';
+
+  @override
+  String get timeline => 'Tracking';
+
+  @override
+  String changesUntil(Object time) {
+    return 'Changes allowed until $time';
+  }
+
+  @override
+  String get cancelOrder => 'Cancel order';
+
+  @override
+  String get cancelOrderBody => 'Paid money goes back as Dabba credit or a refund, per our policy.';
+
+  @override
+  String get skipMeal => 'Skip this day';
+
+  @override
+  String get unskipMeal => 'Bring it back';
+
+  @override
+  String get swapDabba => 'Swap dabba';
+
+  @override
+  String get swapTitle => 'Swap to another dabba';
+
+  @override
+  String swapPayMore(Object amount) {
+    return '+$amount to pay';
+  }
+
+  @override
+  String swapCredit(Object amount) {
+    return '$amount back as credit';
+  }
+
+  @override
+  String get swapSame => 'Same price';
+
+  @override
+  String get current => 'Current';
+
+  @override
+  String get payDifferenceWith => 'Pay the difference with';
+
+  @override
+  String get rateMeal => 'Rate this dabba';
+
+  @override
+  String get comment => 'Comment';
+
+  @override
+  String get thanksFeedback => 'Thanks for the feedback!';
+
+  @override
+  String get getHelp => 'Get help with this order';
+
+  @override
+  String get plansTitle => 'Meal plans';
+
+  @override
+  String get myPlans => 'My plans';
+
+  @override
+  String get perMeal => 'per meal';
+
+  @override
+  String get popular => 'Popular';
+
+  @override
+  String get deliveryIncluded => 'Delivery included';
+
+  @override
+  String get choosePlan => 'Choose this plan';
+
+  @override
+  String get startDate => 'Start date';
+
+  @override
+  String get deliveryDays => 'Delivery days';
+
+  @override
+  String minDays(int n) {
+    return 'At least $n days a week';
+  }
+
+  @override
+  String get weeks => 'Weeks';
+
+  @override
+  String get vegOnly => 'Vegetarian only';
+
+  @override
+  String get chefRotation => 'Dabbas follow the chef\'s rotation; you can swap any day before the cut-off.';
+
+  @override
+  String get subscribe => 'Start plan';
+
+  @override
+  String get planStarted => 'Your plan is set!';
+
+  @override
+  String planEnds(Object date) {
+    return 'Ends $date';
+  }
+
+  @override
+  String get savings => 'You save';
+
+  @override
+  String get noPlans => 'You don\'t have a meal plan yet.';
+
+  @override
+  String get planMeals => 'Meals';
+
+  @override
+  String get pausePlan => 'Pause';
+
+  @override
+  String get pauseFrom => 'Pause from';
+
+  @override
+  String get resumePlan => 'Resume';
+
+  @override
+  String get cancelPlan => 'Cancel plan';
+
+  @override
+  String get renewPlan => 'Renew';
+
+  @override
+  String get renewalExists => 'A renewal already exists for this plan.';
+
+  @override
+  String get addMeal => 'Add a meal';
+
+  @override
+  String get pendingSwapPayments => 'Swaps waiting for payment';
+
+  @override
+  String get policies => 'Policies';
+
+  @override
+  String pausedUntil(Object date) {
+    return 'Paused until $date';
+  }
+
+  @override
+  String get accountTitle => 'My account';
+
+  @override
+  String get addresses => 'Addresses';
+
+  @override
+  String get wallet => 'Dabba credit';
+
+  @override
+  String get payments => 'Payments';
+
+  @override
+  String get notifications => 'Notifications';
+
+  @override
+  String get referrals => 'Refer a friend';
+
+  @override
+  String get support => 'Help & support';
+
+  @override
+  String get profile => 'Profile';
+
+  @override
+  String get foodPreferences => 'Food preferences';
+
+  @override
+  String get notificationSettings => 'Notification settings';
+
+  @override
+  String get privacy => 'Privacy & data';
+
+  @override
+  String get security => 'Security';
+
+  @override
+  String get makeDefault => 'Make default';
+
+  @override
+  String get defaultAddress => 'Default';
+
+  @override
+  String get notCovered => 'We don\'t deliver here yet';
+
+  @override
+  String get covered => 'We deliver here';
+
+  @override
+  String get deleteAddressConfirm => 'Remove this address?';
+
+  @override
+  String get addressLabel => 'Label (e.g. Office)';
+
+  @override
+  String get addressType => 'Type';
+
+  @override
+  String get recipient => 'Recipient name';
+
+  @override
+  String get placeName => 'Building / company';
+
+  @override
+  String get line1 => 'Street / house';
+
+  @override
+  String get area => 'Area (e.g. Baneshwor)';
+
+  @override
+  String get ward => 'Ward';
+
+  @override
+  String get municipality => 'Municipality';
+
+  @override
+  String get city => 'City';
+
+  @override
+  String get landmark => 'Landmark';
+
+  @override
+  String get instructions => 'Delivery instructions';
+
+  @override
+  String get checkCoverage => 'Check coverage';
+
+  @override
+  String get atHOME => 'Home';
+
+  @override
+  String get atOFFICE => 'Office';
+
+  @override
+  String get atSHOP => 'Shop';
+
+  @override
+  String get atCOLLEGE => 'College';
+
+  @override
+  String get atSITE => 'Work site';
+
+  @override
+  String get atOTHER => 'Other';
+
+  @override
+  String get walletBalance => 'Balance';
+
+  @override
+  String get walletHistory => 'History';
+
+  @override
+  String get topUp => 'Add credit';
+
+  @override
+  String get topUpAmount => 'Amount (Rs)';
+
+  @override
+  String topUpLimits(Object min, Object max) {
+    return 'Between $min and $max';
+  }
+
+  @override
+  String get invalidAmount => 'Enter a valid amount';
+
+  @override
+  String get markAllRead => 'Mark all read';
+
+  @override
+  String get noNotifications => 'No notifications yet.';
+
+  @override
+  String get yourCode => 'Your code';
+
+  @override
+  String get friendsJoined => 'Friends';
+
+  @override
+  String get rewardsEarned => 'Rewards earned';
+
+  @override
+  String get haveFriendCode => 'Have a friend\'s code?';
+
+  @override
+  String get claim => 'Use code';
+
+  @override
+  String get referralsOff => 'Referrals aren\'t running right now.';
+
+  @override
+  String get newTicket => 'New request';
+
+  @override
+  String get subject => 'Subject';
+
+  @override
+  String get message => 'Message';
+
+  @override
+  String get category => 'Topic';
+
+  @override
+  String get send => 'Send';
+
+  @override
+  String get noTickets => 'No support requests. We usually answer within a working day.';
+
+  @override
+  String get ticketClosed => 'This conversation is closed. Open a new request if you need more help.';
+
+  @override
+  String get replyHint => 'Write a reply';
+
+  @override
+  String get tcORDER => 'Order';
+
+  @override
+  String get tcPAYMENT => 'Payment';
+
+  @override
+  String get tcDELIVERY => 'Delivery';
+
+  @override
+  String get tcFOOD => 'Food';
+
+  @override
+  String get tcACCOUNT => 'Account';
+
+  @override
+  String get tcCORPORATE => 'Company';
+
+  @override
+  String get tcGENERAL => 'Something else';
+
+  @override
+  String get marketingOptIn => 'Send me new menus and offers';
+
+  @override
+  String get phoneChangeNote => 'Changing your number means verifying it again.';
+
+  @override
+  String get diet => 'Diet';
+
+  @override
+  String get dietANY => 'Anything';
+
+  @override
+  String get dietEGG_OK => 'Veg + egg';
+
+  @override
+  String get spiceTolerance => 'Spice tolerance';
+
+  @override
+  String get myAllergies => 'My allergies (printed on your dabba label)';
+
+  @override
+  String get avoidOnionGarlic => 'Avoid onion & garlic';
+
+  @override
+  String get dietaryNotes => 'Notes for the kitchen';
+
+  @override
+  String get ntORDER_UPDATES => 'Order updates';
+
+  @override
+  String get ntPLAN_REMINDERS => 'Plan reminders';
+
+  @override
+  String get ntMARKETING => 'Menus & offers';
+
+  @override
+  String get chIN_APP => 'In app';
+
+  @override
+  String get chEMAIL => 'Email';
+
+  @override
+  String get chSMS => 'SMS';
+
+  @override
+  String get exportData => 'Download my data';
+
+  @override
+  String get exportDataBody => 'Everything we hold about you, as JSON you can save or share.';
+
+  @override
+  String get deleteAccount => 'Ask to delete my account';
+
+  @override
+  String get deleteAccountBody => 'Our team reviews deletion requests. Open orders, credit and invoices are settled first. Type DELETE to confirm.';
+
+  @override
+  String get privacyRequests => 'My requests';
+
+  @override
+  String get typeDelete => 'Type DELETE';
+
+  @override
   String get riderRoutesTitle => 'My routes';
 
   @override

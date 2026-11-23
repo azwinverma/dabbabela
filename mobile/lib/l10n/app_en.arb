@@ -152,6 +152,335 @@
       }
     }
   },
+  "tabHome": "Home",
+  "tabMenu": "Menu",
+  "tabPlans": "Plans",
+  "tabOrders": "Orders",
+  "tabAccount": "Account",
+  "hello": "Namaste, {name}",
+  "@hello": {
+    "placeholders": {
+      "name": {}
+    }
+  },
+  "todaysLunch": "Today's lunch",
+  "upcomingMeals": "Coming up",
+  "noUpcoming": "No meals booked. Pick something from this week's menu.",
+  "browseMenu": "See the menu",
+  "planProgress": "{done} of {total} meals delivered",
+  "@planProgress": {
+    "placeholders": {
+      "done": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "handOffCode": "Hand-off code",
+  "handOffHelp": "Tell this code to the rider when your dabba arrives.",
+  "companyMenu": "Showing your company's lunch menu ({company})",
+  "@companyMenu": {
+    "placeholders": {
+      "company": {}
+    }
+  },
+  "noMenu": "This week's menu isn't published yet",
+  "prevWeek": "Previous week",
+  "nextWeek": "Next week",
+  "orderBy": "Order by {time}",
+  "@orderBy": {
+    "placeholders": {
+      "time": {}
+    }
+  },
+  "orderClosed": "Ordering closed",
+  "kitchenClosed": "Kitchen closed",
+  "soldOut": "Sold out",
+  "onlyLeft": "Only {n} left",
+  "@onlyLeft": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "chefsPick": "Chef's pick",
+  "addToCart": "Add to my dabbas",
+  "addedToCart": "Added — {name}",
+  "@addedToCart": {
+    "placeholders": {
+      "name": {}
+    }
+  },
+  "whatsInside": "What's inside",
+  "allergens": "Allergens",
+  "mayContain": "may contain",
+  "noAllergens": "No listed allergens",
+  "sharedKitchen": "Cooked in a shared kitchen that uses wheat, milk, egg, soy, sesame and mustard. We can't guarantee zero cross-contact.",
+  "allergyWarning": "Contains something on your allergy list: {list}",
+  "@allergyWarning": {
+    "placeholders": {
+      "list": {}
+    }
+  },
+  "nutrition": "Nutrition (estimated)",
+  "nutritionNote": "Estimated from our recipes, not lab-tested.",
+  "spiceLevel": "Spice {n}/4",
+  "@spiceLevel": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "pickDay": "Delivery day",
+  "noDays": "No delivery days are open for this dabba right now.",
+  "offCompanyMenu": "Not on your company's menu.",
+  "swaps": "Chef-approved swaps",
+  "quantity": "Quantity",
+  "cart": "My dabbas",
+  "cartEmpty": "Your cart is empty.",
+  "checkout": "Checkout",
+  "deliverTo": "Deliver to",
+  "addAddress": "Add a delivery address",
+  "changeAddress": "Change address",
+  "deliverySlot": "Delivery time",
+  "anySlot": "Usual lunch window",
+  "payWith": "Pay with",
+  "walletBalanceShort": "Balance {amount}",
+  "@walletBalanceShort": {
+    "placeholders": {
+      "amount": {}
+    }
+  },
+  "coupon": "Coupon code",
+  "apply": "Apply",
+  "notesForKitchen": "Notes for the rider",
+  "companyPays": "{company} pays",
+  "@companyPays": {
+    "placeholders": {
+      "company": {}
+    }
+  },
+  "couponDiscount": "Coupon",
+  "youPay": "You pay",
+  "taxIncluded": "Prices include VAT",
+  "placeOrder": "Place order",
+  "fixProblems": "Fix the highlighted items to continue.",
+  "orderPlaced": "Order placed!",
+  "orderPlacedBody": "We'll start cooking on the day. You'll see each dabba under Orders.",
+  "viewOrders": "View my orders",
+  "payment": "Payment",
+  "payNow": "Pay {amount} now",
+  "@payNow": {
+    "placeholders": {
+      "amount": {}
+    }
+  },
+  "openingGateway": "Opening {gateway}…",
+  "@openingGateway": {
+    "placeholders": {
+      "gateway": {}
+    }
+  },
+  "checkingPayment": "Checking your payment with the gateway…",
+  "paymentPaid": "Payment received. Thank you!",
+  "paymentFailed": "The payment didn't go through. You can try again or pick another method.",
+  "paymentStillPending": "We haven't heard from the gateway yet. If money left your account it will show here shortly — don't pay twice.",
+  "paymentExpired": "This payment is no longer open.",
+  "checkAgain": "Check again",
+  "switchMethod": "Pay another way",
+  "bankDetails": "Bank details",
+  "bankHelp": "Transfer the exact amount, then upload a screenshot or photo of the receipt.",
+  "transferReference": "Transfer reference / transaction ID",
+  "chooseReceipt": "Choose receipt photo",
+  "takeReceiptPhoto": "Take a photo",
+  "uploadProof": "Send proof",
+  "proofSent": "Proof received — we'll confirm it shortly.",
+  "awaitingVerification": "Waiting for our team to verify your transfer.",
+  "cashNote": "Pay the rider in cash when your dabba arrives.",
+  "gatewayTitle": "Secure payment",
+  "ordersUpcoming": "Upcoming",
+  "ordersPast": "Past",
+  "noOrders": "No orders here yet.",
+  "orderNumber": "Order {number}",
+  "@orderNumber": {
+    "placeholders": {
+      "number": {}
+    }
+  },
+  "items": "Items",
+  "delivery": "Delivery",
+  "timeline": "Tracking",
+  "changesUntil": "Changes allowed until {time}",
+  "@changesUntil": {
+    "placeholders": {
+      "time": {}
+    }
+  },
+  "cancelOrder": "Cancel order",
+  "cancelOrderBody": "Paid money goes back as Dabba credit or a refund, per our policy.",
+  "skipMeal": "Skip this day",
+  "unskipMeal": "Bring it back",
+  "swapDabba": "Swap dabba",
+  "swapTitle": "Swap to another dabba",
+  "swapPayMore": "+{amount} to pay",
+  "@swapPayMore": {
+    "placeholders": {
+      "amount": {}
+    }
+  },
+  "swapCredit": "{amount} back as credit",
+  "@swapCredit": {
+    "placeholders": {
+      "amount": {}
+    }
+  },
+  "swapSame": "Same price",
+  "current": "Current",
+  "payDifferenceWith": "Pay the difference with",
+  "rateMeal": "Rate this dabba",
+  "comment": "Comment",
+  "thanksFeedback": "Thanks for the feedback!",
+  "getHelp": "Get help with this order",
+  "plansTitle": "Meal plans",
+  "myPlans": "My plans",
+  "perMeal": "per meal",
+  "popular": "Popular",
+  "deliveryIncluded": "Delivery included",
+  "choosePlan": "Choose this plan",
+  "startDate": "Start date",
+  "deliveryDays": "Delivery days",
+  "minDays": "At least {n} days a week",
+  "@minDays": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "weeks": "Weeks",
+  "vegOnly": "Vegetarian only",
+  "chefRotation": "Dabbas follow the chef's rotation; you can swap any day before the cut-off.",
+  "subscribe": "Start plan",
+  "planStarted": "Your plan is set!",
+  "planEnds": "Ends {date}",
+  "@planEnds": {
+    "placeholders": {
+      "date": {}
+    }
+  },
+  "savings": "You save",
+  "noPlans": "You don't have a meal plan yet.",
+  "planMeals": "Meals",
+  "pausePlan": "Pause",
+  "pauseFrom": "Pause from",
+  "resumePlan": "Resume",
+  "cancelPlan": "Cancel plan",
+  "renewPlan": "Renew",
+  "renewalExists": "A renewal already exists for this plan.",
+  "addMeal": "Add a meal",
+  "pendingSwapPayments": "Swaps waiting for payment",
+  "policies": "Policies",
+  "pausedUntil": "Paused until {date}",
+  "@pausedUntil": {
+    "placeholders": {
+      "date": {}
+    }
+  },
+  "accountTitle": "My account",
+  "addresses": "Addresses",
+  "wallet": "Dabba credit",
+  "payments": "Payments",
+  "notifications": "Notifications",
+  "referrals": "Refer a friend",
+  "support": "Help & support",
+  "profile": "Profile",
+  "foodPreferences": "Food preferences",
+  "notificationSettings": "Notification settings",
+  "privacy": "Privacy & data",
+  "security": "Security",
+  "makeDefault": "Make default",
+  "defaultAddress": "Default",
+  "notCovered": "We don't deliver here yet",
+  "covered": "We deliver here",
+  "deleteAddressConfirm": "Remove this address?",
+  "addressLabel": "Label (e.g. Office)",
+  "addressType": "Type",
+  "recipient": "Recipient name",
+  "placeName": "Building / company",
+  "line1": "Street / house",
+  "area": "Area (e.g. Baneshwor)",
+  "ward": "Ward",
+  "municipality": "Municipality",
+  "city": "City",
+  "landmark": "Landmark",
+  "instructions": "Delivery instructions",
+  "checkCoverage": "Check coverage",
+  "atHOME": "Home",
+  "atOFFICE": "Office",
+  "atSHOP": "Shop",
+  "atCOLLEGE": "College",
+  "atSITE": "Work site",
+  "atOTHER": "Other",
+  "walletBalance": "Balance",
+  "walletHistory": "History",
+  "topUp": "Add credit",
+  "topUpAmount": "Amount (Rs)",
+  "topUpLimits": "Between {min} and {max}",
+  "@topUpLimits": {
+    "placeholders": {
+      "min": {},
+      "max": {}
+    }
+  },
+  "invalidAmount": "Enter a valid amount",
+  "markAllRead": "Mark all read",
+  "noNotifications": "No notifications yet.",
+  "yourCode": "Your code",
+  "friendsJoined": "Friends",
+  "rewardsEarned": "Rewards earned",
+  "haveFriendCode": "Have a friend's code?",
+  "claim": "Use code",
+  "referralsOff": "Referrals aren't running right now.",
+  "newTicket": "New request",
+  "subject": "Subject",
+  "message": "Message",
+  "category": "Topic",
+  "send": "Send",
+  "noTickets": "No support requests. We usually answer within a working day.",
+  "ticketClosed": "This conversation is closed. Open a new request if you need more help.",
+  "replyHint": "Write a reply",
+  "tcORDER": "Order",
+  "tcPAYMENT": "Payment",
+  "tcDELIVERY": "Delivery",
+  "tcFOOD": "Food",
+  "tcACCOUNT": "Account",
+  "tcCORPORATE": "Company",
+  "tcGENERAL": "Something else",
+  "marketingOptIn": "Send me new menus and offers",
+  "phoneChangeNote": "Changing your number means verifying it again.",
+  "diet": "Diet",
+  "dietANY": "Anything",
+  "dietEGG_OK": "Veg + egg",
+  "spiceTolerance": "Spice tolerance",
+  "myAllergies": "My allergies (printed on your dabba label)",
+  "avoidOnionGarlic": "Avoid onion & garlic",
+  "dietaryNotes": "Notes for the kitchen",
+  "ntORDER_UPDATES": "Order updates",
+  "ntPLAN_REMINDERS": "Plan reminders",
+  "ntMARKETING": "Menus & offers",
+  "chIN_APP": "In app",
+  "chEMAIL": "Email",
+  "chSMS": "SMS",
+  "exportData": "Download my data",
+  "exportDataBody": "Everything we hold about you, as JSON you can save or share.",
+  "deleteAccount": "Ask to delete my account",
+  "deleteAccountBody": "Our team reviews deletion requests. Open orders, credit and invoices are settled first. Type DELETE to confirm.",
+  "privacyRequests": "My requests",
+  "typeDelete": "Type DELETE",
   "riderRoutesTitle": "My routes",
   "riderNoRoutes": "No routes for this day.",
   "riderStopsProgress": "{done} of {total} stops done",
