@@ -123,7 +123,9 @@ reports reconcile with order records. Everything below still needs the owner or 
 - [ ] Turnstile keys set (`/api/health` → `turnstile: true`); sign up / log in once on production to confirm the widget passes
 - [ ] Sentry DSN set (`sentry: true`); trigger a test error on staging and check the event has no email/phone/payment reference
 - [ ] Browser console on home, menu, checkout, login, admin and rider shows no CSP violations (the `e2e/security.spec.ts` check, against staging)
-- [ ] Approval threshold reviewed in Settings; at least two staff hold "approvals → approve"
+- [ ] Approval threshold and per-staff 24 h money limit reviewed in Settings; at least two staff hold "approvals → approve" (gateway/bank/cash refunds are paid out by someone other than the requester)
+- [ ] Live eSewa/Khalti URLs set (`/api/health` → `paymentsConfig.ok: true`, `integrations.esewa/khalti: true`)
+- [ ] Every chef / store keeper / dispatcher / rider account has a kitchen (unassigned kitchen staff see no kitchen)
 - [ ] Staging verified (section above), including the acceptance E2E
 - [ ] Brand cleared: trademark search, `.com.np` domain, social handles (name is provisional)
 - [ ] Company registration, PAN/VAT; tax advice on VAT rate, invoice format and IRD rules; enter legal name and PAN in Settings; enable the VAT tax rule only after VAT registration

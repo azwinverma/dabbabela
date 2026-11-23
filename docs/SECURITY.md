@@ -135,11 +135,43 @@
   `adjustOrderTx`). EXECUTED at most once (racing approvers: one wins; `idempotencyKey` is unique and a retried submit returns the
   same request). Failures are stored as FAILED with the error and can be retried. A refund created by an approval is already
   APPROVED (approvedBy = checker) and still needs proof to be processed.
-* Safety net for refunds created by other paths (e.g. cancel with a REFUND settlement): `approveRefund` refuses a refund ≥ the
-  threshold when the approver is its requester.
+* Safety net for refunds created by other paths (e.g. cancel with a REFUND settlement): `approveRefund` refuses self-approval when
+  the refund — alone or summed with the payment's other refunds — reaches the threshold, or the approver is over their 24 h limit.
+* Since the 2026-11-23 security fixes the trigger is not only the single amount: refunds summed per payment and a rolling-24 h
+  per-person limit (`staffDailyMoneyLimit`) also route to approval, and gateway/bank/cash refunds are paid out by someone other than
+  the requester (see "Security review fixes").
 * Everything audited (`approval.request/approve/reject/cancel/execute/failed`); approvers notified in-app + email outbox
   (`approval.requested`), requester told the outcome (`approval.decided`); alert detector `approvals` flags requests pending
   > 4 h (critical > 24 h) and FAILED executions.
+
+## Security review fixes (2026-11-23)
+An independent review of the money paths (HEAD `0c4ab02`) reported 1 critical, 4 high, 4 medium and 10 low findings, most
+reproduced with proof-of-concept tests. All are **fixed**; each has a regression test that failed before the fix and passes after
+(`tests/integration/security-money.test.ts`, `tests/integration/security-access.test.ts`; concurrency tests use `Promise.all`).
+Shared building blocks: `lockPayment` / `expireOpenAttempts` (`src/server/payments/attempts.ts`) and the maker-checker limits
+(`src/server/money-limits.ts`). Lock order everywhere: plan (`sub:`) → payment (`pay:`) → refund requests (`refund:`) → user ledger.
+
+| # | Finding | Status | How |
+|---|---|---|---|
+| C1 | Parallel plan cancels credited the plan N times; REFUND settlements wrote unchecked refunds; payout never re-checked the cap | Fixed | `cancelSubscription` is ONE transaction under the plan lock: guarded flip of the plan (`status NOT IN (CANCELLED, COMPLETED)`, count 0 → error), guarded flip of each meal, money computed only from meals actually flipped (per payment), refunds via `requestRefundTx` (wallet-paid → `WALLET_CREDIT`). `processRefund` takes the payment + refund locks and refuses when this refund + the other approved ones exceed `amount − refundedAmount` (and per order); `bumpPaymentRefund` is atomic under the payment lock and never lets `refundedAmount > amount`. `cancelOrder`'s REFUND path also goes through `requestRefundTx`. |
+| H1 | Cancel part of an unpaid multi-day order, pay the original gateway amount → cancelled share AND overpayment credited, plus a paid meal | Fixed | Any change of `payment.amount` (order/plan cancel, DUE_LATER swap, method switch, top-up cancel) expires the open gateway sessions. `markPaymentPaid` computes the credit ONCE: surplus = verified amount − what the still-live orders owe, attributed to late / cancelled orders first, then plain overpayment; `Payment.amount` records the money actually received. An order is PAID only when covered. |
+| H2 | Parallel skips credited a meal N times (CREDIT) or appended N meals (EXTEND); unskip had the same race | Fixed | `skipMeal` / `unskipMeal`: guarded status flip (status + version, count checked) and the credit / appended meal in the same transaction under the plan lock. |
+| H3 | `orders.edit` holders could mint unlimited wallet credit with repeated negative order adjustments | Fixed | Negative adjustments capped at the order's remaining customer share (`adjustableCredit`: share − refunded − open refunds − earlier negative adjustments) under a per-order lock; need `refunds.create`; count toward the per-person 24 h limit; the same cap applies to approved executions. |
+| H4 | One finance user could request, self-approve and pay out a large refund split below the threshold; credits unbounded; no customer scope | Fixed | Approval is needed when an action would reach the threshold alone, **or summed with the refunds already on the same payment** (requested + approved + processed), **or** the person's rolling-24 h total of refunds + manual credits + credit-creating adjustments would reach `staffDailyMoneyLimit` (new setting, default Rs 5,000, on /admin/settings next to the threshold; credits executed from an approved request don't count). Checked under a per-actor lock in the same transaction as the write (`assertWithinStaffLimits` → `NeedsApprovalError` → the action files an ApprovalRequest). Self-approval of a refund follows the same rules. **Segregation of duties:** a gateway/bank/cash refund is paid out by someone other than its requester (super admins included). **Closed loop:** a wallet-paid payment refunds only as `WALLET_CREDIT`. Manual credits (`adjustCreditAction`, `issueCredit`) go only to customer accounts, inside the actor's kitchen scope, under the same limits. |
+| M1 | A stale gateway session paid off a payment whose amount had grown (DUE_LATER swap after a cash switch) | Fixed | `markPaymentPaid` refuses any verified amount below the current `payment.amount`, for every purpose: nothing flips, the attempt is marked `MISMATCH`, a GATEWAY_MISMATCH alert is raised, the payment stays pending. Method switches expire started sessions. |
+| M2 | Cancel-and-restart top-ups bypassed the daily limit and the balance cap; yesterday's pending top-ups dropped out of the cap | Fixed | Cancelling a top-up expires its sessions; a cancelled top-up that is still paid at the gateway is **refused + alerted** (finance refunds it at the gateway — chosen over "credit if limits allow" so limits can't be raced). Pending top-ups (and failed ones with an open session) count toward the cap whatever day they were started. |
+| M3 | A rider could brute-force the 4-digit hand-off code | Fixed | Wrong codes are counted per order (the existing `DeliveryEvent` log, no schema change) under a per-order lock: 5 wrong codes lock the stop (`delivery.otp_locked` audit, API `423 HANDOFF_LOCKED`) until a dispatcher unlocks it on the dispatch board (`delivery.otp_unlock`, audited) or confirms the hand-off themselves (`delivery.otp_override`, audited). Code tries are also rate-limited per rider (30 / 10 min, fail closed) on the web action and the API. |
+| M4 | Staff with no kitchen assigned got every kitchen | Fixed | `kitchenScope` is role-aware: kitchen-bound staff (chef/kitchen staff, store keeper, dispatcher, rider, and support/content/menu accounts whose custom role adds kitchen/dispatch/rider/inventory permissions) with no kitchen get `[]` = no kitchen. Owner, super admin, operations manager and finance stay business-wide. Approval requests without a kitchen can only be decided (and are only listed for) approvers with all-kitchen scope. Demo kitchen staff are seeded with the kitchen. |
+| L1 | Voiding a partly applied supplier credit let the same return be credited again | Fixed | VOID credits keep covering their returns in `uncreditedReturnValue` (void writes off the remainder; the return stays used). |
+| L2 | Per-IP limits trusted the first `X-Forwarded-For` value; limiter failed open | Fixed | `clientIpFrom`: on Vercel `x-vercel-forwarded-for` / `x-real-ip`, otherwise the right-most XFF hop (`TRUSTED_PROXY_HOPS`, default 1). Auth, OTP, 2FA, hand-off and money buckets fail closed on a limiter error (browsing fails open). 2FA verify is limited per IP **and** per challenge (web: hash of the signed `two_factor` cookie; API: hash of the challenge token). |
+| L3 | `/api/v1/auth/sign-up` had no bot check | Fixed (alternative) | The app can't render Turnstile, so the API uses stricter limits instead: web sign-up limit per IP + 3 per hour per IP and per email. TODO: app attestation (Play Integrity / App Attest). |
+| L4 | Turnstile accepted a token with no `action` | Fixed | When an action is expected the response must carry exactly that action. |
+| L5 | eSewa/Khalti endpoints defaulted to sandbox in production | Fixed | Live mode (production without `PAYMENTS_SANDBOX=true`) never defaults to sandbox URLs or keys; a gateway with an unset or sandbox-host endpoint is switched off and `/api/health` reports `paymentsConfig.ok: false` with the problem. |
+| L6 | Two parallel switches to WALLET debited twice | Fixed | The switch locks the payment, re-reads it, debits and marks paid in one transaction. |
+| L7 | Push tokens silently moved to whichever account registered them | Fixed | The move is kept (shared phones) but audited (`device.moved`) and the previous account gets an in-app security notice. |
+| L8 | `apiOrigin` trusted `X-Forwarded-Host` | Fixed | `NEXT_PUBLIC_SITE_URL`, then `BETTER_AUTH_URL`; X-Forwarded-Host only outside production. |
+| L9 | Idempotency claim went stale after 2 min | Fixed | Stale after 6 min (longer than any function can run), and skip / cancel / swap / deliver are guarded state transitions, so a re-run can't double-apply. |
+| L10 | Refunds ignored closed-loop credit | Fixed | See H4: wallet-paid → credit only, in `requestRefundTx` and again at payout. |
 
 ## Payments
 * Prices recomputed on the server for every quote and order; client totals are ignored.
@@ -170,12 +202,13 @@
 * A verified amount that differs from the top-up is **never credited**: the payment stays unpaid, a `MISMATCH` provider event is stored
   and a CRITICAL `GATEWAY_MISMATCH` alert is raised immediately (same dedupe key as the detector sweep).
 * Limits are server-side, under the customer's lock: min / max per top-up, daily total (PAID + PENDING top-ups created in the Kathmandu
-  day) and balance cap (balance + today's pending top-ups + amount). Idempotency key per submit; a key belonging to another customer is
+  day) and balance cap (balance + every still-payable top-up + amount). Idempotency key per submit; a key belonging to another customer is
   refused (never returns their payment). Only eSewa / Khalti / bank can buy credit (never wallet or cash).
 * Refunds of a top-up go to the source only (no wallet-credit refund), only up to the unspent part (re-checked under the user's lock at
   processing, so a spend since the request can't push the balance negative), and post a negative `TOPUP_REVERSAL` row. Staff actions
-  (bank verification → `wallet.topup_verify`, refund request/approve/process) are audited. Maker-checker for refunds above the
-  approval threshold is Phase 2B (TODO hook in `requestRefund`).
+  (bank verification → `wallet.topup_verify`, refund request/approve/process) are audited; refunds follow the maker-checker limits.
+* A cancelled top-up is never credited: cancelling expires its gateway sessions, and money still confirmed for it is refused and
+  raises a GATEWAY_MISMATCH alert for a refund at the gateway. Pending top-ups count toward the balance cap whatever day they started.
 * Detectors: stuck pending top-ups, paid top-ups without a credit row, balances above the cap, more than 5 top-ups per customer per day,
   gateway mismatches. Unpaid top-ups are not receivables; paid top-ups are cash in but a liability (`liability.customer_credit` in the
   journal), recognised as sales only when the credit pays for orders.
@@ -248,7 +281,12 @@ zone (fixed in WP-20 for reports, analytics, exports and dish capacity; the reco
 * No WAF (Vercel Firewall rules are a dashboard setting, not code).
 * No penetration test yet; reviews are code review + the automated guard/IDOR tests.
 * `style-src` still allows `'unsafe-inline'` (styles can't execute code; React style attributes need it).
-* Rate limiting keys on `x-forwarded-for` (set by Vercel); behind another proxy configure it to pass the client IP.
+* Rate limiting keys on the platform client IP (Vercel headers) or the right-most `X-Forwarded-For` hop; off Vercel the app must sit
+  behind a proxy that appends the client IP (`TRUSTED_PROXY_HOPS` = number of such proxies). The limiter is fixed-window (a burst of up
+  to 2× at a window edge).
+* Mobile sign-up relies on stricter rate limits instead of a bot challenge until app attestation is added.
+* Plan-cancel REFUND settlements set the cancelled meals' `refundedAmount` when the request is created (as before); a rejected
+  request leaves that figure overstated — finance should then settle the meals by credit.
 * Plan quotes (`quotePlanLengthAction`) don't count wrong coupon codes yet (cart quotes do).
 * Payment-proof uploads are stored in Vercel Blob with `access: "public"` (unguessable URL, not authenticated) — move to private
   blobs/signed URLs when the plan allows.

@@ -1,10 +1,30 @@
 # Implementation status
 
-_Last updated: 2026-11-23 (Phase 4 Flutter app; Phase 3 mobile API; Phase 2C business gaps; earlier: WP-20 acceptance, security and performance pass)._ This is an honest status.
+_Last updated: 2026-11-23 (security review fixes; Phase 4 Flutter app; Phase 3 mobile API; Phase 2C business gaps; earlier: WP-20 acceptance, security and performance pass)._ This is an honest status.
 "Done" means the flow works against a real Postgres database and the checks listed below cover it.
 **This is not a production-readiness claim.** The app is deployed to Vercel (https://dabbabela.vercel.app) in
 sandbox mode only. There is no production domain, no live payment merchant keys, and no SMS or email provider.
 The external blockers listed further down are still open.
+
+## Security review fixes — money paths (2026-11-23)
+An independent review of HEAD `0c4ab02` found 1 critical, 4 high, 4 medium and 10 low issues (most reproduced with PoC tests).
+All fixed; details and the per-finding "how" are in `docs/SECURITY.md` → "Security review fixes".
+| Item | Status | Notes |
+|---|---|---|
+| C1 plan cancel race / unchecked refunds / payout cap | ✅ | One guarded transaction under a plan lock; refunds via `requestRefundTx`; `processRefund` and `bumpPaymentRefund` re-check the cap under the payment lock |
+| H1 / M1 stale gateway amount (double credit, free meal, underpayment) | ✅ | Gateway sessions expire on any amount/method change; `markPaymentPaid` refuses underpayment (alert) and credits the surplus once |
+| H2 skip / unskip race | ✅ | Guarded flip + credit/append in one transaction |
+| H3 / H4 / L10 credit minting, threshold splitting, self-processing, cash-out of credit | ✅ | Per-order adjustment cap; refunds summed per payment; per-person rolling-24 h `staffDailyMoneyLimit` (Settings, default Rs 5,000); payout ≠ requester for gateway/bank/cash; wallet-paid → credit only; manual credit to customers in scope only |
+| M2 top-up limit bypass | ✅ | Cancelled top-ups never credited (refused + GATEWAY_MISMATCH alert → refund at the gateway); pending top-ups of any day count toward the cap |
+| M3 hand-off code brute force | ✅ | 5 wrong codes lock the stop (API 423 `HANDOFF_LOCKED`); dispatcher unlock on the dispatch board (audited); per-rider limit |
+| M4 unassigned staff = all kitchens | ✅ | Kitchen-bound staff without a kitchen get none; no-kitchen approvals need all-kitchen approvers; demo staff seeded with the kitchen. **Existing deployments:** assign a kitchen to every chef / store keeper / dispatcher / rider account before deploying (they otherwise see no kitchen) |
+| Lows L1–L9 | ✅ | Supplier-credit void, client IP + fail-closed limits + 2FA per challenge, API sign-up limits (attestation TODO), Turnstile action, no sandbox defaults live (health flag), wallet switch race, audited device moves, `apiOrigin`, idempotency stale window |
+| Schema | — | No schema change or migration |
+
+_Checks (2026-11-23): `tsc` 0 errors; eslint 0 errors (same 7 warnings); Vitest **526 / 526** in **49** files, two consecutive green runs
+(30 new tests in `tests/integration/security-money.test.ts` (18) and `security-access.test.ts` (12) — all 30 failed against the pre-fix
+code; one earlier run had a one-off failure in `integration-pass` "distance fee bands" that did not reproduce); review PoCs no
+longer exploit; `next build` ✅; Playwright full suite against that production build on :3400 — **46 / 46**._
 
 ## Mobile app — Phase 4 Flutter (2026-11-23)
 | Item | Status | Notes |
@@ -181,7 +201,7 @@ section is in [FEATURE_AUDIT.md](FEATURE_AUDIT.md#final-status-2026-11-20). Each
 4. There is no food photography; illustrated dabbas are used.
 5. ~~The CSP allows `'unsafe-inline'` scripts~~ — nonce-based CSP since Phase 2B (styles still allow inline).
 6. Sentry and Turnstile are built (Phase 2B) but inactive until the owner creates the accounts and sets the keys.
-7. No penetration test has been done. Security review is code review plus automated guard and IDOR tests.
+7. No penetration test has been done. Security review is code review plus automated guard and IDOR tests, and one independent money-path review (2026-11-23, all findings fixed).
 8. Performance has been checked by code review and index coverage only. There's no load test, and no `EXPLAIN` on production-sized data.
 9. The local dev database holds old demo/test rows (E2E orders, "Acceptance …" dishes and dabbas, test plans).
 

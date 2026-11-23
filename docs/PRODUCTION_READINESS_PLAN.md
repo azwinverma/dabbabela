@@ -134,3 +134,39 @@ Branch `worktree-agent-a57e199ea4420ea7b` (from main `77a3eb4`). No backend or w
 
 Checks: `flutter analyze` **0 issues**; `flutter test` **55 tests pass** (API client: envelope, error mapping, 401, idempotency reuse/release/persist; model JSON against spec-shaped payloads; widgets: sign-in + 2FA, menu, checkout quote + place order, rider deliver dialog, role routing from `/me`, 401 → sign-in); `flutter build web --release` compiles (sanity only, output deleted). Root `npx tsc --noEmit` 0 errors, `npx eslint .` 0 errors (7 old warnings).
 Not done / owner: run on real Android + iOS devices; Android/iOS release builds (disk space); gateway sandbox end-to-end in the webview; Firebase project + FCM/APNs (and server-side push sending); store accounts, signing keys, listings, privacy/data-safety forms; Nepali copy review; generate launcher icons.
+
+### 2026-11-23 — Security fixes: money-path review (done)
+
+Worked on `main` (no worktree). Input: an independent review of `0c4ab02` with proof-of-concept tests. No schema change.
+
+| Finding | Fix | Regression test |
+|---|---|---|
+| C1 plan cancel race (N× credit, unchecked refunds, payout cap) | `cancelSubscription` = one transaction under `sub:` lock, guarded plan + meal flips, money from flipped meals per payment, refunds via `requestRefundTx`; `processRefund` re-checks (approved total ≤ amount − refunded) under payment + refund locks; atomic `bumpPaymentRefund` | security-money › C1 (3 tests) |
+| H1 partial cancel + stale gateway amount | `expireOpenAttempts` on every amount/method change; `markPaymentPaid` computes surplus once (verified − owed by live orders) | security-money › H1 (2) |
+| H2 skip / unskip race | guarded flip + credit / append in one transaction under the plan lock | security-money › H2 (2) |
+| M1 stale attempt for a grown amount | underpayment refused for every purpose (attempt → MISMATCH, alert, payment stays pending); method switch expires sessions | security-money › M1 (2) |
+| M2 top-up limit bypass | cancel expires sessions; cancelled top-up refused + alert (chosen over "credit if limits allow"); still-payable top-ups of any day count toward the cap | security-money › M2 (2) |
+| H3 order adjustments minting credit | `adjustableCredit` cap under a per-order lock; negative adjustment needs `refunds.create`; counts toward the 24 h limit | security-money › H3 |
+| H4 splitting / self-processing / credits | `money-limits.ts`: threshold alone or summed per payment, per-person rolling-24 h `staffDailyMoneyLimit` (new setting on /admin/settings, default Rs 5,000) under a per-actor lock → approval request; payout ≠ requester for ORIGINAL/BANK/CASH; wallet-paid refunds as credit only (L10); manual credit to customers in the actor's scope | security-money › H4 (5) |
+| L6 wallet switch race | lock + re-read + debit + mark paid in one transaction | security-money › L6 |
+| M3 hand-off brute force | 5 wrong codes lock the stop (DeliveryEvent counter, per-order lock), `423 HANDOFF_LOCKED`, audited unlock / override, per-rider limit | security-access › M3 |
+| M4 kitchen scope fail-open | role-aware `kitchenScope` ([] for kitchen-bound staff without a kitchen); no-kitchen approvals need all-kitchen approvers; seed assigns demo staff | security-access › M4 (2), security-money › H4 scope |
+| L1 supplier credit void | void credits still cover their returns | security-access › L1 |
+| L2 IP / fail-open / 2FA | `clientIpFrom` (platform header, right-most hop), fail-closed auth/money buckets, 2FA per challenge | security-access › L2 (3) |
+| L3 API sign-up | stricter per-IP + per-email limits (no Turnstile possible in the app; attestation TODO) | security-access › L2 sign-up |
+| L4 Turnstile action | exact action required | security-access › L4 |
+| L5 sandbox defaults | live mode: no sandbox defaults; gateway off + `paymentsConfig` in health | security-access › L5 |
+| L7 device token move | audited + in-app notice to the old account | security-access › L7 |
+| L8 `apiOrigin` | configured URL; X-Forwarded-Host only outside production | security-access › L8 |
+| L9 idempotency stale claim | 6 min + guarded transitions underneath | (covered by the C1/H2 concurrency tests) |
+
+Existing tests updated for the new rules: approvals (raw-path refunds where a staff request would now route to approval), commerce and
+wallet-topup (a second finance user pays out), kitchen-mgmt (chef starts without a kitchen). E2E `refunds.spec` now pays the refunded
+order cash-on-delivery (fixture) and checks that a wallet-paid order can't be refunded to a bank. OpenAPI: `423 HANDOFF_LOCKED`,
+sign-up / 2FA / devices notes.
+
+Checks: `tsc` 0 errors; eslint 0 errors (7 old warnings); Vitest **526 / 526** in 49 files, two consecutive green runs (all 30 new tests
+fail on the pre-fix code); review PoCs no longer exploit (F1–F3 assertions now fail, F1b credits exactly the cancelled shares, F4/F4b
+credit nothing for cancelled top-ups, F5/F6 refused); `next build` ✅; Playwright **46 / 46** against that build on :3400.
+Deploy note: assign a kitchen to every chef / store keeper / dispatcher / rider account first (unassigned kitchen staff now see no
+kitchen). Left: app attestation for API sign-up; the limiter stays fixed-window.
