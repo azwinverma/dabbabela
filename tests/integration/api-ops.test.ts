@@ -194,7 +194,7 @@ describe("dispatcher", () => {
   });
 
   it("auto-group answers for an empty day", async () => {
-    const r = await call(autoGroup.POST, "POST", "/dispatch/auto-group", { token: tokens.dispatcher, body: { kitchenId, date: serviceDay(40, 0) } });
+    const r = await call(autoGroup.POST, "POST", "/dispatch/auto-group", { token: tokens.dispatcher, body: { kitchenId, date: serviceDay(300, 0) } }); // far ahead: other files book orders ~40 days out
     expect(r.status).toBe(200);
     expect(r.body.data).toEqual({ routes: 0, stops: 0 });
   });

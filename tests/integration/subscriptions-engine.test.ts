@@ -325,13 +325,14 @@ describe("per-plan policies", () => {
     const staffOnly = await freshPlan("wp06-cancel-staff", { cancelPolicy: "STAFF_ONLY" });
     const refund = await freshPlan("wp06-cancel-refund", { cancelPolicy: "REFUND" });
     const { user, addressId } = await customer(C);
-    const s1 = await createSubscription(user, { planId: staffOnly.id, startDate: serviceDay(5), days: ["WED"], addressId, method: "ESEWA" });
+    // several days: another file's bandh test may close one of them (date-dependent collision otherwise)
+    const s1 = await createSubscription(user, { planId: staffOnly.id, startDate: serviceDay(5), days: ["TUE", "WED", "THU"], addressId, method: "ESEWA" });
     await markPaymentPaid(s1.payment.id, { amount: s1.payment.amount });
     await expect(cancelSubscription(s1.subscription.id, { id: user.id, isStaff: false }, { userId: user.id, reason: "nope" })).rejects.toThrow(/contact support/);
     const staff = await cancelSubscription(s1.subscription.id, { id: user.id, isStaff: true }, { reason: "support call" });
     expect(staff.cancelled).toBeGreaterThan(0);
 
-    const s2 = await createSubscription(user, { planId: refund.id, startDate: serviceDay(5), days: ["WED"], addressId, method: "ESEWA" });
+    const s2 = await createSubscription(user, { planId: refund.id, startDate: serviceDay(5), days: ["TUE", "WED", "THU"], addressId, method: "ESEWA" });
     await markPaymentPaid(s2.payment.id, { amount: s2.payment.amount });
     const wallet = await walletBalance(user.id);
     const c = await cancelSubscription(s2.subscription.id, { id: user.id, isStaff: false }, { userId: user.id, reason: "moving away" });
