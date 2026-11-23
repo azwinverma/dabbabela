@@ -1,10 +1,24 @@
 # Implementation status
 
-_Last updated: 2026-11-21 (Phase 3 mobile API; Phase 2C business gaps; earlier: WP-20 acceptance, security and performance pass)._ This is an honest status.
+_Last updated: 2026-11-23 (Phase 4 Flutter app; Phase 3 mobile API; Phase 2C business gaps; earlier: WP-20 acceptance, security and performance pass)._ This is an honest status.
 "Done" means the flow works against a real Postgres database and the checks listed below cover it.
 **This is not a production-readiness claim.** The app is deployed to Vercel (https://dabbabela.vercel.app) in
 sandbox mode only. There is no production domain, no live payment merchant keys, and no SMS or email provider.
 The external blockers listed further down are still open.
+
+## Mobile app — Phase 4 Flutter (2026-11-23)
+| Item | Status | Notes |
+|---|---|---|
+| Project `mobile/` | ✅ built | Flutter 3.29.3, `com.dabbabela.app`, Android minSdk 23 / iOS 13, release https-only, camera/photo usage strings, en + ne |
+| Auth | ✅ built | Email/password + 2FA, sign-up, reset, phone OTP (flag), staff TOTP enrolment (QR, backup codes, token swap), sessions, sign-out, app switcher from `GET /me` |
+| Customer | ✅ built | Menu (company menu), dabba detail, cart → server quote → checkout, eSewa/Khalti webview + payment polling, bank proof upload, orders (cancel/skip/swap + pay-the-difference/feedback), plans (subscribe/pause/resume/cancel/renew/add meal/address), addresses + coverage, wallet/top-up (flags), payments, notifications, referrals, support, profile/preferences, privacy |
+| Rider / Kitchen / Dispatcher | ✅ built | Routes + deliver (code/cash/photo)/fail/finish; production, bulk start/pack, batches, QC, stock alerts; board, routes, rider assignment, start/complete, auto-group, failed resolve |
+| Tests / analyzer | ✅ | `flutter analyze` 0 issues; `flutter test` 55 (API client, models, widgets); web compile sanity |
+| Real devices | ❌ not yet | Never run on a physical Android/iOS device or emulator; no Android/iOS release build made (disk space) |
+| Payments in app | ⚠️ untested live | Webview flow + polling unit/widget-tested only; needs sandbox eSewa/Khalti end-to-end on a device |
+| Push | ❌ | `PushService` no-op; needs Firebase project, FCM/APNs keys and server-side sending |
+| Store submission | ❌ owner | Play/App Store accounts, upload key + `key.properties`, iOS signing, listings, data-safety / privacy labels, reviewer demo accounts, launcher icons (`dart run flutter_launcher_icons`) — steps in `mobile/README.md` |
+| Nepali copy | ⚠️ | Hand-written, needs a native-speaker review |
 
 ## Production readiness Phase 3 — mobile REST API (2026-11-21)
 | Item | Status | Notes |
