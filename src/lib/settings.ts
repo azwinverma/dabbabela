@@ -59,6 +59,11 @@ export type SiteSettings = {
   walletBalanceCap: number; // a top-up may not take the wallet balance above this
   /** Refunds / manual wallet adjustments at or above this (paisa) need a second staff member's approval. */
   approvalThreshold: number;
+  /**
+   * Rolling-24h money a staff member may move on their own (paisa): refunds they request + manual wallet credits +
+   * credit-creating order adjustments. An action that would reach it goes to a second person (approvals). 0 = off.
+   */
+  staffDailyMoneyLimit: number;
   flags: FeatureFlags;
 };
 
@@ -115,6 +120,7 @@ export const DEFAULT_SETTINGS: SiteSettings = {
   walletTopupDaily: 2000000, // Rs 20,000
   walletBalanceCap: 2500000, // Rs 25,000
   approvalThreshold: 200000, // Rs 2,000
+  staffDailyMoneyLimit: 500000, // Rs 5,000
   flags: DEFAULT_FLAGS,
 };
 

@@ -21,6 +21,8 @@ async function customer(tag: string) {
 }
 const key = () => `tk-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 let finance: { id: string };
+/** Pays out refunds: segregation of duties — never the person who requested the refund (security review H4). */
+let payer: { id: string };
 let original: Awaited<ReturnType<typeof getSettings>>;
 
 function esewaData(uuid: string, amountRs: string) {
@@ -45,6 +47,7 @@ async function paidTopup(userId: string, amount: number) {
 beforeAll(async () => {
   original = await getSettings();
   finance = await db.user.create({ data: { name: "Topup Finance", email: `topup-finance-${Date.now()}@test.local`, role: "FINANCE" } });
+  payer = await db.user.create({ data: { name: "Topup Payer", email: `topup-payer-${Date.now()}@test.local`, role: "FINANCE" } });
   await saveSettings({ bankDetails: original.bankDetails || "Test bank · A/C 000", flags: { ...original.flags, walletTopup: true, wallet: true }, paymentMethods: { ...original.paymentMethods, ESEWA: true, BANK_TRANSFER: true } });
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -244,12 +247,12 @@ describe("refunds", () => {
     await approveRefund(r1.id, finance.id);
     // Customer spends some more before finance processes → processing refuses (balance would go negative).
     await db.$transaction((tx) => spendCredit(tx, { userId: u.id, amount: 10000, note: "lunch 2" }));
-    await expect(processRefund(r1.id, finance.id, { providerRef: "ESW-RF-1" })).rejects.toThrow(/at most Rs 200/);
+    await expect(processRefund(r1.id, payer.id, { providerRef: "ESW-RF-1" })).rejects.toThrow(/at most Rs 200/);
     expect((await db.refund.findUniqueOrThrow({ where: { id: r1.id } })).status).toBe("APPROVED");
     await rejectRefund(r1.id, finance.id, "Spent since");
     const r2 = await requestRefund({ ...base, amount: 20000, method: "ORIGINAL" });
     await approveRefund(r2.id, finance.id);
-    await processRefund(r2.id, finance.id, { providerRef: "ESW-RF-2" });
+    await processRefund(r2.id, payer.id, { providerRef: "ESW-RF-2" });
     expect(await walletBalance(u.id)).toBe(0);
     const rev = await db.creditLedger.findFirstOrThrow({ where: { paymentId: payment.id, reason: "TOPUP_REVERSAL" } });
     expect(rev).toMatchObject({ amount: -20000, refundId: r2.id });
@@ -267,7 +270,7 @@ describe("reports, reconciliation and finance", () => {
     await paidTopup(u.id, 120000);
     const r = await requestRefund({ paymentId: p1.id, amount: 10000, reason: "test", method: "ORIGINAL", actorId: finance.id });
     await approveRefund(r.id, finance.id);
-    await processRefund(r.id, finance.id, { providerRef: "RF-REP" });
+    await processRefund(r.id, payer.id, { providerRef: "RF-REP" });
     const today = ktmNow().date;
     const owner = await loadUser("owner@test.local");
     const out = await runReport(owner, "wallet-topups", { from: today, to: today }, { all: true });

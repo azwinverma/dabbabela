@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { acceptDialogs, login, placeOrder, watchErrors } from "./helpers";
 import { db } from "./db";
 
-test("support requests a refund, finance approves it and can only process it with a reference", async ({ browser }) => {
+test("support requests a refund, finance approves it and can only process it with a reference (credit stays credit)", async ({ browser }) => {
   const stamp = Date.now().toString(36);
 
   // finance tops up the customer's credit (audited ledger adjustment)
@@ -20,17 +20,33 @@ test("support requests a refund, finance approves it and can only process it wit
   // customer pays for a dabba with that credit → payment is PAID immediately
   const customer = await (await browser.newContext()).newPage();
   await login(customer, "customer.c@demo.dabbabela.local");
-  const { paymentId } = await placeOrder(customer, /dabba bela credit/i);
+  const { paymentId: walletPaymentId } = await placeOrder(customer, /dabba bela credit/i);
+  const walletPayment = await db().payment.findUniqueOrThrow({ where: { id: walletPaymentId } });
+  expect(walletPayment.status).toBe("PAID");
+  // … and a cash-on-delivery dabba, paid at the door (fixture: what the rider's cash collection records)
+  const { paymentId } = await placeOrder(customer);
+  await db().$transaction([
+    db().payment.update({ where: { id: paymentId }, data: { status: "PAID", paidAt: new Date() } }),
+    db().order.updateMany({ where: { paymentId }, data: { paymentStatus: "PAID" } }),
+  ]);
   const payment = await db().payment.findUniqueOrThrow({ where: { id: paymentId } });
-  expect(payment.status).toBe("PAID");
   await customer.context().close();
 
-  // support requests a bank refund of Rs 50 from the payment page
   const support = await (await browser.newContext()).newPage();
   const supportErrors = watchErrors(support);
   await login(support, "support@demo.dabbabela.local", undefined, "/admin");
-  await support.goto(`/admin/payments/${paymentId}`);
   const sm = support.locator("main");
+  // closed-loop credit: what was paid with credit can't come back as a bank transfer
+  await support.goto(`/admin/payments/${walletPaymentId}`);
+  await sm.getByLabel("Amount").fill("50");
+  await sm.getByLabel("Refund method").selectOption("BANK");
+  await sm.getByLabel("Reason").fill(`E2E cash-out attempt ${stamp}`);
+  await sm.getByRole("button", { name: "Request refund" }).click();
+  await expect(sm.getByText(/only be refunded as credit/)).toBeVisible();
+  expect(await db().refund.count({ where: { paymentId: walletPaymentId } })).toBe(0);
+
+  // support requests a bank refund of Rs 50 on the cash-paid order
+  await support.goto(`/admin/payments/${paymentId}`);
   await sm.getByLabel("Amount").fill("50");
   await sm.getByLabel("Refund method").selectOption("BANK");
   await sm.getByLabel("Reason").fill(`E2E refund ${stamp}`);

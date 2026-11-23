@@ -14,6 +14,7 @@ import { assertDayCapacity, CapacityError, lockKitchenDay } from "./capacity";
 import { addCredit, spendCredit, walletBalance } from "./ledger";
 import { assertTransition, canTransition, EDITABLE_STATUSES, LIVE_STATUSES } from "./transitions";
 import { availableMethods } from "./payments/methods";
+import { expireOpenAttempts, lockPayment } from "./payments/attempts";
 import { companyMenuBoxIds, companyOutstanding, companySpecFor, isEligibleOn } from "./corporate";
 import { zoneFee, zoneSlots, type LatLng, type ZoneFeeQuote } from "./coverage";
 import { notify } from "./notify";
@@ -687,8 +688,10 @@ export async function cancelOrder(
     refundable <= 0 ? "NONE" : actor.isStaff ? (opts.settlement ?? "CREDIT") : settings.cancelBeforeCutoff === "FULL_REFUND" ? "REFUND" : "CREDIT";
 
   await db.$transaction(async (tx) => {
+    // Payment lock first: serialises with markPaymentPaid, method switches and other cancels on the same payment.
+    if (order.paymentId) await lockPayment(tx, order.paymentId);
     const u = await tx.order.updateMany({
-      where: { id: order.id, status: order.status },
+      where: { id: order.id, status: order.status, version: order.version },
       data: { status: "CANCELLED", cancelledAt: new Date(), version: { increment: 1 }, refundedAmount: settlement === "CREDIT" ? { increment: refundable } : undefined, paymentStatus: settlement === "CREDIT" ? "REFUNDED" : undefined },
     });
     if (!u.count) throw new OrderError("The order changed — reload and try again");
@@ -698,14 +701,19 @@ export async function cancelOrder(
       await bumpPaymentRefund(tx, order.paymentId, refundable);
     }
     if (settlement === "REFUND" && order.paymentId) {
-      await tx.refund.create({ data: { paymentId: order.paymentId, orderId: order.id, amount: refundable, reason: opts.reason, method: "ORIGINAL", requestedById: actor.id } });
+      // Through requestRefundTx: refundable cap re-checked under the refund lock; wallet-paid → credit only (closed loop).
+      const { requestRefundTx } = await import("./payments");
+      await requestRefundTx(tx, { paymentId: order.paymentId, orderId: order.id, amount: refundable, reason: opts.reason, method: order.payment?.method === "WALLET" ? "WALLET_CREDIT" : "ORIGINAL", actorId: actor.id ?? order.userId });
     }
-    // Unpaid payment: shrink what's owed, cancel it when nothing is left.
-    if (order.payment && order.payment.status === "PENDING") {
-      const left = await tx.order.count({ where: { paymentId: order.paymentId, status: { notIn: ["CANCELLED", "SKIPPED"] } } });
+    // Unpaid payment: shrink what's owed, cancel it when nothing is left. Either way the open gateway sessions were for
+    // the old amount — expire them (a stale session still paid later is re-checked by markPaymentPaid).
+    const pay = order.paymentId ? await tx.payment.findUnique({ where: { id: order.paymentId } }) : null;
+    if (pay && pay.status === "PENDING") {
+      const left = await tx.order.count({ where: { paymentId: pay.id, status: { notIn: ["CANCELLED", "SKIPPED"] } } });
+      await expireOpenAttempts(tx, pay.id);
       await tx.payment.update({
-        where: { id: order.payment.id },
-        data: left ? { amount: { decrement: Math.min(order.customerShare, order.payment.amount) } } : { status: "CANCELLED" },
+        where: { id: pay.id },
+        data: { ...(left ? { amount: { decrement: Math.min(order.customerShare, pay.amount) } } : { status: "CANCELLED" as const }), version: { increment: 1 } },
       });
     }
   });
@@ -713,9 +721,15 @@ export async function cancelOrder(
   return { settlement, amount: refundable };
 }
 
+/**
+ * Record money given back on a payment (credit or processed refund). Atomic under the payment lock, and never more
+ * than the payment received: refundedAmount ≤ amount always holds (security review C1).
+ */
 export async function bumpPaymentRefund(tx: Tx, paymentId: string, amount: number) {
+  await lockPayment(tx, paymentId);
   const p = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
   const refunded = p.refundedAmount + amount;
+  if (refunded > p.amount) throw new OrderError(`At most ${rs(Math.max(0, p.amount - p.refundedAmount))} more can go back on payment ${p.reference}`);
   await tx.payment.update({
     where: { id: paymentId },
     data: { refundedAmount: refunded, status: refunded >= p.amount ? "REFUNDED" : "PARTIALLY_REFUNDED", version: { increment: 1 } },
@@ -727,14 +741,38 @@ export async function adjustOrder(orderId: string, actorId: string, amount: numb
   return db.$transaction((tx) => adjustOrderTx(tx, orderId, actorId, amount, reason));
 }
 
-/** adjustOrder inside a caller's transaction (maker-checker execution re-validates the order here). */
-export async function adjustOrderTx(tx: Tx, orderId: string, actorId: string, amount: number, reason: string) {
+/**
+ * What a negative (credit-creating) adjustment may still give back on an order: its customer share, minus what already
+ * went back (refundedAmount: cancel credits, skip credits, processed refunds), minus open refund requests, minus every
+ * earlier negative adjustment (staff credits and cheaper swaps — conservative). Security review H3.
+ */
+export async function adjustableCredit(orderId: string, client: Tx | typeof db = db) {
+  const o = await client.order.findUnique({ where: { id: orderId }, select: { customerShare: true, refundedAmount: true } });
+  if (!o) return 0;
+  const [adj, open] = await Promise.all([
+    client.orderAdjustment.aggregate({ where: { orderId, amount: { lt: 0 } }, _sum: { amount: true } }),
+    client.refund.aggregate({ where: { orderId, status: { in: ["REQUESTED", "APPROVED"] } }, _sum: { amount: true } }),
+  ]);
+  return Math.max(0, o.customerShare - o.refundedAmount - (open._sum.amount ?? 0) + (adj._sum.amount ?? 0));
+}
+
+/**
+ * adjustOrder inside a caller's transaction (maker-checker execution re-validates the order here). A negative amount
+ * becomes wallet credit, capped at adjustableCredit() under a per-order lock (no minting credit beyond what the
+ * customer paid for the order, however many adjustments are posted).
+ */
+export async function adjustOrderTx(tx: Tx, orderId: string, actorId: string, amount: number, reason: string, opts: { approved?: boolean } = {}) {
   if (!reason.trim()) throw new OrderError("Give a reason");
   if (!Number.isInteger(amount) || amount === 0) throw new OrderError("Enter a non-zero amount");
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`order-adj:${orderId}`}))`;
   const order = await tx.order.findUnique({ where: { id: orderId } });
   if (!order) throw new OrderError("Order not found");
+  if (amount < 0) {
+    const room = await adjustableCredit(orderId, tx);
+    if (-amount > room) throw new OrderError(room > 0 ? `At most ${rs(room)} can be credited on order ${order.number} (what the customer paid for it, less what already went back)` : `Nothing more can be credited on order ${order.number} — the customer's share has already gone back`);
+  }
   const adj = await tx.orderAdjustment.create({ data: { orderId, amount, reason, actorId } });
-  if (amount < 0) await addCredit(tx, { userId: order.userId, amount: -amount, reason: "ADJUSTMENT", orderId, actorId, note: reason });
+  if (amount < 0) await addCredit(tx, { userId: order.userId, amount: -amount, reason: "ADJUSTMENT", orderId, actorId, note: opts.approved ? `${reason} (approved)` : reason });
   return adj;
 }
 

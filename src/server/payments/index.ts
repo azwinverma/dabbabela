@@ -16,6 +16,8 @@ import { khaltiInitiate, khaltiLookup } from "./khalti";
 import { creditTopupPayment, isTopupMethod, topupEnabled, topupRefundable } from "../wallet-topup";
 import { lockUser } from "../capacity";
 import { applySwapDifference } from "../subscriptions";
+import { expireOpenAttempts, lockPayment } from "./attempts";
+import { assertWithinStaffLimits, lockStaffMoney, paymentRefundTotal, staffMoneyUsed24h } from "../money-limits";
 
 type Tx = Prisma.TransactionClient;
 
@@ -40,128 +42,195 @@ async function recordEvent(provider: string, eventKey: string, paymentId: string
 
 type PayingPayment = Prisma.PaymentGetPayload<{ include: { orders: true } }>;
 type PaidOpts = { amount?: number | null; attemptId?: string | null; actorId?: string | null; note?: string | null };
+/** `refused` (with mismatch) = verified money we will not accept automatically: underpayment, or a cancelled top-up. */
+export type PaidResult = { already: boolean; payment: PayingPayment; credited: number; mismatch: boolean; refused?: "UNDERPAID" | "TOPUP_AMOUNT" | "TOPUP_CANCELLED" };
 
 /**
- * Mark a payment paid exactly once and fulfil what it pays for. Safe to call repeatedly / concurrently:
- * the status flip is a guarded update on (status, version), so only one caller fulfils.
+ * Mark a payment paid exactly once and fulfil what it pays for. Safe to call repeatedly / concurrently: it runs under
+ * the payment lock (lockPayment — the same lock cancels, swaps and method switches take) and the status flip is a
+ * guarded update on (status, version), so only one caller fulfils.
  *
  * This is THE single place money is accepted. What happens next depends on `purpose` (see `fulfil`).
+ * Refused (nothing flips, payment stays unpaid, GATEWAY_MISMATCH alert raised for a manual refund / follow-up):
+ *   - a verified amount below the payment's CURRENT amount, for every purpose (a stale gateway session for a payment
+ *     that has grown since — swap DUE_LATER — or a forged/partial amount);
+ *   - a top-up whose verified amount differs at all (credit is sold at face value);
+ *   - a top-up the customer cancelled (cancelling expired its sessions; crediting it now would bypass the daily limit
+ *     and balance cap — finance refunds it at the gateway instead, see docs/SECURITY.md M2).
  */
-export async function markPaymentPaid(paymentId: string, opts: PaidOpts = {}) {
+export async function markPaymentPaid(paymentId: string, opts: PaidOpts = {}): Promise<PaidResult> {
   const settings = await getSettings();
-  const result = await db.$transaction(async (tx) => {
-    const p = await tx.payment.findUnique({ where: { id: paymentId }, include: { orders: true } });
-    if (!p) throw new PaymentError("Payment not found");
-    if (p.status === "PAID" || p.status === "PARTIALLY_REFUNDED" || p.status === "REFUNDED") return { already: true, payment: p, credited: 0, mismatch: false };
-    // Store credit is sold at face value: a verified amount that differs from the top-up is never credited.
-    if (p.purpose === "WALLET_TOPUP" && opts.amount != null && opts.amount !== p.amount) return { already: false, payment: p, credited: 0, mismatch: true };
-    // WP-09: estimated gateway fee from the configured rate for the method; the statement import fills feeActual.
-    const gatewayFee = await estimateGatewayFee(p.method, opts.amount ?? p.amount, tx);
-    const flipped = await tx.payment.updateMany({
-      where: { id: p.id, status: p.status, version: p.version },
-      data: { status: "PAID", paidAt: new Date(), verifiedById: opts.actorId ?? null, note: opts.note ?? p.note, gatewayFee, version: { increment: 1 } },
-    });
-    if (!flipped.count) return { already: true, payment: p, credited: 0, mismatch: false };
-    if (opts.attemptId) await tx.paymentAttempt.update({ where: { id: opts.attemptId }, data: { status: "SUCCESS" } });
-    const credited = await fulfil(tx, p, opts, settings);
-    return { already: false, payment: p, credited, mismatch: false };
-  });
-  if (result.mismatch) {
-    await amountMismatch(result.payment, opts.amount ?? 0, "verify");
-    return result;
-  }
-  if (!result.already) {
-    const topup = result.payment.purpose === "WALLET_TOPUP";
-    void notify("payment.received", { userId: result.payment.userId }, { amount: rs(opts.amount ?? result.payment.amount), reference: result.payment.reference }, { dedupeKey: `paid:${paymentId}` });
-    if (opts.actorId)
-      await audit({
-        actorId: opts.actorId,
-        action: topup ? "wallet.topup_verify" : "payment.mark_paid",
-        entity: "Payment",
-        entityId: paymentId,
-        summary: topup ? `Wallet top-up ${result.payment.reference} verified · ${rs(result.payment.amount)} credited` : `${result.payment.reference} marked paid`,
-        reason: opts.note,
-      });
-    // WP-15: payment may be the last condition for a referral reward (idempotent; never blocks payment).
-    if (!topup) void import("../marketing").then((m) => m.settleReferralFor(result.payment.userId)).catch((error) => log.error("referral.settle_failed", { paymentId, error }));
-  }
+  const result = await db.$transaction((tx) => markPaymentPaidTx(tx, paymentId, opts, settings));
+  await afterPaid(result, opts);
   return result;
+}
+
+/** markPaymentPaid inside a caller's transaction (the caller runs afterPaid once it has committed). */
+async function markPaymentPaidTx(tx: Tx, paymentId: string, opts: PaidOpts, settings: SiteSettings): Promise<PaidResult> {
+  await lockPayment(tx, paymentId);
+  const p = await tx.payment.findUnique({ where: { id: paymentId }, include: { orders: true } });
+  if (!p) throw new PaymentError("Payment not found");
+  if (p.status === "PAID" || p.status === "PARTIALLY_REFUNDED" || p.status === "REFUNDED") return { already: true, payment: p, credited: 0, mismatch: false };
+  const refuse = async (refused: NonNullable<PaidResult["refused"]>): Promise<PaidResult> => {
+    if (opts.attemptId) await tx.paymentAttempt.updateMany({ where: { id: opts.attemptId, status: { in: ["STARTED", "EXPIRED"] } }, data: { status: "MISMATCH" } });
+    return { already: false, payment: p, credited: 0, mismatch: true, refused };
+  };
+  if (p.purpose === "WALLET_TOPUP") {
+    // Store credit is sold at face value: a verified amount that differs from the top-up is never credited.
+    if (opts.amount != null && opts.amount !== p.amount) return refuse("TOPUP_AMOUNT");
+    if (p.status === "CANCELLED") return refuse("TOPUP_CANCELLED");
+  }
+  // Underpayment is never accepted, whatever the purpose: the orders would be released / marked PAID for less.
+  if (opts.amount != null && opts.amount < p.amount) return refuse("UNDERPAID");
+  const paid = opts.amount ?? p.amount;
+  const plan = p.purpose === "WALLET_TOPUP" || p.purpose === "SWAP_DIFFERENCE" ? null : await planOrderFulfilment(tx, p, settings);
+  // Belt and braces: never release orders for less than they still owe (payment.amount should always cover them).
+  if (plan && paid < plan.owed) return refuse("UNDERPAID");
+  // WP-09: estimated gateway fee from the configured rate for the method; the statement import fills feeActual.
+  const gatewayFee = await estimateGatewayFee(p.method, paid, tx);
+  const flipped = await tx.payment.updateMany({
+    where: { id: p.id, status: p.status, version: p.version },
+    // Payment.amount = money actually received (a stale session for a payment that shrank pays more; the surplus is
+    // credited below and recorded in refundedAmount, so "cash collected" stays the real gateway amount).
+    data: { status: "PAID", paidAt: new Date(), amount: paid, verifiedById: opts.actorId ?? null, note: opts.note ?? p.note, gatewayFee, version: { increment: 1 } },
+  });
+  if (!flipped.count) return { already: true, payment: p, credited: 0, mismatch: false };
+  if (opts.attemptId) await tx.paymentAttempt.update({ where: { id: opts.attemptId }, data: { status: "SUCCESS" } });
+  const credited = await fulfil(tx, p, paid, plan, opts);
+  return { already: false, payment: p, credited, mismatch: false };
+}
+
+/** Side effects after a markPaymentPaid transaction committed (alert on mismatch; receipt, audit, referral on success). */
+async function afterPaid(result: PaidResult, opts: PaidOpts) {
+  const paymentId = result.payment.id;
+  if (result.mismatch) {
+    await amountMismatch(result.payment, opts.amount ?? result.payment.amount, result.refused === "TOPUP_CANCELLED" ? "cancelled-topup" : result.refused === "UNDERPAID" ? "underpaid" : "verify");
+    return;
+  }
+  if (result.already) return;
+  const topup = result.payment.purpose === "WALLET_TOPUP";
+  void notify("payment.received", { userId: result.payment.userId }, { amount: rs(opts.amount ?? result.payment.amount), reference: result.payment.reference }, { dedupeKey: `paid:${paymentId}` });
+  if (opts.actorId)
+    await audit({
+      actorId: opts.actorId,
+      action: topup ? "wallet.topup_verify" : "payment.mark_paid",
+      entity: "Payment",
+      entityId: paymentId,
+      summary: topup ? `Wallet top-up ${result.payment.reference} verified · ${rs(result.payment.amount)} credited` : `${result.payment.reference} marked paid`,
+      reason: opts.note,
+    });
+  // WP-15: payment may be the last condition for a referral reward (idempotent; never blocks payment).
+  if (!topup) void import("../marketing").then((m) => m.settleReferralFor(result.payment.userId)).catch((error) => log.error("referral.settle_failed", { paymentId, error }));
 }
 
 /**
  * Dispatch a freshly-paid payment by purpose. Runs inside markPaymentPaid's transaction, after the guarded flip.
  * Returns wallet credit given back as REFUND (late / over-payment) — not top-up credit, which is the purchase itself.
- * Phase 2C adds SWAP_DIFFERENCE and INVOICE cases here.
  */
-async function fulfil(tx: Tx, p: PayingPayment, opts: PaidOpts, settings: SiteSettings): Promise<number> {
+async function fulfil(tx: Tx, p: PayingPayment, paid: number, plan: OrderPlan | null, opts: PaidOpts): Promise<number> {
   switch (p.purpose) {
     case "WALLET_TOPUP":
       await creditTopupPayment(tx, p, opts.actorId);
       return 0;
     case "SWAP_DIFFERENCE":
-      return fulfilSwapDifference(tx, p, opts);
+      return fulfilSwapDifference(tx, p, paid, opts);
     case "ORDER":
     case "SUBSCRIPTION":
     default:
-      return fulfilOrders(tx, p, opts, settings);
+      return fulfilOrders(tx, p, paid, plan!, opts);
   }
 }
 
 /**
  * Phase 2C: apply the pending plan swap a SWAP_DIFFERENCE payment was for (subscriptions.applySwapDifference). If it
- * can't be applied any more (meal changed, cut-off passed, sold out, price moved) the money becomes wallet credit.
+ * can't be applied any more (meal changed, cut-off passed, sold out, price moved) the whole verified amount becomes
+ * wallet credit; when it is applied, only a surplus over the difference does. Never both.
  */
-async function fulfilSwapDifference(tx: Tx, p: PayingPayment, opts: PaidOpts): Promise<number> {
-  let credited = (await applySwapDifference(tx, p, { actorId: opts.actorId })).credited;
-  if (opts.amount != null && opts.amount > p.amount) {
-    await addCredit(tx, { userId: p.userId, amount: opts.amount - p.amount, reason: "REFUND", paymentId: p.id, note: "Paid more than the swap difference" });
-    credited += opts.amount - p.amount;
+async function fulfilSwapDifference(tx: Tx, p: PayingPayment, paid: number, opts: PaidOpts): Promise<number> {
+  const r = await applySwapDifference(tx, p, { amount: p.amount, actorId: opts.actorId });
+  let credited = r.credited;
+  if (r.applied && paid > p.amount) {
+    await addCredit(tx, { userId: p.userId, amount: paid - p.amount, reason: "REFUND", paymentId: p.id, note: "Paid more than the swap difference" });
+    credited += paid - p.amount;
+  } else if (!r.applied && paid > r.credited) {
+    await addCredit(tx, { userId: p.userId, amount: paid - r.credited, reason: "REFUND", paymentId: p.id, note: "Paid more than the swap difference" });
+    credited = paid;
   }
-  if (credited > 0) await tx.payment.update({ where: { id: p.id }, data: { refundedAmount: { increment: credited }, status: credited >= p.amount ? "REFUNDED" : "PARTIALLY_REFUNDED" } });
+  if (credited > 0) await tx.payment.update({ where: { id: p.id }, data: { refundedAmount: { increment: credited }, status: credited >= paid ? "REFUNDED" : "PARTIALLY_REFUNDED" } });
   return credited;
 }
 
-/** Release the payment's orders (and plan). Late money (orders already cancelled, or the day closed) becomes wallet credit. */
-async function fulfilOrders(tx: Tx, p: PayingPayment, opts: PaidOpts, settings: SiteSettings): Promise<number> {
+type OrderRow = PayingPayment["orders"][number];
+type OrderPlan = { release: OrderRow[]; late: OrderRow[]; owing: OrderRow[]; owed: number };
+
+/**
+ * What a payment for orders pays for right now (read under the payment lock, before the flip):
+ *   release = PENDING_PAYMENT orders still before their cut-off → SCHEDULED + PAID;
+ *   late    = PENDING_PAYMENT orders whose day has closed → cancelled, their share credited;
+ *   owing   = live orders already released unpaid (cash switch) → PAID.
+ * `owed` = Σ customerShare of release + owing — the money the still-live orders need (no orders: the amount).
+ */
+async function planOrderFulfilment(tx: Tx, p: PayingPayment, settings: SiteSettings): Promise<OrderPlan> {
   const now = ktmNow();
-  let credited = 0;
+  const plan: OrderPlan = { release: [], late: [], owing: [], owed: 0 };
   for (const o of p.orders) {
-    const date = isoDate(o.deliveryDate);
     if (o.status === "PENDING_PAYMENT") {
-      const lock = await tx.dayLock.findUnique({ where: { kitchenId_date: { kitchenId: o.kitchenId, date: o.deliveryDate } } });
+      const date = isoDate(o.deliveryDate);
+      const lock = date === now.date ? await tx.dayLock.findUnique({ where: { kitchenId_date: { kitchenId: o.kitchenId, date: o.deliveryDate } } }) : null;
       const late = date < now.date || (date === now.date && (now.time >= settings.orderCutoff || Boolean(lock)));
-      if (late) {
-        await tx.order.update({ where: { id: o.id }, data: { status: "CANCELLED", cancelledAt: new Date(), paymentStatus: "REFUNDED", refundedAmount: o.customerShare, version: { increment: 1 } } });
-        await tx.orderStatusEvent.create({ data: { orderId: o.id, fromStatus: "PENDING_PAYMENT", toStatus: "CANCELLED", note: "Payment arrived after the cut-off — credited", actorId: opts.actorId ?? null } });
-        if (o.customerShare > 0) {
-          await addCredit(tx, { userId: p.userId, amount: o.customerShare, reason: "REFUND", orderId: o.id, paymentId: p.id, note: "Payment arrived after the day closed" });
-          credited += o.customerShare;
-        }
-      } else {
-        await tx.order.update({ where: { id: o.id }, data: { status: "SCHEDULED", paymentStatus: "PAID", version: { increment: 1 } } });
-        await tx.orderStatusEvent.create({ data: { orderId: o.id, fromStatus: "PENDING_PAYMENT", toStatus: "SCHEDULED", note: "Payment received", actorId: opts.actorId ?? null } });
-      }
-    } else if (o.status === "CANCELLED" && o.paymentStatus !== "REFUNDED" && o.customerShare > 0) {
-      // Order expired before the money arrived.
-      await tx.order.update({ where: { id: o.id }, data: { paymentStatus: "REFUNDED", refundedAmount: o.customerShare } });
-      await addCredit(tx, { userId: p.userId, amount: o.customerShare, reason: "REFUND", orderId: o.id, paymentId: p.id, note: "Paid after the order had expired" });
-      credited += o.customerShare;
-    } else if (o.paymentStatus === "UNPAID" || o.paymentStatus === "PENDING") {
-      await tx.order.update({ where: { id: o.id }, data: { paymentStatus: "PAID" } });
-    }
+      (late ? plan.late : plan.release).push(o);
+    } else if (o.status !== "CANCELLED" && o.status !== "SKIPPED" && (o.paymentStatus === "UNPAID" || o.paymentStatus === "PENDING")) plan.owing.push(o);
   }
-  // Overpayment (amount changed after the gateway session started).
-  if (opts.amount != null && opts.amount > p.amount) {
-    await addCredit(tx, { userId: p.userId, amount: opts.amount - p.amount, reason: "REFUND", paymentId: p.id, note: "Paid more than the order total" });
-    credited += opts.amount - p.amount;
+  // A payment with no orders (e.g. a company invoice paid online) owes exactly its amount.
+  plan.owed = p.orders.length ? [...plan.release, ...plan.owing].reduce((a, o) => a + o.customerShare, 0) : p.amount;
+  return plan;
+}
+
+/**
+ * Release the payment's orders (and plan). The credit is computed ONCE: surplus = verified amount − what the
+ * still-live orders owe. It is attributed first to late orders (cancelled now), then to orders cancelled while the
+ * payment was pending (their share was taken off payment.amount, but a stale gateway session may still have paid
+ * it), and anything left is plain overpayment. Never "cancelled share" AND "overpayment" for the same money, and an
+ * order is marked PAID only when the money covers it (the caller refuses paid < owed).
+ */
+async function fulfilOrders(tx: Tx, p: PayingPayment, paid: number, plan: OrderPlan, opts: PaidOpts): Promise<number> {
+  const surplus = Math.max(0, paid - plan.owed);
+  let left = surplus;
+  const guarded = async (o: OrderRow, data: Prisma.OrderUpdateManyMutationInput) => {
+    const u = await tx.order.updateMany({ where: { id: o.id, status: o.status, version: o.version }, data: { ...data, version: { increment: 1 } } });
+    if (!u.count) throw new PaymentError(`Order ${o.number} changed while the payment was being confirmed — try again`);
+  };
+  for (const o of plan.release) {
+    await guarded(o, { status: "SCHEDULED", paymentStatus: "PAID" });
+    await tx.orderStatusEvent.create({ data: { orderId: o.id, fromStatus: "PENDING_PAYMENT", toStatus: "SCHEDULED", note: "Payment received", actorId: opts.actorId ?? null } });
   }
+  for (const o of plan.owing) await guarded(o, { paymentStatus: "PAID" });
+  for (const o of plan.late) {
+    const back = Math.min(o.customerShare, left);
+    left -= back;
+    await guarded(o, { status: "CANCELLED", cancelledAt: new Date(), paymentStatus: back >= o.customerShare ? "REFUNDED" : back > 0 ? "PARTIALLY_REFUNDED" : undefined, refundedAmount: back });
+    await tx.orderStatusEvent.create({ data: { orderId: o.id, fromStatus: "PENDING_PAYMENT", toStatus: "CANCELLED", note: "Payment arrived after the cut-off — credited", actorId: opts.actorId ?? null } });
+    if (back > 0) await addCredit(tx, { userId: p.userId, amount: back, reason: "REFUND", orderId: o.id, paymentId: p.id, note: "Payment arrived after the day closed" });
+  }
+  for (const o of p.orders) {
+    if (o.status !== "CANCELLED" || o.paymentStatus === "REFUNDED" || o.customerShare <= 0) continue;
+    // Cancelled while the payment was pending. Covered only if the verified money actually included it.
+    const back = Math.min(o.customerShare - o.refundedAmount, left);
+    if (back <= 0) continue;
+    left -= back;
+    await guarded(o, { paymentStatus: back + o.refundedAmount >= o.customerShare ? "REFUNDED" : "PARTIALLY_REFUNDED", refundedAmount: { increment: back } });
+    await addCredit(tx, { userId: p.userId, amount: back, reason: "REFUND", orderId: o.id, paymentId: p.id, note: "Paid after the order had been cancelled" });
+  }
+  // Skipped unpaid plan meals (moved to the end of the plan) carry no money of their own.
+  for (const o of p.orders) if (o.status === "SKIPPED" && (o.paymentStatus === "UNPAID" || o.paymentStatus === "PENDING")) await guarded(o, { paymentStatus: "PAID" });
+  if (left > 0) await addCredit(tx, { userId: p.userId, amount: left, reason: "REFUND", paymentId: p.id, note: "Paid more than the order total" });
   if (p.subscriptionId) {
     await tx.subscription.updateMany({ where: { id: p.subscriptionId, status: "PENDING_PAYMENT" }, data: { status: "ACTIVE" } });
   }
-  if (credited > 0) {
-    await tx.payment.update({ where: { id: p.id }, data: { refundedAmount: { increment: credited }, status: credited >= p.amount ? "REFUNDED" : "PARTIALLY_REFUNDED" } });
+  if (surplus > 0) {
+    await tx.payment.update({ where: { id: p.id }, data: { refundedAmount: { increment: surplus }, status: surplus >= paid ? "REFUNDED" : "PARTIALLY_REFUNDED" } });
   }
-  return credited;
+  return surplus;
 }
 
 /**
@@ -182,7 +251,9 @@ async function amountMismatch(p: Pick<Payment, "id" | "method">, got: number, so
 }
 
 async function markAttemptFailed(attemptId: string, paymentId: string, response: unknown) {
-  await db.paymentAttempt.updateMany({ where: { id: attemptId, status: "STARTED" }, data: { status: "FAILED", response: json(response) } });
+  const live = await db.paymentAttempt.updateMany({ where: { id: attemptId, status: "STARTED" }, data: { status: "FAILED", response: json(response) } });
+  // A superseded (EXPIRED) session failing says nothing about the payment's current session.
+  if (!live.count) return void (await db.paymentAttempt.updateMany({ where: { id: attemptId, status: "EXPIRED" }, data: { status: "FAILED", response: json(response) } }));
   await db.payment.updateMany({ where: { id: paymentId, status: "PENDING" }, data: { status: "FAILED" } });
 }
 
@@ -311,7 +382,10 @@ export async function reconcileGatewayAttempts() {
   const since = new Date(Date.now() - 3 * 24 * 3600_000);
   const before = new Date(Date.now() - 5 * 60_000);
   const attempts = await db.paymentAttempt.findMany({
-    where: { status: "STARTED", createdAt: { gte: since, lte: before }, payment: { status: { in: ["PENDING", "FAILED", "CANCELLED"] } } },
+    // EXPIRED = superseded by an amount/method change (or given up after 24 h): still polled for 3 days so money paid
+    // through a stale session is never silently lost — markPaymentPaid re-checks it against the current payment.
+    where: { status: { in: ["STARTED", "EXPIRED"] }, createdAt: { gte: since, lte: before }, payment: { status: { in: ["PENDING", "FAILED", "CANCELLED"] } } },
+    orderBy: { createdAt: "asc" },
     take: 50,
   });
   let paid = 0;
@@ -320,7 +394,7 @@ export async function reconcileGatewayAttempts() {
       const r = a.method === "ESEWA" ? await confirmEsewa(a.id, a.paymentId, a.providerRef, a.amount, `esewa:${a.providerRef}:reconcile`, { reconcile: true }) : await confirmKhalti(a.id, a.paymentId, a.providerRef, a.amount);
       if (r.ok) paid++;
       else if (!r.pending) continue;
-      else if (a.createdAt < new Date(Date.now() - 24 * 3600_000)) await db.paymentAttempt.update({ where: { id: a.id }, data: { status: "EXPIRED" } });
+      else if (a.status === "STARTED" && a.createdAt < new Date(Date.now() - 24 * 3600_000)) await db.paymentAttempt.update({ where: { id: a.id }, data: { status: "EXPIRED" } });
     } catch (e) {
       log.warn("reconcile.failed", { attemptId: a.id, error: e });
     }
@@ -330,46 +404,63 @@ export async function reconcileGatewayAttempts() {
 
 // ───────────── switching method / manual flows ─────────────
 
-/** Change how an unpaid payment will be paid (e.g. Khalti failed → cash). */
+/**
+ * Change how an unpaid payment will be paid (e.g. Khalti failed → cash). Runs under the payment lock with a guarded
+ * write; open gateway sessions of the old method are expired (a later verification of one is re-checked against
+ * the current amount in markPaymentPaid). Switching to WALLET debits and marks paid in ONE transaction, so two
+ * concurrent switches can't both debit.
+ */
 export async function switchPaymentMethod(paymentId: string, userId: string, method: PaymentMethod) {
   const settings = await getSettings();
-  const p = await db.payment.findFirst({ where: { id: paymentId, userId }, include: { orders: true } });
-  if (!p || !["PENDING", "FAILED"].includes(p.status)) throw new PaymentError("Nothing to pay here");
-  const methods = await availableMethods(settings, { hasCompany: Boolean(p.companyId), customerShare: p.amount });
+  const p0 = await db.payment.findFirst({ where: { id: paymentId, userId }, include: { orders: true } });
+  if (!p0 || !["PENDING", "FAILED"].includes(p0.status)) throw new PaymentError("Nothing to pay here");
+  const methods = await availableMethods(settings, { hasCompany: Boolean(p0.companyId), customerShare: p0.amount });
   if (!methods.includes(method)) throw new PaymentError("That payment method isn't available");
-  if (p.purpose === "SWAP_DIFFERENCE" && !["ESEWA", "KHALTI", "WALLET"].includes(method)) throw new PaymentError("Pay a swap difference with eSewa, Khalti or credit");
-  if (p.purpose === "WALLET_TOPUP") {
+  if (p0.purpose === "SWAP_DIFFERENCE" && !["ESEWA", "KHALTI", "WALLET"].includes(method)) throw new PaymentError("Pay a swap difference with eSewa, Khalti or credit");
+  if (p0.purpose === "WALLET_TOPUP") {
     // Credit is bought with eSewa / Khalti / bank only (never with credit or cash at the door).
     if (!topupEnabled(settings)) throw new PaymentError("Adding credit isn't available right now");
     if (!isTopupMethod(method)) throw new PaymentError("Top-ups can be paid with eSewa, Khalti or bank transfer");
-    if (p.proofUrl) throw new PaymentError("Your transfer proof is being checked — wait for finance to confirm it");
-    if (method === p.method && p.status === "PENDING") return p;
-    await db.payment.update({ where: { id: p.id }, data: { method, status: "PENDING", version: { increment: 1 } } });
-    return p;
+    if (p0.proofUrl) throw new PaymentError("Your transfer proof is being checked — wait for finance to confirm it");
   }
-  if (method === p.method && p.status === "PENDING") return p;
+  if (method === p0.method && p0.status === "PENDING") return p0;
   if (method === "WALLET") {
-    if ((await walletBalance(userId)) < p.amount) throw new PaymentError("Not enough credit");
-    await db.$transaction(async (tx) => {
+    const res = await db.$transaction(async (tx) => {
+      await lockPayment(tx, paymentId);
+      const p = await tx.payment.findFirst({ where: { id: paymentId, userId } });
+      if (!p || !["PENDING", "FAILED"].includes(p.status)) throw new PaymentError("Nothing to pay here");
+      if ((await walletBalance(userId, tx)) < p.amount) throw new PaymentError("Not enough credit");
+      await expireOpenAttempts(tx, p.id);
       await spendCredit(tx, { userId, amount: p.amount, paymentId: p.id, note: `Payment ${p.reference}` });
-      await tx.payment.update({ where: { id: p.id }, data: { method: "WALLET", status: "PENDING" } });
+      await tx.payment.update({ where: { id: p.id }, data: { method: "WALLET", status: "PENDING", version: { increment: 1 } } });
+      return markPaymentPaidTx(tx, p.id, { amount: p.amount }, settings);
     });
-    await markPaymentPaid(p.id, { amount: p.amount });
-    return p;
+    await afterPaid(res, { amount: res.payment.amount });
+    return p0;
   }
-  await db.payment.update({ where: { id: p.id }, data: { method, status: "PENDING", version: { increment: 1 } } });
-  if (method === "CASH") {
-    // Cash is collected at the door: release the orders now (still subject to the cut-off).
-    const now = ktmNow();
-    for (const o of p.orders.filter((x) => x.status === "PENDING_PAYMENT")) {
-      const d = isoDate(o.deliveryDate);
-      if (d < now.date || (d === now.date && now.time >= settings.orderCutoff)) continue;
-      await db.order.update({ where: { id: o.id }, data: { status: "SCHEDULED", paymentStatus: "UNPAID" } });
-      await db.orderStatusEvent.create({ data: { orderId: o.id, fromStatus: "PENDING_PAYMENT", toStatus: "SCHEDULED", note: "Switched to cash on delivery", actorId: userId } });
+  await db.$transaction(async (tx) => {
+    await lockPayment(tx, paymentId);
+    const p = await tx.payment.findFirst({ where: { id: paymentId, userId }, include: { orders: true } });
+    if (!p || !["PENDING", "FAILED"].includes(p.status)) throw new PaymentError("Nothing to pay here");
+    if (p.proofUrl && p.purpose === "WALLET_TOPUP") throw new PaymentError("Your transfer proof is being checked — wait for finance to confirm it");
+    if (method === p.method && p.status === "PENDING") return;
+    await expireOpenAttempts(tx, p.id);
+    const u = await tx.payment.updateMany({ where: { id: p.id, version: p.version }, data: { method, status: "PENDING", version: { increment: 1 } } });
+    if (!u.count) throw new PaymentError("This payment just changed — reload and try again");
+    if (method === "CASH" && p.purpose !== "WALLET_TOPUP") {
+      // Cash is collected at the door: release the orders now (still subject to the cut-off).
+      const now = ktmNow();
+      for (const o of p.orders.filter((x) => x.status === "PENDING_PAYMENT")) {
+        const d = isoDate(o.deliveryDate);
+        if (d < now.date || (d === now.date && now.time >= settings.orderCutoff)) continue;
+        const r = await tx.order.updateMany({ where: { id: o.id, status: "PENDING_PAYMENT" }, data: { status: "SCHEDULED", paymentStatus: "UNPAID", version: { increment: 1 } } });
+        if (!r.count) continue;
+        await tx.orderStatusEvent.create({ data: { orderId: o.id, fromStatus: "PENDING_PAYMENT", toStatus: "SCHEDULED", note: "Switched to cash on delivery", actorId: userId } });
+      }
+      if (p.subscriptionId) await tx.subscription.updateMany({ where: { id: p.subscriptionId, status: "PENDING_PAYMENT" }, data: { status: "ACTIVE" } });
     }
-    if (p.subscriptionId) await db.subscription.updateMany({ where: { id: p.subscriptionId, status: "PENDING_PAYMENT" }, data: { status: "ACTIVE" } });
-  }
-  return p;
+  });
+  return p0;
 }
 
 /** Customer uploads a bank-transfer / QR screenshot. Finance verifies it against the bank statement. */
@@ -443,12 +534,31 @@ export async function refundableNow(paymentId: string, orderId?: string | null, 
  * `approvedById` (maker-checker execution) creates the refund already APPROVED by that second person.
  */
 export async function requestRefundTx(tx: Tx, input: RefundInput & { approvedById?: string | null }) {
+  const p = await checkRefundTx(tx, input);
+  return tx.refund.create({
+    data: {
+      paymentId: p.id,
+      orderId: input.orderId ?? null,
+      amount: input.amount,
+      reason: input.reason,
+      method: input.method,
+      requestedById: input.actorId,
+      ...(input.approvedById ? { status: "APPROVED" as const, approvedById: input.approvedById } : {}),
+    },
+  });
+}
+
+/** requestRefundTx's validation (takes the refund lock; throws PaymentError) without creating anything. */
+async function checkRefundTx(tx: Tx, input: RefundInput) {
   if (!Number.isInteger(input.amount) || input.amount <= 0) throw new PaymentError("Enter an amount");
   if (!input.reason.trim()) throw new PaymentError("Give a reason");
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`refund:${input.paymentId}`}))`;
   const { p, available } = await refundable(tx, input.paymentId);
   if (!["PAID", "PARTIALLY_REFUNDED"].includes(p.status)) throw new PaymentError("Only paid payments can be refunded");
   if (input.amount > available) throw new PaymentError(`At most ${rs(available)} can be refunded`);
+  // Closed-loop credit (security review L10): what was paid with wallet credit only ever goes back as credit, so
+  // goodwill / skip / adjustment credit can't be turned into cash through a refund.
+  if (p.method === "WALLET" && input.method !== "WALLET_CREDIT") throw new PaymentError("This was paid with Dabba Bela credit — it can only be refunded as credit");
   if (p.purpose === "WALLET_TOPUP") {
     // A top-up goes back to its source, and only the part the customer hasn't spent (wallet never goes negative).
     // Enforced here, so a maker-checker execution (approvals.ts → requestRefundTx) gets the same cap.
@@ -465,21 +575,22 @@ export async function requestRefundTx(tx: Tx, input: RefundInput & { approvedByI
     const left = o.customerShare - o.refundedAmount - (open._sum.amount ?? 0);
     if (input.amount > left) throw new PaymentError(`At most ${rs(Math.max(0, left))} can be refunded on order ${o.number}`);
   }
-  return tx.refund.create({
-    data: {
-      paymentId: p.id,
-      orderId: input.orderId ?? null,
-      amount: input.amount,
-      reason: input.reason,
-      method: input.method,
-      requestedById: input.actorId,
-      ...(input.approvedById ? { status: "APPROVED" as const, approvedById: input.approvedById } : {}),
-    },
-  });
+  return p;
 }
 
+/**
+ * A staff member's own refund request (no second person yet). Refused with NeedsApprovalError when it would reach the
+ * approval threshold — alone, or with the refunds already on this payment — or the person's rolling-24h money limit
+ * (money-limits.ts); the caller then files an ApprovalRequest instead.
+ */
 export async function requestRefund(input: RefundInput) {
-  const r = await db.$transaction((tx) => requestRefundTx(tx, input));
+  const r = await db.$transaction(async (tx) => {
+    // Lock order: this person's money lock first, then the payment's refund lock (and the customer's ledger lock).
+    await lockStaffMoney(tx, input.actorId);
+    await checkRefundTx(tx, input); // a bad request is an error, not something to send for approval
+    await assertWithinStaffLimits(tx, { actorId: input.actorId, amount: input.amount, paymentId: input.paymentId });
+    return requestRefundTx(tx, input);
+  });
   await audit({ actorId: input.actorId, action: "refund.request", entity: "Refund", entityId: r.id, summary: `${rs(r.amount)} via ${r.method}`, reason: input.reason });
   return r;
 }
@@ -489,11 +600,18 @@ export async function requestRefund(input: RefundInput) {
  * with a REFUND settlement): at or above the approval threshold the approver must be someone other than the requester.
  */
 export async function approveRefund(refundId: string, actorId: string) {
-  const ref = await db.refund.findUnique({ where: { id: refundId }, select: { amount: true, requestedById: true, status: true } });
+  const ref = await db.refund.findUnique({ where: { id: refundId }, select: { amount: true, requestedById: true, status: true, paymentId: true } });
   if (!ref || ref.status !== "REQUESTED") throw new PaymentError("Refund isn't waiting for approval");
-  const { approvalThreshold } = await getSettings();
-  if (approvalThreshold > 0 && ref.amount >= approvalThreshold && ref.requestedById === actorId)
-    throw new PaymentError(`Refunds of ${rs(approvalThreshold)} or more need a second person — someone else has to approve a refund you requested`);
+  if (ref.requestedById === actorId) {
+    // Self-approval only below every maker-checker limit: the threshold (alone or summed over the payment's refunds)
+    // and the approver's own rolling-24h limit (this refund already counts in it — it is theirs).
+    const s = await getSettings();
+    const total = await paymentRefundTotal(ref.paymentId);
+    if (s.approvalThreshold > 0 && (ref.amount >= s.approvalThreshold || total >= s.approvalThreshold))
+      throw new PaymentError(`Refunds of ${rs(s.approvalThreshold)} or more (also when refunds on one payment add up to it) need a second person — someone else has to approve a refund you requested`);
+    if (s.staffDailyMoneyLimit > 0 && (await staffMoneyUsed24h(actorId)) >= s.staffDailyMoneyLimit)
+      throw new PaymentError(`You've reached your ${rs(s.staffDailyMoneyLimit)} 24-hour limit — someone else has to approve a refund you requested`);
+  }
   const r = await db.refund.updateMany({ where: { id: refundId, status: "REQUESTED" }, data: { status: "APPROVED", approvedById: actorId } });
   if (!r.count) throw new PaymentError("Refund isn't waiting for approval");
   await audit({ actorId, action: "refund.approve", entity: "Refund", entityId: refundId });
@@ -511,9 +629,26 @@ export async function rejectRefund(refundId: string, actorId: string, reason: st
  */
 export async function processRefund(refundId: string, actorId: string, proof: { providerRef?: string; proofUrl?: string; note?: string }) {
   const out = await db.$transaction(async (tx) => {
+    const r0 = await tx.refund.findUniqueOrThrow({ where: { id: refundId }, select: { paymentId: true } });
+    // Same lock order as everywhere: payment → refund requests.
+    await lockPayment(tx, r0.paymentId);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`refund:${r0.paymentId}`}))`;
     const r = await tx.refund.findUniqueOrThrow({ where: { id: refundId }, include: { payment: true } });
     if (r.status !== "APPROVED") throw new PaymentError("Approve the refund first");
     if (r.method !== "WALLET_CREDIT" && !proof.providerRef?.trim() && !proof.proofUrl) throw new PaymentError("Add the transaction reference or a receipt as proof");
+    // Segregation of duties (H4): money leaving the business (gateway / bank / cash) is paid out by someone other than
+    // the person who asked for it — super admins included.
+    if (r.method !== "WALLET_CREDIT" && r.requestedById === actorId) throw new PaymentError("Someone else has to pay out a refund you requested");
+    if (r.payment.method === "WALLET" && r.method !== "WALLET_CREDIT") throw new PaymentError("This was paid with Dabba Bela credit — it can only be refunded as credit");
+    // Re-check the cap at payout (C1): this refund plus the other approved ones must fit what is left on the payment.
+    const others = await tx.refund.aggregate({ where: { paymentId: r.paymentId, status: "APPROVED", id: { not: r.id } }, _sum: { amount: true } });
+    const left = r.payment.amount - r.payment.refundedAmount;
+    if (r.amount > left) throw new PaymentError(`Only ${rs(Math.max(0, left))} is left to refund on this payment — reject this refund`);
+    if (r.amount + (others._sum.amount ?? 0) > left) throw new PaymentError(`Approved refunds on this payment add up to more than the ${rs(Math.max(0, left))} left — reject one of them first`);
+    if (r.orderId) {
+      const o = await tx.order.findUniqueOrThrow({ where: { id: r.orderId }, select: { customerShare: true, refundedAmount: true, number: true } });
+      if (r.amount > o.customerShare - o.refundedAmount) throw new PaymentError(`Only ${rs(Math.max(0, o.customerShare - o.refundedAmount))} is left to refund on order ${o.number} — reject this refund`);
+    }
     const u = await tx.refund.updateMany({
       where: { id: r.id, status: "APPROVED" },
       data: { status: "PROCESSED", processedById: actorId, processedAt: new Date(), providerRef: proof.providerRef?.trim() || null, proofUrl: proof.proofUrl || null, note: proof.note || r.note },

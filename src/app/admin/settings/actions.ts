@@ -31,11 +31,13 @@ export async function updateSettings(_prev: ActionResult, fd: FormData): Promise
     const walletTopupDaily = f.money(fd, "walletTopupDaily", "Top-ups per day");
     const walletBalanceCap = f.money(fd, "walletBalanceCap", "Wallet balance cap");
     const approvalThreshold = f.money(fd, "approvalThreshold", "Second approval from");
+    const staffDailyMoneyLimit = f.money(fd, "staffDailyMoneyLimit", "Per-staff daily money limit");
     if (walletTopupMin <= 0) throw new FieldError("walletTopupMin", "Smallest top-up must be more than Rs 0");
     if (walletTopupMax < walletTopupMin) throw new FieldError("walletTopupMax", "Largest top-up can't be below the smallest");
     if (walletTopupDaily < walletTopupMax) throw new FieldError("walletTopupDaily", "The daily limit can't be below the largest single top-up");
     if (walletBalanceCap < walletTopupMin) throw new FieldError("walletBalanceCap", "The balance cap can't be below the smallest top-up");
     if (approvalThreshold <= 0) throw new FieldError("approvalThreshold", "Enter an amount above Rs 0");
+    if (staffDailyMoneyLimit <= 0) throw new FieldError("staffDailyMoneyLimit", "Enter an amount above Rs 0");
     const patch: Partial<SiteSettings> = {
       brandName,
       brandNameNe: f.str(fd, "brandNameNe", 60),
@@ -72,6 +74,7 @@ export async function updateSettings(_prev: ActionResult, fd: FormData): Promise
       walletTopupDaily,
       walletBalanceCap,
       approvalThreshold,
+      staffDailyMoneyLimit,
       flags,
     };
     const modificationCutoff = f.str(fd, "modificationCutoff", 20);

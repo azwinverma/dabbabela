@@ -205,7 +205,10 @@ describe("cancellations, credit and refunds", () => {
     await expect(processRefund(r.id, owner.id, {})).rejects.toThrow(/Approve/);
     await approveRefund(r.id, owner.id);
     await expect(processRefund(r.id, owner.id, {})).rejects.toThrow(/proof/);
-    await processRefund(r.id, owner.id, { providerRef: "ESW-REF-1" });
+    // Segregation of duties: money out is paid by someone other than the requester (super admin / owner included).
+    await expect(processRefund(r.id, owner.id, { providerRef: "ESW-REF-1" })).rejects.toThrow(/Someone else/);
+    const finance = await db.user.create({ data: { name: "Commerce Payer", email: `commerce-payer-${Date.now()}@test.local`, role: "FINANCE" } });
+    await processRefund(r.id, finance.id, { providerRef: "ESW-REF-1" });
     const p = await db.payment.findUniqueOrThrow({ where: { id: res.payment.id } });
     expect(p.status).toBe("PARTIALLY_REFUNDED");
   });

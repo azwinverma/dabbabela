@@ -10,7 +10,8 @@ import { userAttributionSnapshot, type Touch } from "@/lib/attribution";
 import { dateWhere, one, pageWindow, parseDateRange, parseEnum, type ListState, type SearchParamsRecord } from "@/app/admin/_kit/params";
 import { addCredit } from "./ledger";
 import { lockUser } from "./capacity";
-import { needsApproval, requestApproval } from "./approvals";
+import { requestApproval } from "./approvals";
+import { assertCreditTarget, assertWithinStaffLimits, NeedsApprovalError } from "./money-limits";
 import { completeDataRequest, exportUserData } from "./privacy";
 import { csv } from "./reports";
 
@@ -23,7 +24,7 @@ import { csv } from "./reports";
 
 export class CrmError extends Error {}
 
-export type Staff = { id: string; role: Role | string; customGrants?: readonly string[] | null };
+export type Staff = { id: string; role: Role | string; customGrants?: readonly string[] | null; kitchenIds?: string[] | null };
 
 function need(actor: Staff, ...perms: Permission[]) {
   for (const p of perms) if (!can(actor, p)) throw new CrmError(`You don't have permission for this (${p})`);
@@ -478,7 +479,11 @@ function checkAmount(amount: number) {
   if (amount > CREDIT_MAX) throw new CrmError(`A single credit can't exceed Rs ${(CREDIT_MAX / 100).toLocaleString("en-IN")}`);
 }
 
-/** Direct credit by someone who may approve credit: they are recorded as the approver. */
+/**
+ * Direct credit by someone who may approve credit: they are recorded as the approver. Refused (NeedsApprovalError)
+ * when it would reach the approval threshold or the person's rolling-24h money limit (money-limits.ts) — checked
+ * under the per-actor lock in the same transaction as the ledger row.
+ */
 export async function issueCredit(actor: Staff, userId: string, amount: number, note: string) {
   need(actor, "refunds.approve");
   checkAmount(amount);
@@ -486,23 +491,33 @@ export async function issueCredit(actor: Staff, userId: string, amount: number, 
   if (why.length < 3) throw new CrmError("A reason is required for every credit");
   const u = await customerOr404(userId);
   if (u.deletedAt) throw new CrmError("This customer's personal data was deleted");
-  // Maker-checker: at or above the approval threshold a second person must approve (issueCreditOrRequest).
-  if (await needsApproval(amount)) throw new CrmError("Credit this large needs a second person's approval");
-  const row = await db.$transaction((tx) => addCredit(tx, { userId, amount, reason: "GOODWILL", actorId: actor.id, note: why.slice(0, 300) }));
+  try {
+    await assertCreditTarget(actor, userId);
+  } catch (e) {
+    throw new CrmError(e instanceof Error ? e.message : "Customer not found");
+  }
+  const row = await db.$transaction(async (tx) => {
+    await assertWithinStaffLimits(tx, { actorId: actor.id, amount });
+    return addCredit(tx, { userId, amount, reason: "GOODWILL", actorId: actor.id, note: why.slice(0, 300) });
+  });
   await audit({ actorId: actor.id, approvedById: actor.id, action: "credit.issue", entity: "User", entityId: userId, summary: `+Rs ${(amount / 100).toFixed(2)} goodwill credit`, reason: why, after: { amount, ledgerId: row.id } });
   return row;
 }
 
 /**
- * Profile credit by an approver: below the approval threshold it is issued at once; at or above it a maker-checker
- * ApprovalRequest (WALLET_ADJUSTMENT, reason GOODWILL) is created for a second person.
+ * Profile credit by an approver: within the maker-checker limits it is issued at once; otherwise (threshold, or the
+ * approver's rolling-24h limit) a maker-checker ApprovalRequest (WALLET_ADJUSTMENT, reason GOODWILL) is created.
  */
 export async function issueCreditOrRequest(actor: Staff, userId: string, amount: number, note: string, idempotencyKey?: string | null) {
   need(actor, "refunds.approve");
   checkAmount(amount);
-  if (!(await needsApproval(amount))) return { issued: true as const, row: await issueCredit(actor, userId, amount, note) };
   const why = note.trim();
   if (why.length < 3) throw new CrmError("A reason is required for every credit");
+  try {
+    return { issued: true as const, row: await issueCredit(actor, userId, amount, note) };
+  } catch (e) {
+    if (!(e instanceof NeedsApprovalError)) throw e;
+  }
   const { request } = await requestApproval(actor, { kind: "WALLET_ADJUSTMENT", payload: { userId, amount, note: why.slice(0, 300), reason: "GOODWILL" }, reason: why, idempotencyKey });
   return { issued: false as const, approvalId: request.id };
 }

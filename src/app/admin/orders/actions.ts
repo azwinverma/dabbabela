@@ -7,7 +7,9 @@ import { requirePermission } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { done, fail, type ActionResult } from "@/lib/action";
 import { parseRupees, rs } from "@/lib/money";
-import { adjustOrder, cancelOrder, setOrderStatus, type CartLine, type Settlement } from "@/server/orders";
+import { adjustableCredit, adjustOrderTx, cancelOrder, setOrderStatus, type CartLine, type Settlement } from "@/server/orders";
+import { assertWithinStaffLimits, NeedsApprovalError } from "@/server/money-limits";
+import { can } from "@/lib/permissions";
 import { createCorporateBulkOrder, createManualOrder, editOrderLines, quoteManualOrder, reassignDelivery, reassignKitchen, substituteOrderItem } from "@/server/orders-admin";
 import { f } from "@/app/admin/_kit/form";
 import { requestRefund } from "@/server/payments";
@@ -59,12 +61,25 @@ export async function adjustAction(orderId: string, _p: ActionResult, fd: FormDa
     const reason = reasonOf(fd);
     const amount = parseRupees(String(fd.get("amount") ?? ""));
     if (!amount) return fail("Enter an amount, e.g. -50 for a Rs 50 credit or 30 for an extra charge");
-    if (await needsApproval(amount)) {
+    // A negative adjustment is wallet credit = a refund in disguise: it needs refund rights (H3), is capped at what is
+    // left of the order's customer share (adjustOrderTx), and counts toward the person's 24 h money limit.
+    if (amount < 0 && !can(user, "refunds.create")) return fail("Crediting the customer needs refund permission — ask finance");
+    try {
+      await db.$transaction(async (tx) => {
+        if (amount < 0) await assertWithinStaffLimits(tx, { actorId: user.id, amount: -amount });
+        else if (await needsApproval(amount)) throw new NeedsApprovalError("This needs a second person: at or above the approval threshold");
+        await adjustOrderTx(tx, orderId, user.id, amount, reason);
+      });
+    } catch (e) {
+      if (!(e instanceof NeedsApprovalError)) throw e;
+      if (amount < 0) {
+        const room = await adjustableCredit(orderId);
+        if (-amount > room) return fail(room > 0 ? `At most ${rs(room)} can be credited on this order` : "Nothing more can be credited on this order");
+      }
       const { replayed } = await requestApproval(user, { kind: "ORDER_ADJUSTMENT", payload: { orderId, amount, reason }, reason });
       revalidatePath(`/admin/orders/${orderId}`);
       return done(replayed ? "Already waiting for approval" : `Adjustment of ${rs(Math.abs(amount))} needs a second person — sent for approval`);
     }
-    await adjustOrder(orderId, user.id, amount, reason);
     await audit({ actorId: user.id, action: "order.adjust", entity: "Order", entityId: orderId, summary: `${o.number}: adjustment ${rs(amount)}`, reason, after: { amount } });
     revalidatePath(`/admin/orders/${orderId}`);
     return done(amount < 0 ? `${rs(-amount)} credited to the customer's wallet` : `Charge of ${rs(amount)} recorded`);
@@ -80,12 +95,14 @@ export async function refundAction(orderId: string, _p: ActionResult, fd: FormDa
     const amount = parseRupees(String(fd.get("amount") ?? ""));
     if (!amount || amount <= 0) return fail("Enter the refund amount");
     const method = (["ORIGINAL", "BANK", "CASH", "WALLET_CREDIT"].includes(String(fd.get("method"))) ? String(fd.get("method")) : "WALLET_CREDIT") as RefundMethod;
-    if (await needsApproval(amount)) {
+    try {
+      await requestRefund({ paymentId: o.paymentId, orderId, amount, reason, method, actorId: user.id });
+    } catch (e) {
+      if (!(e instanceof NeedsApprovalError)) throw e;
       const { replayed } = await requestApproval(user, { kind: "REFUND", payload: { paymentId: o.paymentId, orderId, amount, method, reason }, reason });
       revalidatePath(`/admin/orders/${orderId}`);
       return done(replayed ? "Already waiting for approval" : `Refund of ${rs(amount)} needs a second person — sent for approval`);
     }
-    await requestRefund({ paymentId: o.paymentId, orderId, amount, reason, method, actorId: user.id });
     revalidatePath(`/admin/orders/${orderId}`);
     return done(`Refund of ${rs(amount)} requested — finance approves and processes it`);
   });

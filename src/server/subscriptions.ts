@@ -13,6 +13,7 @@ import { checkCoupon, redeemCoupon } from "./coupons";
 import { assertDayCapacity, CapacityError, lockKitchenDay } from "./capacity";
 import { addCredit, spendCredit, walletBalance } from "./ledger";
 import { availableMethods } from "./payments/methods";
+import { expireOpenAttempts, lockPayment } from "./payments/attempts";
 import { priceCustomBox, type CustomPick } from "./builder";
 import {
   applyDayCompanyShares,
@@ -576,20 +577,29 @@ async function cloneMealOrder(tx: Tx, tpl: Order & { items: Prisma.OrderItemGetP
   });
 }
 
-/** Re-add `count` meals after the plan's last live meal, copying the money of the given template orders. */
-async function appendMeals(subId: string, templates: (Order & { items: Prisma.OrderItemGetPayload<object>[] })[], actorId: string | null, note: string) {
+/** Serialise changes to one plan (skip / unskip / cancel / append): a transaction-scoped advisory lock. */
+async function lockSubscription(tx: Tx, subId: string) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`sub:${subId}`}))`;
+}
+
+/**
+ * Re-add `count` meals after the plan's last live meal, copying the money of the given template orders. With `client`
+ * (a caller's transaction, which should hold lockSubscription) the meals are created inside it, so a skip and its
+ * appended meal commit together or not at all.
+ */
+async function appendMeals(subId: string, templates: (Order & { items: Prisma.OrderItemGetPayload<object>[] })[], actorId: string | null, note: string, client?: Tx) {
   const settings = await getSettings();
-  const sub = await db.subscription.findUniqueOrThrow({ where: { id: subId } });
-  const live = await db.order.findMany({ where: { subscriptionId: subId, status: { in: LIVE_STATUSES } }, select: { deliveryDate: true }, orderBy: { deliveryDate: "asc" } });
-  const taken = new Set(live.map((o) => isoDate(o.deliveryDate)));
-  const last = live.length ? isoDate(live[live.length - 1].deliveryDate) : todayKTM();
-  const after = last > todayKTM() ? last : todayKTM();
   const kitchenId = templates[0]?.kitchenId;
   if (!kitchenId || !templates.length) return [];
-  const dates = await nextServiceDates(after, templates.length, sub.days, settings, kitchenId, taken);
-  const offers = await getOffersForDates(dates, kitchenId);
-  const created: string[] = [];
-  await db.$transaction(async (tx) => {
+  const run = async (tx: Tx) => {
+    const sub = await tx.subscription.findUniqueOrThrow({ where: { id: subId } });
+    const live = await tx.order.findMany({ where: { subscriptionId: subId, status: { in: LIVE_STATUSES } }, select: { deliveryDate: true }, orderBy: { deliveryDate: "asc" } });
+    const taken = new Set(live.map((o) => isoDate(o.deliveryDate)));
+    const last = live.length ? isoDate(live[live.length - 1].deliveryDate) : todayKTM();
+    const after = last > todayKTM() ? last : todayKTM();
+    const dates = await nextServiceDates(after, templates.length, sub.days, settings, kitchenId, taken);
+    const offers = await getOffersForDates(dates, kitchenId);
+    const created: string[] = [];
     for (let i = 0; i < dates.length; i++) {
       await lockKitchenDay(tx, kitchenId, dates[i]);
       await assertDayCapacity(tx, { kitchenId, date: dates[i], meals: 1, slotId: templates[i].slotId });
@@ -598,8 +608,13 @@ async function appendMeals(subId: string, templates: (Order & { items: Prisma.Or
     }
     const end = await tx.order.findFirst({ where: { subscriptionId: subId, status: { in: LIVE_STATUSES } }, orderBy: { deliveryDate: "desc" } });
     if (end) await tx.subscription.update({ where: { id: subId }, data: { endDate: end.deliveryDate } });
+    return created;
+  };
+  if (client) return run(client);
+  return db.$transaction(async (tx) => {
+    await lockSubscription(tx, subId);
+    return run(tx);
   });
-  return created;
 }
 
 async function ownMeal(orderId: string, userId: string | null) {
@@ -612,6 +627,8 @@ async function ownMeal(orderId: string, userId: string | null) {
  * Skip one meal before the cut-off. Policy (MealPlan.skipPolicy, else Settings → skipPolicy):
  * EXTEND = the meal moves to the end of the plan; CREDIT = its paid value goes to the wallet.
  * Unpaid plans always EXTEND (there is nothing to credit yet).
+ * The status flip is a guarded update (status + version) in the SAME transaction as the credit / appended meal, under
+ * the plan lock: concurrent skips of one meal credit (or append) exactly once; the others fail.
  */
 export async function skipMeal(orderId: string, actor: { id: string; isStaff: boolean }, userId: string | null) {
   const settings = await getSettings();
@@ -622,23 +639,39 @@ export async function skipMeal(orderId: string, actor: { id: string; isStaff: bo
   if (!actor.isStaff && !(await changeWindowOpen(date, order.kitchenId, settings, cutoff))) throw new OrderError(`Skips for ${date} closed at ${cutoff}`);
   const paid = order.paymentStatus === "PAID" && order.customerShare > 0;
   const policy = paid ? skipPolicyFor(order.subscription.plan, settings) : "EXTEND";
-  await setOrderStatus([order.id], "SKIPPED", actor.id, policy === "CREDIT" ? "Skipped — credited" : "Skipped — moved to end of plan");
+  const note = policy === "CREDIT" ? "Skipped — credited" : "Skipped — moved to end of plan";
+  const credit = order.customerShare - order.refundedAmount;
   let moved: string[] = [];
-  if (policy === "CREDIT") {
-    await db.$transaction(async (tx) => {
-      await addCredit(tx, { userId: order.userId, amount: order.customerShare, reason: "SKIP_CREDIT", orderId: order.id, paymentId: order.paymentId, actorId: actor.id });
-      await tx.order.update({ where: { id: order.id }, data: { refundedAmount: order.customerShare, paymentStatus: "REFUNDED" } });
-      if (order.paymentId) await bumpPaymentRefund(tx, order.paymentId, order.customerShare);
-      await tx.subscription.update({ where: { id: order.subscription.id }, data: { mealsTotal: { decrement: 1 } } });
-    });
-  } else {
-    moved = await appendMeals(order.subscription.id, [order], actor.id, `Moved from ${date}`);
+  try {
+    moved = await db.$transaction(
+      async (tx) => {
+        await lockSubscription(tx, order.subscription.id);
+        const flip = await tx.order.updateMany({ where: { id: order.id, status: order.status, version: order.version }, data: { status: "SKIPPED", version: { increment: 1 } } });
+        if (!flip.count) throw new OrderError("This meal was just changed — refresh and try again");
+        await tx.orderStatusEvent.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: "SKIPPED", note, actorId: actor.id } });
+        if (policy === "CREDIT") {
+          if (credit > 0) {
+            await addCredit(tx, { userId: order.userId, amount: credit, reason: "SKIP_CREDIT", orderId: order.id, paymentId: order.paymentId, actorId: actor.id });
+            if (order.paymentId) await bumpPaymentRefund(tx, order.paymentId, credit);
+          }
+          await tx.order.update({ where: { id: order.id }, data: { refundedAmount: order.customerShare, paymentStatus: "REFUNDED" } });
+          await tx.subscription.update({ where: { id: order.subscription.id }, data: { mealsTotal: { decrement: 1 } } });
+          return [];
+        }
+        return appendMeals(order.subscription.id, [order], actor.id, `Moved from ${date}`, tx);
+      },
+      { timeout: 20_000 },
+    );
+  } catch (e) {
+    if (e instanceof CapacityError) throw new OrderError(e.message);
+    throw e;
   }
-  await db.subscriptionChange.create({ data: { subscriptionId: order.subscription.id, type: "SKIP", date: order.deliveryDate, detail: policy === "CREDIT" ? `Credited ${rs(order.customerShare)}` : `Moved to ${moved.join(", ") || "end of plan"}`, amount: policy === "CREDIT" ? order.customerShare : null, actorId: actor.id } });
-  return { policy, moved, credited: policy === "CREDIT" ? order.customerShare : 0 };
+  const credited = policy === "CREDIT" ? Math.max(0, credit) : 0;
+  await db.subscriptionChange.create({ data: { subscriptionId: order.subscription.id, type: "SKIP", date: order.deliveryDate, detail: policy === "CREDIT" ? `Credited ${rs(credited)}` : `Moved to ${moved.join(", ") || "end of plan"}`, amount: policy === "CREDIT" ? credited : null, actorId: actor.id } });
+  return { policy, moved, credited };
 }
 
-/** Undo a skip before the cut-off (only for EXTEND skips: the appended meal is removed again). */
+/** Undo a skip before the cut-off (only for EXTEND skips: the appended meal is removed again). One guarded transaction. */
 export async function unskipMeal(orderId: string, actor: { id: string; isStaff: boolean }, userId: string | null) {
   const settings = await getSettings();
   const order = await ownMeal(orderId, userId);
@@ -647,15 +680,27 @@ export async function unskipMeal(orderId: string, actor: { id: string; isStaff: 
   const date = isoDate(order.deliveryDate);
   const cutoff = await mealCutoff(date, order.kitchenId, order.companyId, settings);
   if (!actor.isStaff && !(await changeWindowOpen(date, order.kitchenId, settings, cutoff))) throw new OrderError(`Changes for ${date} closed at ${cutoff}`);
-  const lastAppended = await db.order.findFirst({ where: { subscriptionId: order.subscription.id, status: { in: ["SCHEDULED", "PENDING_PAYMENT"] }, deliveryDate: { gt: order.deliveryDate } }, orderBy: { deliveryDate: "desc" } });
-  await db.$transaction(async (tx) => {
-    await lockKitchenDay(tx, order.kitchenId, date);
-    await assertDayCapacity(tx, { kitchenId: order.kitchenId, date, meals: 1, slotId: order.slotId });
-  });
-  await setOrderStatus([order.id], "SCHEDULED", actor.id, "Skip undone");
-  if (lastAppended) await setOrderStatus([lastAppended.id], "CANCELLED", actor.id, `Removed — ${date} un-skipped`);
-  const end = await db.order.findFirst({ where: { subscriptionId: order.subscription.id, status: { in: LIVE_STATUSES } }, orderBy: { deliveryDate: "desc" } });
-  if (end) await db.subscription.update({ where: { id: order.subscription.id }, data: { endDate: end.deliveryDate } });
+  try {
+    await db.$transaction(async (tx) => {
+      await lockSubscription(tx, order.subscription.id);
+      await lockKitchenDay(tx, order.kitchenId, date);
+      await assertDayCapacity(tx, { kitchenId: order.kitchenId, date, meals: 1, slotId: order.slotId });
+      const flip = await tx.order.updateMany({ where: { id: order.id, status: "SKIPPED", version: order.version, paymentStatus: { not: "REFUNDED" } }, data: { status: "SCHEDULED", version: { increment: 1 } } });
+      if (!flip.count) throw new OrderError("This meal was just changed — refresh and try again");
+      await tx.orderStatusEvent.create({ data: { orderId: order.id, fromStatus: "SKIPPED", toStatus: "SCHEDULED", note: "Skip undone", actorId: actor.id } });
+      const lastAppended = await tx.order.findFirst({ where: { subscriptionId: order.subscription.id, status: { in: ["SCHEDULED", "PENDING_PAYMENT"] }, deliveryDate: { gt: order.deliveryDate } }, orderBy: { deliveryDate: "desc" } });
+      if (lastAppended) {
+        const c = await tx.order.updateMany({ where: { id: lastAppended.id, status: lastAppended.status, version: lastAppended.version }, data: { status: "CANCELLED", cancelledAt: new Date(), version: { increment: 1 } } });
+        if (!c.count) throw new OrderError("The plan was just changed — refresh and try again");
+        await tx.orderStatusEvent.create({ data: { orderId: lastAppended.id, fromStatus: lastAppended.status, toStatus: "CANCELLED", note: `Removed — ${date} un-skipped`, actorId: actor.id } });
+      }
+      const end = await tx.order.findFirst({ where: { subscriptionId: order.subscription.id, status: { in: LIVE_STATUSES } }, orderBy: { deliveryDate: "desc" } });
+      if (end) await tx.subscription.update({ where: { id: order.subscription.id }, data: { endDate: end.deliveryDate } });
+    });
+  } catch (e) {
+    if (e instanceof CapacityError) throw new OrderError(e.message);
+    throw e;
+  }
   await db.subscriptionChange.create({ data: { subscriptionId: order.subscription.id, type: "UNSKIP", date: order.deliveryDate, actorId: actor.id } });
 }
 
@@ -709,65 +754,91 @@ export async function resumeSubscription(subId: string, actor: { id: string; isS
 /**
  * Cancel a plan. Meals still before their cut-off are cancelled and their paid value goes back
  * as wallet credit (or a refund request when staff choose so). Meals already locked are kept.
+ *
+ * Exactly once (security review C1): ONE transaction under the plan lock flips the plan with a guarded update
+ * (status not CANCELLED/COMPLETED — a concurrent cancel gets count 0 and fails), flips each meal with a guarded
+ * update, and computes the money only from the meals it actually flipped (plus paid pause-holds), per payment.
+ * Refund settlements go through requestRefundTx (payment lock + refundable cap).
  */
 export async function cancelSubscription(subId: string, actor: { id: string; isStaff: boolean }, opts: { userId?: string; reason: string; settlement?: "CREDIT" | "REFUND" }) {
   const settings = await getSettings();
-  const sub = await db.subscription.findFirst({ where: { id: subId, ...(opts.userId ? { userId: opts.userId } : {}) }, include: { plan: true } });
-  if (!sub || ["CANCELLED", "COMPLETED"].includes(sub.status)) throw new OrderError("This plan can't be cancelled");
+  const sub0 = await db.subscription.findFirst({ where: { id: subId, ...(opts.userId ? { userId: opts.userId } : {}) }, include: { plan: true } });
+  if (!sub0 || ["CANCELLED", "COMPLETED"].includes(sub0.status)) throw new OrderError("This plan can't be cancelled");
   // Per-plan cancel policy decides how a customer's own cancellation settles; staff choose explicitly.
-  const policy = cancelPolicyFor(sub.plan);
-  if (!actor.isStaff && policy === "STAFF_ONLY" && sub.status !== "PENDING_PAYMENT") throw new OrderError(POLICY_TEXT.cancel.STAFF_ONLY);
+  const policy = cancelPolicyFor(sub0.plan);
+  if (!actor.isStaff && policy === "STAFF_ONLY" && sub0.status !== "PENDING_PAYMENT") throw new OrderError(POLICY_TEXT.cancel.STAFF_ONLY);
   if (!actor.isStaff) opts = { ...opts, settlement: policy === "REFUND" ? "REFUND" : "CREDIT" };
-  const orders = await db.order.findMany({ where: { subscriptionId: subId, status: { in: ["SCHEDULED", "PENDING_PAYMENT", "SKIPPED"] } }, include: { payment: true } });
-  let credit = 0;
-  const cancel: string[] = [];
-  for (const o of orders) {
-    if (o.status === "SKIPPED") continue;
-    if (!(await changeWindowOpen(isoDate(o.deliveryDate), o.kitchenId, settings))) continue; // locked meals still go out
-    cancel.push(o.id);
-    if (o.paymentStatus === "PAID") credit += o.customerShare - o.refundedAmount;
-  }
-  // Paid meals still on hold from a pause (never re-added) also come back. Skips that were moved
-  // to the end of the plan, and pause-holds already re-added on resume, carry no money any more.
-  const heldIds = new Set(
-    (
-      await db.order.findMany({
-        where: {
-          subscriptionId: subId,
-          status: "SKIPPED",
-          paymentStatus: "PAID",
-          events: { some: { note: "Plan paused" }, none: { note: "Re-added on resume" } },
-        },
-        select: { id: true },
-      })
-    ).map((o) => o.id),
-  );
-  const held = orders.filter((o) => heldIds.has(o.id) && o.refundedAmount < o.customerShare);
-  credit += held.reduce((a, o) => a + o.customerShare - o.refundedAmount, 0);
-  await setOrderStatus(cancel, "CANCELLED", actor.id, `Plan cancelled: ${opts.reason}`);
   const settlement = opts.settlement ?? "CREDIT";
-  const paymentId = orders[0]?.paymentId ?? null;
-  await db.$transaction(async (tx) => {
-    for (const id of [...cancel, ...held.map((h) => h.id)]) {
-      const o = orders.find((x) => x.id === id)!;
-      if (o.paymentStatus !== "PAID") continue;
-      await tx.order.update({ where: { id }, data: { refundedAmount: o.customerShare, paymentStatus: settlement === "CREDIT" ? "REFUNDED" : o.paymentStatus } });
-    }
-    if (credit > 0 && paymentId) {
-      if (settlement === "CREDIT") {
-        await addCredit(tx, { userId: sub.userId, amount: credit, reason: "CANCEL_CREDIT", paymentId, actorId: actor.id, note: `Plan ${sub.reference} cancelled` });
-        await bumpPaymentRefund(tx, paymentId, credit);
-      } else {
-        await tx.refund.create({ data: { paymentId, amount: credit, reason: `Plan ${sub.reference} cancelled: ${opts.reason}`, method: "ORIGINAL", requestedById: actor.id } });
+  // Which meals are still inside their change window (read-only; the flips below are guarded on status).
+  const candidates = await db.order.findMany({ where: { subscriptionId: subId, status: { in: ["SCHEDULED", "PENDING_PAYMENT"] } }, select: { id: true, deliveryDate: true, kitchenId: true } });
+  const open: string[] = [];
+  for (const o of candidates) if (await changeWindowOpen(isoDate(o.deliveryDate), o.kitchenId, settings)) open.push(o.id); // locked meals still go out
+  const { requestRefundTx } = await import("./payments");
+
+  return db.$transaction(
+    async (tx) => {
+      await lockSubscription(tx, subId);
+      const sub = await tx.subscription.findUnique({ where: { id: subId } });
+      if (!sub || ["CANCELLED", "COMPLETED"].includes(sub.status)) throw new OrderError("This plan can't be cancelled");
+      const flip = await tx.subscription.updateMany({ where: { id: subId, status: { notIn: ["CANCELLED", "COMPLETED"] } }, data: { status: "CANCELLED", cancelReason: opts.reason } });
+      if (!flip.count) throw new OrderError("This plan can't be cancelled");
+
+      // Lock every payment we may touch (sorted → no lock-order deadlocks with other payment writers).
+      const payIds = [...new Set((await tx.order.findMany({ where: { subscriptionId: subId, paymentId: { not: null } }, select: { paymentId: true } })).map((o) => o.paymentId!))].sort();
+      for (const id of payIds) await lockPayment(tx, id);
+
+      const now = new Date();
+      const changed: string[] = [];
+      for (const id of open) {
+        const o = await tx.order.findUnique({ where: { id }, select: { status: true } });
+        if (!o || (o.status !== "SCHEDULED" && o.status !== "PENDING_PAYMENT")) continue;
+        const u = await tx.order.updateMany({ where: { id, subscriptionId: subId, status: o.status }, data: { status: "CANCELLED", cancelledAt: now, version: { increment: 1 } } });
+        if (!u.count) continue;
+        await tx.orderStatusEvent.create({ data: { orderId: id, fromStatus: o.status, toStatus: "CANCELLED", note: `Plan cancelled: ${opts.reason}`, actorId: actor.id } });
+        changed.push(id);
       }
-    }
-    // Only the plan's own payment (an extra-meal payment linked to the plan settles with its own order).
-    const pending = await tx.payment.findFirst({ where: { subscriptionId: subId, status: "PENDING", orders: { some: { subscriptionId: subId } } } });
-    if (pending) await tx.payment.update({ where: { id: pending.id }, data: { status: "CANCELLED" } });
-    await tx.subscription.update({ where: { id: subId }, data: { status: "CANCELLED", cancelReason: opts.reason } });
-    await tx.subscriptionChange.create({ data: { subscriptionId: subId, type: "CANCEL", detail: `${cancel.length} meals cancelled${credit ? `, ${rs(credit)} ${settlement === "CREDIT" ? "credited" : "to refund"}` : ""}`, amount: credit || null, actorId: actor.id } });
-  });
-  return { cancelled: cancel.length, credit, settlement };
+      // Paid meals still on hold from a pause (never re-added) also come back. Skips that were moved to the end of the
+      // plan, and pause-holds already re-added on resume, carry no money any more.
+      const held = await tx.order.findMany({
+        where: { subscriptionId: subId, status: "SKIPPED", paymentStatus: "PAID", events: { some: { note: "Plan paused" }, none: { note: "Re-added on resume" } } },
+      });
+      const flipped = await tx.order.findMany({ where: { id: { in: changed } } });
+      const byPayment = new Map<string, typeof flipped>();
+      for (const o of [...flipped, ...held]) {
+        if (o.paymentStatus !== "PAID" || !o.paymentId || o.customerShare - o.refundedAmount <= 0) continue;
+        byPayment.set(o.paymentId, [...(byPayment.get(o.paymentId) ?? []), o]);
+      }
+      let credit = 0;
+      for (const [paymentId, rows] of byPayment) {
+        const pay = await tx.payment.findUniqueOrThrow({ where: { id: paymentId }, select: { status: true, method: true } });
+        const amount = rows.reduce((a, o) => a + o.customerShare - o.refundedAmount, 0);
+        const paymentPaid = ["PAID", "PARTIALLY_REFUNDED"].includes(pay.status);
+        credit += amount;
+        // A refund request needs a paid payment; meals paid at the door on a still-open cash payment come back as credit.
+        const refund = settlement === "REFUND" && paymentPaid;
+        for (const o of rows) {
+          const u = await tx.order.updateMany({ where: { id: o.id, refundedAmount: o.refundedAmount, paymentStatus: "PAID" }, data: { refundedAmount: o.customerShare, paymentStatus: refund ? undefined : "REFUNDED" } });
+          if (!u.count) throw new OrderError("The plan was just changed — refresh and try again");
+        }
+        if (refund) {
+          // Closed-loop credit: a wallet-paid plan goes back as credit, never cash.
+          await requestRefundTx(tx, { paymentId, amount, reason: `Plan ${sub.reference} cancelled: ${opts.reason}`, method: pay.method === "WALLET" ? "WALLET_CREDIT" : "ORIGINAL", actorId: actor.id });
+          continue;
+        }
+        await addCredit(tx, { userId: sub.userId, amount, reason: "CANCEL_CREDIT", paymentId, actorId: actor.id, note: `Plan ${sub.reference} cancelled` });
+        if (paymentPaid) await bumpPaymentRefund(tx, paymentId, amount);
+      }
+      // Only the plan's own payment (an extra-meal payment linked to the plan settles with its own order).
+      const pending = await tx.payment.findFirst({ where: { subscriptionId: subId, status: "PENDING", orders: { some: { subscriptionId: subId } } } });
+      if (pending) {
+        await expireOpenAttempts(tx, pending.id);
+        await tx.payment.update({ where: { id: pending.id }, data: { status: "CANCELLED", version: { increment: 1 } } });
+      }
+      await tx.subscriptionChange.create({ data: { subscriptionId: subId, type: "CANCEL", detail: `${changed.length} meals cancelled${credit ? `, ${rs(credit)} ${settlement === "CREDIT" ? "credited" : "to refund"}` : ""}`, amount: credit || null, actorId: actor.id } });
+      return { cancelled: changed.length, credit, settlement };
+    },
+    { timeout: 20_000 },
+  );
 }
 
 /** Move all editable future meals of a plan to another saved address (zone must be served). */
@@ -926,7 +997,12 @@ async function writeSwap(
     await addCredit(tx, { userId: order.userId, amount: -custDelta, reason: "ADJUSTMENT", orderId: order.id, paymentId: order.paymentId, actorId, note });
     if (order.paymentId) await bumpPaymentRefund(tx, order.paymentId, -custDelta);
   }
-  if (settlement === "DUE_LATER" && order.paymentId) await tx.payment.updateMany({ where: { id: order.paymentId, status: "PENDING" }, data: { amount: { increment: custDelta } } });
+  if (settlement === "DUE_LATER" && order.paymentId) {
+    // The pending payment grows/shrinks: lock it, and expire gateway sessions started for the old amount (M1).
+    await lockPayment(tx, order.paymentId);
+    const grown = await tx.payment.updateMany({ where: { id: order.paymentId, status: "PENDING" }, data: { amount: { increment: custDelta }, version: { increment: 1 } } });
+    if (grown.count) await expireOpenAttempts(tx, order.paymentId);
+  }
   const choices = { ...((sub.dayChoices as Record<string, DayPick> | null) ?? {}), [date]: { boxId: pick.box.id } };
   await tx.subscription.update({ where: { id: sub.id }, data: { dayChoices: choices as Prisma.InputJsonValue, boxChoice: "CUSTOM" } });
   await tx.subscriptionChange.create({
@@ -1006,7 +1082,12 @@ async function startSwapPayment(order: OwnMeal, pick: SwapPick, amount: number, 
   const key = swapPaymentKey(order.id, pick.box.id, order.version);
   const existing = await db.payment.findUnique({ where: { idempotencyKey: key } });
   if (existing && existing.userId === order.userId && existing.amount === amount && ["PENDING", "FAILED"].includes(existing.status)) {
-    if (existing.method !== method) await db.payment.update({ where: { id: existing.id }, data: { method, status: "PENDING" } });
+    if (existing.method !== method)
+      await db.$transaction(async (tx) => {
+        await lockPayment(tx, existing.id);
+        await expireOpenAttempts(tx, existing.id);
+        await tx.payment.update({ where: { id: existing.id }, data: { method, status: "PENDING", version: { increment: 1 } } });
+      });
     return { changed: false, delta: amount, settlement: "PAY_ONLINE" as const, paymentId: existing.id };
   }
   if (existing && existing.status === "PAID") throw new OrderError("This swap is already paid — refresh the page");

@@ -9,6 +9,7 @@ import { addCredit, walletBalance } from "./ledger";
 import { lockUser } from "./capacity";
 import { paymentRef } from "./orders";
 import { availableMethods } from "./payments/methods";
+import { expireOpenAttempts, lockPayment } from "./payments/attempts";
 
 /**
  * Wallet top-up (Phase 2A): customers buy Dabba Bela credit online. Closed-loop store credit — spendable only on
@@ -59,17 +60,29 @@ export type TopupLimits = {
   balance: number;
   /** Σ PAID + PENDING top-ups created today (Kathmandu). */
   usedToday: number;
-  /** Σ PENDING top-ups created today (not credited yet, but they will be if paid). */
+  /** Σ top-ups still payable (PENDING, or FAILED with an open gateway session), any day — they'll be credited if paid. */
   pendingToday: number;
   /** Largest amount allowed right now (0 = none). */
   maxNow: number;
 };
 
+/**
+ * A top-up that may still turn into credit: PENDING, or FAILED with a gateway session still open (a failed status
+ * check doesn't stop the customer finishing another session). Counted toward the cap whatever day it was started
+ * (M2: a pending top-up from yesterday used to drop out of the cap at midnight). Cancelled top-ups don't count:
+ * cancelling expires their sessions and markPaymentPaid refuses to credit a cancelled top-up.
+ */
+const stillPayable = (userId: string): Prisma.PaymentWhereInput => ({
+  userId,
+  purpose: "WALLET_TOPUP",
+  OR: [{ status: "PENDING" }, { status: "FAILED", attempts: { some: { status: "STARTED" } } }],
+});
+
 async function usage(client: Tx | typeof db, userId: string, now = new Date()) {
   const where = { userId, purpose: "WALLET_TOPUP" as const, createdAt: ktmDayRange(ktmNow(now).date) };
   const [used, pending, balance] = await Promise.all([
-    client.payment.aggregate({ where: { ...where, status: { in: TOPUP_COUNTED } }, _sum: { amount: true } }),
-    client.payment.aggregate({ where: { ...where, status: "PENDING" }, _sum: { amount: true } }),
+    client.payment.aggregate({ where: { ...where, OR: [{ status: { in: TOPUP_COUNTED } }, { status: "FAILED", attempts: { some: { status: "STARTED" } } }] }, _sum: { amount: true } }),
+    client.payment.aggregate({ where: stillPayable(userId), _sum: { amount: true } }),
     walletBalance(userId, client),
   ]);
   return { usedToday: used._sum.amount ?? 0, pendingToday: pending._sum.amount ?? 0, balance };
@@ -146,12 +159,19 @@ export async function startTopup(user: { id: string }, input: { amount: number; 
 }
 
 /**
- * Customer withdraws a top-up they haven't paid. Only PENDING/FAILED without an uploaded bank proof. If the gateway
- * later confirms money anyway, the reconciler still credits it (markPaymentPaid accepts CANCELLED payments).
+ * Customer withdraws a top-up they haven't paid. Only PENDING/FAILED without an uploaded bank proof. Its gateway
+ * sessions are expired, and a cancelled top-up is never credited: if the gateway still confirms money for it later,
+ * markPaymentPaid refuses it and raises a GATEWAY_MISMATCH alert so finance refunds it at the gateway (security
+ * review M2 — otherwise cancel-and-restart would bypass the daily limit and the balance cap).
  */
 export async function cancelTopup(userId: string, paymentId: string) {
-  const r = await db.payment.updateMany({ where: { id: paymentId, userId, purpose: "WALLET_TOPUP", status: { in: ["PENDING", "FAILED"] }, proofUrl: null }, data: { status: "CANCELLED", version: { increment: 1 } } });
-  if (!r.count) throw new TopupError("This top-up can't be cancelled (already paid, or your transfer proof is being checked)");
+  const ok = await db.$transaction(async (tx) => {
+    await lockPayment(tx, paymentId);
+    const r = await tx.payment.updateMany({ where: { id: paymentId, userId, purpose: "WALLET_TOPUP", status: { in: ["PENDING", "FAILED"] }, proofUrl: null }, data: { status: "CANCELLED", version: { increment: 1 } } });
+    if (r.count) await expireOpenAttempts(tx, paymentId);
+    return r.count > 0;
+  });
+  if (!ok) throw new TopupError("This top-up can't be cancelled (already paid, or your transfer proof is being checked)");
 }
 
 // ───────────── crediting (called only from markPaymentPaid) ─────────────

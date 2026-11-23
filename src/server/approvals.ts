@@ -15,8 +15,9 @@ import { notify } from "./notify";
 /**
  * Maker-checker approvals (Phase 2B, docs/PRODUCTION_READINESS_PLAN.md).
  *
- * Money actions whose absolute amount is at or above `settings.approvalThreshold` (paisa) — refunds, manual wallet
- * adjustments (credit or debit) and order adjustments — are stored as a PENDING `ApprovalRequest` instead of running.
+ * Money actions that would reach a maker-checker limit (src/server/money-limits.ts: `settings.approvalThreshold` per
+ * action or summed over a payment's refunds, or the person's rolling-24h `staffDailyMoneyLimit`) — refunds, manual
+ * wallet adjustments (credit or debit) and order adjustments — are stored as a PENDING `ApprovalRequest` instead.
  * A second staff member decides it:
  *   - the requester can never approve (or reject) their own request — super admins included;
  *   - the approver needs `approvals.approve` AND the permission of the action itself (KIND_PERMISSION), and the
@@ -136,8 +137,8 @@ async function targetOf(kind: ExecutableKind, payload: RefundPayload | WalletPay
     return { entity: "Payment", entityId: pay!.id, kitchenId };
   }
   if (kind === "WALLET_ADJUSTMENT") {
-    const u = await db.user.findUnique({ where: { id: (payload as WalletPayload).userId }, select: { id: true, deletedAt: true } });
-    if (!u) deny("Customer not found");
+    const u = await db.user.findUnique({ where: { id: (payload as WalletPayload).userId }, select: { id: true, deletedAt: true, role: true } });
+    if (!u || u.role !== "CUSTOMER") deny("Customer not found — wallet credit can only go to customer accounts");
     if (u!.deletedAt) deny("This customer's personal data was deleted");
     return { entity: "User", entityId: u!.id, kitchenId: null };
   }
@@ -146,8 +147,13 @@ async function targetOf(kind: ExecutableKind, payload: RefundPayload | WalletPay
   return { entity: "Order", entityId: o!.id, kitchenId: o!.kitchenId };
 }
 
+/**
+ * A request for a kitchen needs that kitchen in the approver's scope; a request with no kitchen (wallet adjustments,
+ * refunds of top-ups / swap differences) can only be decided by an approver with all-kitchen scope (M4).
+ */
 function inKitchenScope(actor: ApprovalActor, kitchenId: string | null) {
-  return !actor.kitchenIds || !kitchenId || actor.kitchenIds.includes(kitchenId);
+  if (!actor.kitchenIds) return true;
+  return Boolean(kitchenId && actor.kitchenIds.includes(kitchenId));
 }
 
 /** May this actor decide (approve/reject/retry) this request? Returns the reason when not. */
@@ -212,6 +218,10 @@ export async function requestApproval<K extends ExecutableKind>(actor: ApprovalA
     }
   }
   const target = await targetOf(input.kind, payload);
+  if (input.kind === "WALLET_ADJUSTMENT" && actor.kitchenIds) {
+    const n = await db.order.count({ where: { userId: (payload as WalletPayload).userId, kitchenId: { in: actor.kitchenIds } } });
+    if (!n) deny("This customer has no orders in your kitchens");
+  }
   const dup = await db.approvalRequest.findFirst({ where: { status: "PENDING", kind: input.kind, requestedById: actor.id, entityId: target.entityId, amount } });
   if (dup && JSON.stringify(dup.payload) === JSON.stringify(json(payload))) return { request: dup, replayed: true };
   let request: ApprovalRequest;
@@ -250,13 +260,14 @@ async function run(tx: Prisma.TransactionClient, req: ApprovalRequest, approverI
   }
   if (req.kind === "WALLET_ADJUSTMENT") {
     const p = payload as WalletPayload;
-    const u = await tx.user.findUnique({ where: { id: p.userId }, select: { deletedAt: true } });
+    const u = await tx.user.findUnique({ where: { id: p.userId }, select: { deletedAt: true, role: true } });
     if (!u || u.deletedAt) throw new ApprovalError("This customer's personal data was deleted");
+    if (u.role !== "CUSTOMER") throw new ApprovalError("Wallet credit can only go to customer accounts");
     const row = await adjustCreditTx(tx, { userId: p.userId, amount: p.amount, reason: p.reason ?? "ADJUSTMENT", actorId: req.requestedById, note: `${p.note} (approved)` });
     return { ledgerId: row.id };
   }
   const p = payload as OrderAdjustmentPayload;
-  const adj = await adjustOrderTx(tx, p.orderId, req.requestedById, p.amount, p.reason);
+  const adj = await adjustOrderTx(tx, p.orderId, req.requestedById, p.amount, p.reason, { approved: true });
   return { adjustmentId: adj.id };
 }
 
@@ -344,7 +355,7 @@ export const APPROVAL_STATUSES: ApprovalStatus[] = ["PENDING", "APPROVED", "EXEC
 export function approvalWhere(actor: ApprovalActor): Prisma.ApprovalRequestWhereInput {
   if (!can(actor, "approvals.approve")) return { requestedById: actor.id };
   if (!actor.kitchenIds) return {};
-  return { OR: [{ requestedById: actor.id }, { kitchenId: null }, { kitchenId: { in: actor.kitchenIds } }] };
+  return { OR: [{ requestedById: actor.id }, { kitchenId: { in: actor.kitchenIds } }] };
 }
 
 export async function listApprovals(actor: ApprovalActor, f: { status?: string | null; kind?: string | null; mine?: boolean; page?: number } = {}) {

@@ -6,7 +6,7 @@ import type { Role } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getSettings, saveSettings } from "@/lib/settings";
 import { placeCartOrder } from "@/server/orders";
-import { approveRefund, markPaymentPaid, processRefund, requestRefund } from "@/server/payments";
+import { approveRefund, markPaymentPaid, processRefund, requestRefund, requestRefundTx } from "@/server/payments";
 import { creditTopupPayment } from "@/server/wallet-topup";
 import { walletBalance } from "@/server/ledger";
 import {
@@ -154,7 +154,9 @@ describe("refund requests", () => {
     const big = await requestApproval(ops, { kind: "REFUND", payload: { paymentId, amount: left, method: "ORIGINAL", reason: "Whole order" }, reason: "Whole order" });
     const state = await currentState(big.request);
     expect(state.find((s) => s.label === "Refundable on the payment")?.changed).toBe(false);
-    await requestRefund({ paymentId, amount: 1000, reason: "small", method: "WALLET_CREDIT", actorId: support.id });
+    // (a raw service-path refund, e.g. from a cancellation — a staff request would itself now need approval because
+    // refunds on this payment add up past the threshold)
+    await db.$transaction((tx) => requestRefundTx(tx, { paymentId, amount: 1000, reason: "small", method: "WALLET_CREDIT", actorId: support.id }));
     expect((await currentState(big.request)).find((s) => s.label === "Refundable on the payment")?.changed).toBe(true);
     const res = await approveRequest(finance, big.request.id);
     expect(res.status).toBe("FAILED");
@@ -294,7 +296,8 @@ describe("refund integrity (IDOR / mismatch)", () => {
 
   it("a refund at or above the threshold can't be approved by its own requester (safety net for any path)", async () => {
     const o = await db.order.findUniqueOrThrow({ where: { id: orderIds[1] } });
-    const r = await requestRefund({ paymentId, orderId: o.id, amount: Math.min(THRESHOLD, o.customerShare), reason: "cancel refund", method: "WALLET_CREDIT", actorId: finance.id });
+    // Created through a raw service path (as a cancellation does) — a direct staff request this size goes to approvals.
+    const r = await db.$transaction((tx) => requestRefundTx(tx, { paymentId, orderId: o.id, amount: Math.min(THRESHOLD, o.customerShare), reason: "cancel refund", method: "WALLET_CREDIT", actorId: finance.id }));
     await expect(approveRefund(r.id, finance.id)).rejects.toThrow(/second person/);
     await approveRefund(r.id, finance2.id);
     expect((await db.refund.findUniqueOrThrow({ where: { id: r.id } })).status).toBe("APPROVED");
