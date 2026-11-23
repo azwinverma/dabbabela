@@ -10,10 +10,14 @@ import '../../models/auth.dart';
 /// Shared by the kitchen and dispatcher sections: repositories, the kitchen in scope and the service day.
 final riderRepositoryProvider = Provider<RiderRepository>((ref) => RiderRepository(ref.watch(apiClientProvider)));
 final kitchenRepositoryProvider = Provider<KitchenRepository>((ref) => KitchenRepository(ref.watch(apiClientProvider)));
-final dispatchRepositoryProvider = Provider<DispatchRepository>((ref) => DispatchRepository(ref.watch(apiClientProvider)));
+final dispatchRepositoryProvider = Provider<DispatchRepository>(
+  (ref) => DispatchRepository(ref.watch(apiClientProvider)),
+);
 
 /// Kitchens in the caller's scope (GET /kitchen/kitchens).
-final kitchensProvider = FutureProvider.autoDispose<List<KitchenRef>>((ref) => ref.watch(kitchenRepositoryProvider).kitchens());
+final kitchensProvider = FutureProvider.autoDispose<List<KitchenRef>>(
+  (ref) => ref.watch(kitchenRepositoryProvider).kitchens(),
+);
 
 /// The kitchen the user picked (remembered while the app runs). Null = first kitchen in scope.
 final selectedKitchenIdProvider = StateProvider<String?>((ref) => null);
@@ -54,19 +58,25 @@ class KitchenDateBar extends ConsumerWidget {
                     isExpanded: true,
                     value: current?.id,
                     hint: Text(l.pickKitchen),
-                    items: [for (final k in kitchens) DropdownMenuItem(value: k.id, child: Text(k.name, overflow: TextOverflow.ellipsis))],
+                    items: [
+                      for (final k in kitchens)
+                        DropdownMenuItem(value: k.id, child: Text(k.name, overflow: TextOverflow.ellipsis)),
+                    ],
                     onChanged: (v) => ref.read(selectedKitchenIdProvider.notifier).state = v,
                   ),
                 ),
               )
             else if (showKitchen && current != null)
-              Expanded(child: Text(current.name, style: Theme.of(context).textTheme.titleSmall, overflow: TextOverflow.ellipsis))
+              Expanded(
+                child: Text(
+                  current.name,
+                  style: Theme.of(context).textTheme.titleSmall,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              )
             else
               const Spacer(),
-            DateStepper(
-              date: date,
-              onChanged: (d) => ref.read(staffDateProvider.notifier).state = d,
-            ),
+            DateStepper(date: date, onChanged: (d) => ref.read(staffDateProvider.notifier).state = d),
           ],
         ),
       ),
@@ -90,15 +100,20 @@ class DateStepper extends StatelessWidget {
     final l = context.l10n;
     final prev = KtmDates.addDays(date, -1);
     final next = KtmDates.addDays(date, 1);
-    final label = KtmDates.isToday(date)
-        ? l.today
-        : KtmDates.isTomorrow(date)
+    final label =
+        KtmDates.isToday(date)
+            ? l.today
+            : KtmDates.isTomorrow(date)
             ? l.tomorrow
             : KtmDates.serviceDay(date, locale: context.lang);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        IconButton(tooltip: l.back, onPressed: _inRange(prev) ? () => onChanged(prev) : null, icon: const Icon(Icons.chevron_left)),
+        IconButton(
+          tooltip: l.back,
+          onPressed: _inRange(prev) ? () => onChanged(prev) : null,
+          icon: const Icon(Icons.chevron_left),
+        ),
         TextButton.icon(
           icon: const Icon(Icons.calendar_today_outlined, size: 18),
           label: Text(label),
@@ -117,7 +132,11 @@ class DateStepper extends StatelessWidget {
             if (picked != null) onChanged(KtmDates.ymd(picked));
           },
         ),
-        IconButton(tooltip: l.continueLabel, onPressed: _inRange(next) ? () => onChanged(next) : null, icon: const Icon(Icons.chevron_right)),
+        IconButton(
+          tooltip: l.continueLabel,
+          onPressed: _inRange(next) ? () => onChanged(next) : null,
+          icon: const Icon(Icons.chevron_right),
+        ),
       ],
     );
   }

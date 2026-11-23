@@ -9,6 +9,169 @@ class AppLocalizationsNe extends AppLocalizations {
   AppLocalizationsNe([String locale = 'ne']) : super(locale);
 
   @override
+  String get signIn => 'लग इन';
+
+  @override
+  String get signInTitle => 'फेरि स्वागत छ';
+
+  @override
+  String get signUp => 'खाता खोल्नुहोस्';
+
+  @override
+  String get signUpTitle => 'जहाँ भए पनि, समयमै खाना';
+
+  @override
+  String get haveAccount => 'खाता छ? लग इन गर्नुहोस्';
+
+  @override
+  String get noAccount => 'नयाँ हो? खाता खोल्नुहोस्';
+
+  @override
+  String get email => 'इमेल';
+
+  @override
+  String get password => 'पासवर्ड';
+
+  @override
+  String get newPassword => 'नयाँ पासवर्ड';
+
+  @override
+  String get name => 'पूरा नाम';
+
+  @override
+  String get phone => 'मोबाइल नम्बर';
+
+  @override
+  String get phoneHint => '९८XXXXXXXX';
+
+  @override
+  String get companyCode => 'कम्पनी कोड';
+
+  @override
+  String get referralCode => 'रेफरल कोड';
+
+  @override
+  String get showPassword => 'पासवर्ड देखाउनुहोस्';
+
+  @override
+  String get invalidEmail => 'सही इमेल लेख्नुहोस्';
+
+  @override
+  String get invalidPhone => 'नेपाली मोबाइल नम्बर लेख्नुहोस् (९८/९७/९६ + ८ अंक)';
+
+  @override
+  String get passwordTooShort => 'कम्तीमा ८ अक्षर';
+
+  @override
+  String get forgotPassword => 'पासवर्ड बिर्सनुभयो?';
+
+  @override
+  String get forgotTitle => 'पासवर्ड रिसेट गर्नुहोस्';
+
+  @override
+  String get forgotBody => 'हामी इमेलमा लिङ्क पठाउँछौँ। यही फोनमा खोल्नुहोस्, वा लिङ्कको कोड “मसँग रिसेट कोड छ” मा राख्नुहोस्।';
+
+  @override
+  String get sendLink => 'रिसेट लिङ्क पठाउनुहोस्';
+
+  @override
+  String get haveResetCode => 'मसँग रिसेट कोड छ';
+
+  @override
+  String get resetCode => 'रिसेट कोड (इमेल लिङ्कबाट)';
+
+  @override
+  String get setPassword => 'नयाँ पासवर्ड राख्नुहोस्';
+
+  @override
+  String get passwordReset => 'पासवर्ड बदलियो। नयाँ पासवर्डले लग इन गर्नुहोस्।';
+
+  @override
+  String get twoFactorTitle => 'अथेन्टिकेटर कोड लेख्नुहोस्';
+
+  @override
+  String get twoFactorBody => 'अथेन्टिकेटर एप खोलेर डब्बा बेलाको ६ अंकको कोड लेख्नुहोस्।';
+
+  @override
+  String get code => 'कोड';
+
+  @override
+  String get verify => 'पुष्टि गर्नुहोस्';
+
+  @override
+  String get useBackupCode => 'ब्याकअप कोड प्रयोग गर्नुहोस्';
+
+  @override
+  String get useAuthenticator => 'अथेन्टिकेटर एप प्रयोग गर्नुहोस्';
+
+  @override
+  String get backupCode => 'ब्याकअप कोड';
+
+  @override
+  String get challengeExpired => 'लग इनको समय सकियो। फेरि लग इन गर्नुहोस्।';
+
+  @override
+  String get phoneSignIn => 'SMS कोडबाट लग इन';
+
+  @override
+  String get sendCode => 'कोड पठाउनुहोस्';
+
+  @override
+  String codeSent(Object phone) {
+    return '$phone मा कोड पठायौँ';
+  }
+
+  @override
+  String get resendCode => 'नयाँ कोड पठाउनुहोस्';
+
+  @override
+  String get enrolTitle => 'दुई-चरण लग इन सेटअप';
+
+  @override
+  String get enrolIntro => 'स्टाफ खातामा अथेन्टिकेटर एप चाहिन्छ। सुरु गर्न पासवर्ड पुष्टि गर्नुहोस्।';
+
+  @override
+  String get enrolScan => 'अथेन्टिकेटर एपले यो QR स्क्यान गर्नुहोस्, वा कि हातैले लेख्नुहोस्।';
+
+  @override
+  String get enrolSecret => 'सेटअप कि';
+
+  @override
+  String get backupCodesTitle => 'ब्याकअप कोड';
+
+  @override
+  String get backupCodesBody => 'यी सुरक्षित ठाउँमा राख्नुहोस्। फोन हरायो भने प्रत्येक एक पटक चल्छ। फेरि देखाइँदैन।';
+
+  @override
+  String get enrolConfirm => 'सक्न एपको ६ अंकको कोड लेख्नुहोस्';
+
+  @override
+  String get enrolDone => 'दुई-चरण लग इन सक्रिय भयो।';
+
+  @override
+  String get twoFactorOn => 'यो खातामा दुई-चरण लग इन सक्रिय छ।';
+
+  @override
+  String get sessionsTitle => 'लग इन भएका उपकरण';
+
+  @override
+  String get thisDevice => 'यो उपकरण';
+
+  @override
+  String get signOutOthers => 'अरू सबै उपकरणबाट लग आउट';
+
+  @override
+  String get revoke => 'लग आउट';
+
+  @override
+  String lastActive(Object when) {
+    return 'पछिल्लो पटक $when';
+  }
+
+  @override
+  String get maintenance => 'मर्मत भइरहेको छ';
+
+  @override
   String get appName => 'डब्बा बेला';
 
   @override
@@ -216,6 +379,392 @@ class AppLocalizationsNe extends AppLocalizations {
   @override
   String orderCount(int count) {
     return '$count अर्डर';
+  }
+
+  @override
+  String get riderRoutesTitle => 'मेरा रुट';
+
+  @override
+  String get riderNoRoutes => 'यो दिन कुनै रुट छैन।';
+
+  @override
+  String riderStopsProgress(int done, int total) {
+    return '$total मध्ये $done स्टप सकियो';
+  }
+
+  @override
+  String riderCashCollected(Object amount) {
+    return 'उठेको नगद: $amount';
+  }
+
+  @override
+  String get riderReadOnly => 'हेर्न मात्र — यहाँबाट यो रुट बदल्न मिल्दैन।';
+
+  @override
+  String riderRouteCount(int count) {
+    return '$count रुट';
+  }
+
+  @override
+  String riderStop(int n) {
+    return 'स्टप $n';
+  }
+
+  @override
+  String get riderDeliver => 'पुर्‍याइयो';
+
+  @override
+  String get riderFail => 'पुर्‍याउन सकिएन';
+
+  @override
+  String get riderFinishRoute => 'रुट सक्नुहोस्';
+
+  @override
+  String get riderFinishConfirm => 'यो रुट सक्ने? सबै स्टप पुर्‍याइएको वा असफल चिनो लगाइएको छ भनी जाँच्नुहोस्।';
+
+  @override
+  String get riderRouteFinished => 'रुट सकियो।';
+
+  @override
+  String riderOpenStops(int count) {
+    return '$count स्टप बाँकी';
+  }
+
+  @override
+  String riderDeliverTitle(Object number) {
+    return '$number पुर्‍याइएको चिनो';
+  }
+
+  @override
+  String get riderOtpLabel => 'ग्राहकको ४ अंकको कोड';
+
+  @override
+  String get riderOtpHelp => 'ग्राहकको एप वा SMS मा देखिएको कोड सोध्नुहोस्।';
+
+  @override
+  String get riderOtpInvalid => '४ अंकको कोड लेख्नुहोस्';
+
+  @override
+  String riderCollect(Object amount) {
+    return '$amount नगद लिनुहोस्';
+  }
+
+  @override
+  String get riderCashLabel => 'लिएको नगद (रु)';
+
+  @override
+  String riderCashMismatch(Object amount) {
+    return 'ठ्याक्कै $amount हुनुपर्छ';
+  }
+
+  @override
+  String get riderPhoto => 'डेलिभरी फोटो';
+
+  @override
+  String get riderPhotoRequired => 'पुर्‍याइएको डब्बाको फोटो चाहिन्छ।';
+
+  @override
+  String get riderTakePhoto => 'फोटो खिच्नुहोस्';
+
+  @override
+  String get riderChoosePhoto => 'फोटो छान्नुहोस्';
+
+  @override
+  String get riderRemovePhoto => 'फोटो हटाउनुहोस्';
+
+  @override
+  String riderDelivered(Object number) {
+    return '$number पुर्‍याइयो।';
+  }
+
+  @override
+  String get riderFailTitle => 'किन पुर्‍याउन सकिएन?';
+
+  @override
+  String get riderFailDetail => 'के भयो?';
+
+  @override
+  String riderFailed(Object number) {
+    return '$number असफल चिनो लगाइयो।';
+  }
+
+  @override
+  String get riderAllergen => 'एलर्जी टिप्पणी';
+
+  @override
+  String get riderInstructions => 'निर्देशन';
+
+  @override
+  String get riderPrepaid => 'भुक्तानी भइसक्यो — केही लिनु पर्दैन';
+
+  @override
+  String get riderCantOpen => 'यो फोनमा त्यो एप खुलेन।';
+
+  @override
+  String get kitchenProduction => 'उत्पादन';
+
+  @override
+  String get kitchenBatches => 'ब्याच';
+
+  @override
+  String get kitchenQc => 'गुणस्तर लग';
+
+  @override
+  String get kitchenAlerts => 'स्टक सूचना';
+
+  @override
+  String get kitchenOrders => 'अर्डर';
+
+  @override
+  String get kitchenMeals => 'खाना';
+
+  @override
+  String get kitchenPendingPayment => 'भुक्तानी बाँकी';
+
+  @override
+  String get kitchenAllergenFlagged => 'एलर्जी चिनो';
+
+  @override
+  String get kitchenByDabba => 'डब्बा अनुसार';
+
+  @override
+  String get kitchenBySlot => 'डेलिभरी समय अनुसार';
+
+  @override
+  String get kitchenDishes => 'पकाउने परिकार';
+
+  @override
+  String kitchenPortions(int portions, int buffer, int total) {
+    return '$portions + $buffer बफर = $total';
+  }
+
+  @override
+  String get kitchenStartPreparing => 'पकाउन सुरु';
+
+  @override
+  String get kitchenPack => 'प्याक';
+
+  @override
+  String get kitchenPackChecksTitle => 'प्याकिङ जाँच';
+
+  @override
+  String get kitchenPackChecksBody => 'छानिएका हरेक अर्डरका लागि पुष्टि गर्नुहोस्:';
+
+  @override
+  String get kitchenCheckItems => 'सामान टिकटसँग मिल्छ';
+
+  @override
+  String get kitchenCheckLabel => 'डब्बामा लेबल छ';
+
+  @override
+  String get kitchenCheckAllergen => 'एलर्जी टिप्पणी पालना भयो';
+
+  @override
+  String get kitchenCheckSealed => 'सिल गरियो';
+
+  @override
+  String kitchenChanged(int count) {
+    return '$count अर्डर अद्यावधिक भयो';
+  }
+
+  @override
+  String get kitchenRejected => 'बदलिएन:';
+
+  @override
+  String get kitchenSelectOrders => 'एकैपटक काम गर्न अर्डर छान्नुहोस्।';
+
+  @override
+  String get kitchenNoOrders => 'यो भान्सा-दिनका लागि अर्डर छैन।';
+
+  @override
+  String get kitchenPlanBatches => 'पूर्वानुमानबाट ब्याच योजना';
+
+  @override
+  String kitchenPlanned(int created, int updated) {
+    return '$created नयाँ, $updated अद्यावधिक';
+  }
+
+  @override
+  String get kitchenNoBatches => 'अहिलेसम्म ब्याच छैन। पूर्वानुमानबाट योजना बनाउनुहोस्।';
+
+  @override
+  String kitchenBatchPortions(int planned, int buffer) {
+    return '$planned योजना (+$buffer बफर)';
+  }
+
+  @override
+  String get kitchenStartCooking => 'पकाउन सुरु';
+
+  @override
+  String get kitchenMarkDone => 'सकियो चिनो';
+
+  @override
+  String get kitchenCancelBatch => 'ब्याच रद्द';
+
+  @override
+  String get kitchenActualPortions => 'वास्तविक भाग';
+
+  @override
+  String get kitchenWastePortions => 'खेर गएको भाग';
+
+  @override
+  String get kitchenShortages => 'स्टक कमी';
+
+  @override
+  String get kitchenLogQc => 'जाँच दर्ता';
+
+  @override
+  String get kitchenQcType => 'जाँच';
+
+  @override
+  String get kitchenQcValue => 'मान (जस्तै 68°C)';
+
+  @override
+  String get kitchenQcPass => 'पास';
+
+  @override
+  String get kitchenQcFail => 'फेल';
+
+  @override
+  String get kitchenQcNoteRequired => 'फेल जाँचमा टिप्पणी चाहिन्छ।';
+
+  @override
+  String get kitchenNoQc => 'यो दिन कुनै जाँच दर्ता छैन।';
+
+  @override
+  String get kitchenNoAlerts => 'स्टक सूचना छैन। सबै ठिक छ।';
+
+  @override
+  String get qcTEMPERATURE => 'तापक्रम';
+
+  @override
+  String get qcTASTE => 'स्वाद';
+
+  @override
+  String get qcHYGIENE => 'सरसफाइ';
+
+  @override
+  String get qcPACKAGING => 'प्याकेजिङ';
+
+  @override
+  String get qcOTHER => 'अन्य';
+
+  @override
+  String get dispatchBoard => 'बोर्ड';
+
+  @override
+  String get dispatchRoutes => 'रुट';
+
+  @override
+  String get dispatchFailed => 'असफल';
+
+  @override
+  String get dispatchHandOffPoints => 'हस्तान्तरण स्थान';
+
+  @override
+  String get dispatchUnrouted => 'रुट नभएका';
+
+  @override
+  String get dispatchOut => 'बाहिर';
+
+  @override
+  String get dispatchChanged => 'रुटपछि बदलिएका';
+
+  @override
+  String get dispatchManifest => 'म्यानिफेस्ट (समय × क्षेत्र)';
+
+  @override
+  String get dispatchUnroutedOrders => 'रुट नभएका अर्डर';
+
+  @override
+  String get dispatchAllRouted => 'सबै अर्डर रुटमा छन्।';
+
+  @override
+  String get dispatchCreateRoute => 'नयाँ रुट';
+
+  @override
+  String get dispatchAddToRoute => 'रुटमा थप्नुहोस्';
+
+  @override
+  String get dispatchAutoGroup => 'स्वतः समूह';
+
+  @override
+  String get dispatchAutoGroupConfirm => 'रुट नभएका सबै अर्डरलाई समय × क्षेत्र अनुसार एक-एक रुटमा राख्ने?';
+
+  @override
+  String dispatchAutoGrouped(int routes, int stops) {
+    return '$routes रुट, $stops स्टप';
+  }
+
+  @override
+  String get dispatchRouteName => 'रुटको नाम';
+
+  @override
+  String get dispatchSlot => 'डेलिभरी समय';
+
+  @override
+  String get dispatchZone => 'क्षेत्र';
+
+  @override
+  String get dispatchRider => 'राइडर';
+
+  @override
+  String get dispatchNone => 'कुनै होइन';
+
+  @override
+  String get dispatchNoRider => 'राइडर छैन';
+
+  @override
+  String get dispatchAssignRider => 'राइडर तोक्नुहोस्';
+
+  @override
+  String get dispatchUnavailable => 'व्यस्त';
+
+  @override
+  String get dispatchStart => 'पठाउनुहोस्';
+
+  @override
+  String get dispatchComplete => 'रुट बन्द';
+
+  @override
+  String dispatchStarted(int out, int notPacked) {
+    return '$out डेलिभरीमा, $notPacked प्याक बाँकी';
+  }
+
+  @override
+  String get dispatchRemoveStop => 'रुटबाट हटाउनुहोस्';
+
+  @override
+  String get dispatchNoRoutes => 'यो दिनका लागि रुट छैन।';
+
+  @override
+  String dispatchCashExpected(Object collected, Object expected) {
+    return 'नगद $expected मध्ये $collected';
+  }
+
+  @override
+  String get dispatchNoFailed => 'यो दिन कुनै असफल डेलिभरी छैन।';
+
+  @override
+  String get dispatchRetry => 'फेरि पठाउनुहोस्';
+
+  @override
+  String get dispatchCancelCredit => 'रद्द + क्रेडिट';
+
+  @override
+  String get dispatchCancelCreditBody => 'यो अर्डर रद्द गरी ग्राहकको वालेटमा क्रेडिट दिनुहोस्।';
+
+  @override
+  String dispatchResolved(Object number) {
+    return '$number अद्यावधिक भयो।';
+  }
+
+  @override
+  String get dispatchPickRoute => 'रुट छान्नुहोस्';
+
+  @override
+  String dispatchFailedReason(Object reason) {
+    return 'पछिल्लो कारण: $reason';
   }
 
   @override

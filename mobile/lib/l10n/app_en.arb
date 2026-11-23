@@ -1,5 +1,68 @@
 {
   "@@locale": "en",
+  "signIn": "Sign in",
+  "signInTitle": "Welcome back",
+  "signUp": "Create account",
+  "signUpTitle": "Lunch, on time, wherever you are",
+  "haveAccount": "Already have an account? Sign in",
+  "noAccount": "New here? Create an account",
+  "email": "Email",
+  "password": "Password",
+  "newPassword": "New password",
+  "name": "Full name",
+  "phone": "Mobile number",
+  "phoneHint": "98XXXXXXXX",
+  "companyCode": "Company code",
+  "referralCode": "Referral code",
+  "showPassword": "Show password",
+  "invalidEmail": "Enter a valid email",
+  "invalidPhone": "Enter a Nepal mobile number (98/97/96 + 8 digits)",
+  "passwordTooShort": "At least 8 characters",
+  "forgotPassword": "Forgot password?",
+  "forgotTitle": "Reset your password",
+  "forgotBody": "We'll email you a link. Open it on this phone, or copy the code from the link into “I have a reset code”.",
+  "sendLink": "Send reset link",
+  "haveResetCode": "I have a reset code",
+  "resetCode": "Reset code (from the email link)",
+  "setPassword": "Set new password",
+  "passwordReset": "Password changed. Sign in with the new one.",
+  "twoFactorTitle": "Enter your authenticator code",
+  "twoFactorBody": "Open your authenticator app and type the 6-digit code for Dabba Bela.",
+  "code": "Code",
+  "verify": "Verify",
+  "useBackupCode": "Use a backup code instead",
+  "useAuthenticator": "Use the authenticator app",
+  "backupCode": "Backup code",
+  "challengeExpired": "That sign-in expired. Please sign in again.",
+  "phoneSignIn": "Sign in with an SMS code",
+  "sendCode": "Send code",
+  "codeSent": "We sent a code to {phone}",
+  "@codeSent": {
+    "placeholders": {
+      "phone": {}
+    }
+  },
+  "resendCode": "Send a new code",
+  "enrolTitle": "Set up two-step sign-in",
+  "enrolIntro": "Staff accounts need an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password…). Confirm your password to start.",
+  "enrolScan": "Scan this QR code with your authenticator app, or enter the key by hand.",
+  "enrolSecret": "Setup key",
+  "backupCodesTitle": "Backup codes",
+  "backupCodesBody": "Save these somewhere safe. Each works once if you lose your phone. They won't be shown again.",
+  "enrolConfirm": "Enter the 6-digit code from the app to finish",
+  "enrolDone": "Two-step sign-in is on.",
+  "twoFactorOn": "Two-step sign-in is on for this account.",
+  "sessionsTitle": "Signed-in devices",
+  "thisDevice": "This device",
+  "signOutOthers": "Sign out all other devices",
+  "revoke": "Sign out",
+  "lastActive": "Last active {when}",
+  "@lastActive": {
+    "placeholders": {
+      "when": {}
+    }
+  },
+  "maintenance": "We're doing some maintenance",
   "appName": "Dabba Bela",
   "tagline": "Your lunch. Your way. Ghar ko swad.",
   "retry": "Try again",
@@ -87,6 +150,259 @@
       "count": {
         "type": "int"
       }
+    }
+  },
+  "riderRoutesTitle": "My routes",
+  "riderNoRoutes": "No routes for this day.",
+  "riderStopsProgress": "{done} of {total} stops done",
+  "@riderStopsProgress": {
+    "placeholders": {
+      "done": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "riderCashCollected": "Cash collected: {amount}",
+  "@riderCashCollected": {
+    "placeholders": {
+      "amount": {}
+    }
+  },
+  "riderReadOnly": "View only — this route can't be changed from here.",
+  "riderRouteCount": "{count, plural, =0{No routes} =1{1 route} other{{count} routes}}",
+  "@riderRouteCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "riderStop": "Stop {n}",
+  "@riderStop": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "riderDeliver": "Delivered",
+  "riderFail": "Couldn't deliver",
+  "riderFinishRoute": "Finish route",
+  "riderFinishConfirm": "Finish this route? Make sure every stop is delivered or marked failed.",
+  "riderRouteFinished": "Route finished.",
+  "riderOpenStops": "{count, plural, =1{1 stop still out} other{{count} stops still out}}",
+  "@riderOpenStops": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "riderDeliverTitle": "Mark {number} delivered",
+  "@riderDeliverTitle": {
+    "placeholders": {
+      "number": {}
+    }
+  },
+  "riderOtpLabel": "Customer's 4-digit code",
+  "riderOtpHelp": "Ask the customer for the code shown in their app or SMS.",
+  "riderOtpInvalid": "Enter the 4-digit code",
+  "riderCollect": "Collect {amount} in cash",
+  "@riderCollect": {
+    "placeholders": {
+      "amount": {}
+    }
+  },
+  "riderCashLabel": "Cash collected (Rs)",
+  "riderCashMismatch": "Must be exactly {amount}",
+  "@riderCashMismatch": {
+    "placeholders": {
+      "amount": {}
+    }
+  },
+  "riderPhoto": "Delivery photo",
+  "riderPhotoRequired": "A photo of the delivered dabba is required.",
+  "riderTakePhoto": "Take photo",
+  "riderChoosePhoto": "Choose photo",
+  "riderRemovePhoto": "Remove photo",
+  "riderDelivered": "{number} delivered.",
+  "@riderDelivered": {
+    "placeholders": {
+      "number": {}
+    }
+  },
+  "riderFailTitle": "Why couldn't you deliver?",
+  "riderFailDetail": "What happened?",
+  "riderFailed": "{number} marked failed.",
+  "@riderFailed": {
+    "placeholders": {
+      "number": {}
+    }
+  },
+  "riderAllergen": "Allergy note",
+  "riderInstructions": "Instructions",
+  "riderPrepaid": "Paid — nothing to collect",
+  "riderCantOpen": "Couldn't open that app on this phone.",
+  "kitchenProduction": "Production",
+  "kitchenBatches": "Batches",
+  "kitchenQc": "QC log",
+  "kitchenAlerts": "Stock alerts",
+  "kitchenOrders": "Orders",
+  "kitchenMeals": "Meals",
+  "kitchenPendingPayment": "Payment pending",
+  "kitchenAllergenFlagged": "Allergy flags",
+  "kitchenByDabba": "By dabba",
+  "kitchenBySlot": "By delivery slot",
+  "kitchenDishes": "Dishes to cook",
+  "kitchenPortions": "{portions} + {buffer} buffer = {total}",
+  "@kitchenPortions": {
+    "placeholders": {
+      "portions": {
+        "type": "int"
+      },
+      "buffer": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "kitchenStartPreparing": "Start preparing",
+  "kitchenPack": "Pack",
+  "kitchenPackChecksTitle": "Packing checks",
+  "kitchenPackChecksBody": "Confirm for each selected order:",
+  "kitchenCheckItems": "Items match the ticket",
+  "kitchenCheckLabel": "Label is on the dabba",
+  "kitchenCheckAllergen": "Allergy notes respected",
+  "kitchenCheckSealed": "Sealed",
+  "kitchenChanged": "{count, plural, =1{1 order updated} other{{count} orders updated}}",
+  "@kitchenChanged": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "kitchenRejected": "Not changed:",
+  "kitchenSelectOrders": "Select orders to act on them in bulk.",
+  "kitchenNoOrders": "No orders for this kitchen-day.",
+  "kitchenPlanBatches": "Plan batches from forecast",
+  "kitchenPlanned": "{created} created, {updated} updated",
+  "@kitchenPlanned": {
+    "placeholders": {
+      "created": {
+        "type": "int"
+      },
+      "updated": {
+        "type": "int"
+      }
+    }
+  },
+  "kitchenNoBatches": "No batches yet. Plan them from the forecast.",
+  "kitchenBatchPortions": "{planned} planned (+{buffer} buffer)",
+  "@kitchenBatchPortions": {
+    "placeholders": {
+      "planned": {
+        "type": "int"
+      },
+      "buffer": {
+        "type": "int"
+      }
+    }
+  },
+  "kitchenStartCooking": "Start cooking",
+  "kitchenMarkDone": "Mark done",
+  "kitchenCancelBatch": "Cancel batch",
+  "kitchenActualPortions": "Actual portions",
+  "kitchenWastePortions": "Wasted portions",
+  "kitchenShortages": "Stock shortages",
+  "kitchenLogQc": "Log a check",
+  "kitchenQcType": "Check",
+  "kitchenQcValue": "Reading (e.g. 68°C)",
+  "kitchenQcPass": "Pass",
+  "kitchenQcFail": "Fail",
+  "kitchenQcNoteRequired": "A failed check needs a note.",
+  "kitchenNoQc": "No checks logged for this day.",
+  "kitchenNoAlerts": "No stock alerts. All good.",
+  "qcTEMPERATURE": "Temperature",
+  "qcTASTE": "Taste",
+  "qcHYGIENE": "Hygiene",
+  "qcPACKAGING": "Packaging",
+  "qcOTHER": "Other",
+  "dispatchBoard": "Board",
+  "dispatchRoutes": "Routes",
+  "dispatchFailed": "Failed",
+  "dispatchHandOffPoints": "Hand-off points",
+  "dispatchUnrouted": "Unrouted",
+  "dispatchOut": "Out",
+  "dispatchChanged": "Changed after routing",
+  "dispatchManifest": "Manifest (slot × zone)",
+  "dispatchUnroutedOrders": "Unrouted orders",
+  "dispatchAllRouted": "Every order is on a route.",
+  "dispatchCreateRoute": "New route",
+  "dispatchAddToRoute": "Add to route",
+  "dispatchAutoGroup": "Auto-group",
+  "dispatchAutoGroupConfirm": "Put every unrouted order on one route per slot × zone?",
+  "dispatchAutoGrouped": "{routes} routes, {stops} stops",
+  "@dispatchAutoGrouped": {
+    "placeholders": {
+      "routes": {
+        "type": "int"
+      },
+      "stops": {
+        "type": "int"
+      }
+    }
+  },
+  "dispatchRouteName": "Route name",
+  "dispatchSlot": "Delivery slot",
+  "dispatchZone": "Zone",
+  "dispatchRider": "Rider",
+  "dispatchNone": "None",
+  "dispatchNoRider": "No rider yet",
+  "dispatchAssignRider": "Assign rider",
+  "dispatchUnavailable": "busy",
+  "dispatchStart": "Dispatch",
+  "dispatchComplete": "Close route",
+  "dispatchStarted": "{out} out for delivery, {notPacked} not packed yet",
+  "@dispatchStarted": {
+    "placeholders": {
+      "out": {
+        "type": "int"
+      },
+      "notPacked": {
+        "type": "int"
+      }
+    }
+  },
+  "dispatchRemoveStop": "Take off route",
+  "dispatchNoRoutes": "No routes yet for this day.",
+  "dispatchCashExpected": "Cash {collected} of {expected}",
+  "@dispatchCashExpected": {
+    "placeholders": {
+      "collected": {},
+      "expected": {}
+    }
+  },
+  "dispatchNoFailed": "No failed deliveries for this day.",
+  "dispatchRetry": "Retry delivery",
+  "dispatchCancelCredit": "Cancel + credit",
+  "dispatchCancelCreditBody": "Cancel this order and credit the customer's wallet.",
+  "dispatchResolved": "{number} updated.",
+  "@dispatchResolved": {
+    "placeholders": {
+      "number": {}
+    }
+  },
+  "dispatchPickRoute": "Choose a route",
+  "dispatchFailedReason": "Last reason: {reason}",
+  "@dispatchFailedReason": {
+    "placeholders": {
+      "reason": {}
     }
   },
   "stPENDING_PAYMENT": "Payment pending",

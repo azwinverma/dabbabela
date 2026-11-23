@@ -47,7 +47,10 @@ class RiderHomeScreen extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               child: Row(
                 children: [
-                  if (days != null) Expanded(child: Text(l.riderRouteCount(days.routesOn(date)), overflow: TextOverflow.ellipsis)) else const Spacer(),
+                  if (days != null)
+                    Expanded(child: Text(l.riderRouteCount(days.routesOn(date)), overflow: TextOverflow.ellipsis))
+                  else
+                    const Spacer(),
                   DateStepper(
                     date: date,
                     first: window?.from,
@@ -111,7 +114,12 @@ class _RouteCard extends StatelessWidget {
               if (route.slotLabel != null || route.riderName != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
-                  child: Text([if (route.slotLabel != null) route.slotLabel!, if (route.riderName != null) route.riderName!].join(' · ')),
+                  child: Text(
+                    [
+                      if (route.slotLabel != null) route.slotLabel!,
+                      if (route.riderName != null) route.riderName!,
+                    ].join(' · '),
+                  ),
                 ),
               const SizedBox(height: 10),
               LinearProgressIndicator(value: progress, minHeight: 6, borderRadius: BorderRadius.circular(6)),
@@ -144,47 +152,60 @@ class RiderRouteScreen extends ConsumerWidget {
       appBar: AppBar(title: Text(route?.name ?? l.riderRoutesTitle), actions: const [StaffActions()]),
       body: ProviderBody<RiderRouteDetail>(
         provider: provider,
-        builder: (context, r) => ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-          children: [
-            Row(
+        builder:
+            (context, r) => ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
               children: [
-                Expanded(
-                  child: Text(
-                    [KtmDates.serviceDay(r.date, locale: context.lang), if (r.slotLabel != null) r.slotLabel!].join(' · '),
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        [
+                          KtmDates.serviceDay(r.date, locale: context.lang),
+                          if (r.slotLabel != null) r.slotLabel!,
+                        ].join(' · '),
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                    ),
+                    StatusChip(r.status),
+                  ],
                 ),
-                StatusChip(r.status),
+                const SizedBox(height: 6),
+                Text(l.riderCashCollected(rs(context, r.cashCollected))),
+                if (r.readOnly) ...[const SizedBox(height: 10), Notice(l.riderReadOnly)],
+                const SizedBox(height: 12),
+                if (r.stops.isEmpty) EmptyView(message: l.riderNoRoutes),
+                for (final s in r.stops) ...[_StopCard(route: r, stop: s), const SizedBox(height: 10)],
+                if (!r.readOnly && r.status != 'DONE') ...[
+                  const SizedBox(height: 8),
+                  if (r.openStops > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(l.riderOpenStops(r.openStops), textAlign: TextAlign.center),
+                    ),
+                  BusyButton(
+                    label: l.riderFinishRoute,
+                    icon: Icons.flag_outlined,
+                    onPressed:
+                        r.canFinish
+                            ? () async {
+                              final ok = await confirmDialog(
+                                context,
+                                title: l.riderFinishRoute,
+                                body: l.riderFinishConfirm,
+                              );
+                              if (!ok) return;
+                              await ref.read(riderRepositoryProvider).finish(r.id);
+                              ref.invalidate(provider);
+                              ref.invalidate(riderRoutesProvider);
+                              if (context.mounted) showSnack(context, l.riderRouteFinished);
+                            }
+                            : null,
+                  ),
+                ],
               ],
             ),
-            const SizedBox(height: 6),
-            Text(l.riderCashCollected(rs(context, r.cashCollected))),
-            if (r.readOnly) ...[const SizedBox(height: 10), Notice(l.riderReadOnly)],
-            const SizedBox(height: 12),
-            if (r.stops.isEmpty) EmptyView(message: l.riderNoRoutes),
-            for (final s in r.stops) ...[_StopCard(route: r, stop: s), const SizedBox(height: 10)],
-            if (!r.readOnly && r.status != 'DONE') ...[
-              const SizedBox(height: 8),
-              if (r.openStops > 0) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(l.riderOpenStops(r.openStops), textAlign: TextAlign.center)),
-              BusyButton(
-                label: l.riderFinishRoute,
-                icon: Icons.flag_outlined,
-                onPressed: r.canFinish
-                    ? () async {
-                        final ok = await confirmDialog(context, title: l.riderFinishRoute, body: l.riderFinishConfirm);
-                        if (!ok) return;
-                        await ref.read(riderRepositoryProvider).finish(r.id);
-                        ref.invalidate(provider);
-                        ref.invalidate(riderRoutesProvider);
-                        if (context.mounted) showSnack(context, l.riderRouteFinished);
-                      }
-                    : null,
-              ),
-            ],
-          ],
-        ),
       ),
     );
   }
@@ -226,7 +247,8 @@ class _StopCard extends ConsumerWidget {
             const SizedBox(height: 8),
             Text(stop.contactName, style: theme.textTheme.titleMedium),
             Text(stop.addressText),
-            if ((stop.instructions ?? '').isNotEmpty) Text('${l.riderInstructions}: ${stop.instructions}', style: theme.textTheme.bodySmall),
+            if ((stop.instructions ?? '').isNotEmpty)
+              Text('${l.riderInstructions}: ${stop.instructions}', style: theme.textTheme.bodySmall),
             if ((stop.allergenNote ?? '').isNotEmpty) ...[
               const SizedBox(height: 6),
               Notice('${l.riderAllergen}: ${stop.allergenNote}', tone: Tone.warn),
@@ -235,7 +257,10 @@ class _StopCard extends ConsumerWidget {
             Text(stop.items.map((i) => '${i.quantity}× ${i.name}').join(', '), style: theme.textTheme.bodySmall),
             if (stop.cashDue > 0) ...[
               const SizedBox(height: 6),
-              Text(l.riderCollect(rs(context, stop.cashDue)), style: TextStyle(fontWeight: FontWeight.w700, color: theme.colorScheme.primary)),
+              Text(
+                l.riderCollect(rs(context, stop.cashDue)),
+                style: TextStyle(fontWeight: FontWeight.w700, color: theme.colorScheme.primary),
+              ),
             ],
             const SizedBox(height: 8),
             Wrap(
@@ -249,10 +274,11 @@ class _StopCard extends ConsumerWidget {
                     label: Text(stop.contactPhoneDisplay.isNotEmpty ? stop.contactPhoneDisplay : l.call),
                   ),
                 OutlinedButton.icon(
-                  onPressed: () => _open(
-                    context,
-                    Uri.https('www.google.com', '/maps/search/', {'api': '1', 'query': stop.addressText}),
-                  ),
+                  onPressed:
+                      () => _open(
+                        context,
+                        Uri.https('www.google.com', '/maps/search/', {'api': '1', 'query': stop.addressText}),
+                      ),
                   icon: const Icon(Icons.directions_outlined),
                   label: Text(l.navigate),
                 ),
@@ -288,7 +314,9 @@ class _StopCard extends ConsumerWidget {
                           context,
                           stop: stop,
                           reasons: route.failureReasons,
-                          onSubmit: (reason, detail) => ref.read(riderRepositoryProvider).fail(stop.orderId, reason, detail: detail),
+                          onSubmit:
+                              (reason, detail) =>
+                                  ref.read(riderRepositoryProvider).fail(stop.orderId, reason, detail: detail),
                         );
                         if (ok) {
                           refresh();

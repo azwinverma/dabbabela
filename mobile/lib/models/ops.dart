@@ -20,9 +20,9 @@ class RiderDays {
   final List<({String date, int routes})> days;
 
   factory RiderDays.fromJson(Json j) => RiderDays(
-        window: RiderWindow.fromJson(j.obj('window')),
-        days: j.objs('days').map((d) => (date: d.str('date'), routes: d.integer('routes'))).toList(),
-      );
+    window: RiderWindow.fromJson(j.obj('window')),
+    days: j.objs('days').map((d) => (date: d.str('date'), routes: d.integer('routes'))).toList(),
+  );
 
   int routesOn(String date) => days.where((d) => d.date == date).fold(0, (a, d) => a + d.routes);
 }
@@ -53,17 +53,17 @@ class RiderRouteSummary {
   final bool readOnly;
 
   factory RiderRouteSummary.fromJson(Json j) => RiderRouteSummary(
-        id: j.str('id'),
-        name: j.str('name'),
-        date: j.str('date'),
-        status: j.str('status'),
-        slotLabel: j.strOrNull('slotLabel'),
-        riderName: j.strOrNull('riderName'),
-        stops: j.integer('stops'),
-        stopsDone: j.integer('stopsDone'),
-        cashCollected: j.integer('cashCollected'),
-        readOnly: j.boolean('readOnly'),
-      );
+    id: j.str('id'),
+    name: j.str('name'),
+    date: j.str('date'),
+    status: j.str('status'),
+    slotLabel: j.strOrNull('slotLabel'),
+    riderName: j.strOrNull('riderName'),
+    stops: j.integer('stops'),
+    stopsDone: j.integer('stopsDone'),
+    cashCollected: j.integer('cashCollected'),
+    readOnly: j.boolean('readOnly'),
+  );
 }
 
 /// GET /rider/routes?date=.
@@ -75,11 +75,11 @@ class RiderRoutesDay {
   final List<RiderRouteSummary> routes;
 
   factory RiderRoutesDay.fromJson(Json j) => RiderRoutesDay(
-        date: j.str('date'),
-        window: j.objOrNull('window') == null ? null : RiderWindow.fromJson(j.obj('window')),
-        readOnly: j.boolean('readOnly'),
-        routes: j.list('routes', RiderRouteSummary.fromJson),
-      );
+    date: j.str('date'),
+    window: j.objOrNull('window') == null ? null : RiderWindow.fromJson(j.obj('window')),
+    readOnly: j.boolean('readOnly'),
+    routes: j.list('routes', RiderRouteSummary.fromJson),
+  );
 }
 
 class StopItem {
@@ -139,36 +139,36 @@ class RiderStop {
   final int cashDue;
 
   factory RiderStop.fromJson(Json j) => RiderStop(
-        sequence: j.integer('sequence'),
-        orderId: j.str('orderId'),
-        number: j.str('number'),
-        code: j.str('code'),
-        status: j.str('status'),
-        canAct: j.boolean('canAct'),
-        placeName: j.strOrNull('placeName'),
-        addressLine: j.str('addressLine'),
-        area: j.str('area'),
-        ward: j.intOrNull('ward'),
-        landmark: j.strOrNull('landmark'),
-        instructions: j.strOrNull('instructions'),
-        contactName: j.str('contactName'),
-        contactPhone: j.str('contactPhone'),
-        contactPhoneDisplay: j.str('contactPhoneDisplay', j.str('contactPhone')),
-        allergenNote: j.strOrNull('allergenNote'),
-        items: j.list('items', StopItem.fromJson),
-        paymentMethod: j.strOrNull('paymentMethod'),
-        paymentStatus: j.str('paymentStatus'),
-        cashDue: j.integer('cashDue'),
-      );
+    sequence: j.integer('sequence'),
+    orderId: j.str('orderId'),
+    number: j.str('number'),
+    code: j.str('code'),
+    status: j.str('status'),
+    canAct: j.boolean('canAct'),
+    placeName: j.strOrNull('placeName'),
+    addressLine: j.str('addressLine'),
+    area: j.str('area'),
+    ward: j.intOrNull('ward'),
+    landmark: j.strOrNull('landmark'),
+    instructions: j.strOrNull('instructions'),
+    contactName: j.str('contactName'),
+    contactPhone: j.str('contactPhone'),
+    contactPhoneDisplay: j.str('contactPhoneDisplay', j.str('contactPhone')),
+    allergenNote: j.strOrNull('allergenNote'),
+    items: j.list('items', StopItem.fromJson),
+    paymentMethod: j.strOrNull('paymentMethod'),
+    paymentStatus: j.str('paymentStatus'),
+    cashDue: j.integer('cashDue'),
+  );
 
   /// One-line address for maps search: place, line, area, ward, landmark.
   String get addressText => [
-        if ((placeName ?? '').isNotEmpty) placeName!,
-        if (addressLine.isNotEmpty) addressLine,
-        if (area.isNotEmpty) area,
-        if (ward != null) 'Ward $ward',
-        if ((landmark ?? '').isNotEmpty) landmark!,
-      ].join(', ');
+    if ((placeName ?? '').isNotEmpty) placeName!,
+    if (addressLine.isNotEmpty) addressLine,
+    if (area.isNotEmpty) area,
+    if (ward != null) 'Ward $ward',
+    if ((landmark ?? '').isNotEmpty) landmark!,
+  ].join(', ');
 }
 
 /// What the deliver form must ask for.
@@ -236,11 +236,11 @@ class KitchenOrderItem {
   final String diet;
   final List<String> customizations;
   factory KitchenOrderItem.fromJson(Json j) => KitchenOrderItem(
-        name: j.str('name'),
-        quantity: j.integer('quantity', 1),
-        diet: j.str('diet'),
-        customizations: j.strs('customizations'),
-      );
+    name: j.str('name'),
+    quantity: j.integer('quantity', 1),
+    diet: j.str('diet'),
+    customizations: j.strs('customizations'),
+  );
 }
 
 /// `KitchenOrder`.
@@ -310,12 +310,12 @@ class ProductionDish {
   final int buffer;
   final int total;
   factory ProductionDish.fromJson(Json j) => ProductionDish(
-        name: j.str('name'),
-        station: j.str('station'),
-        portions: j.integer('portions'),
-        buffer: j.integer('buffer'),
-        total: j.integer('total'),
-      );
+    name: j.str('name'),
+    station: j.str('station'),
+    portions: j.integer('portions'),
+    buffer: j.integer('buffer'),
+    total: j.integer('total'),
+  );
 }
 
 /// GET /kitchen/production.
@@ -383,9 +383,9 @@ class StatusResult {
   final List<String> changed;
   final List<({String id, String reason})> rejected;
   factory StatusResult.fromJson(Json j) => StatusResult(
-        changed: j.strs('changed'),
-        rejected: j.objs('rejected').map((r) => (id: r.str('id'), reason: r.str('reason'))).toList(),
-      );
+    changed: j.strs('changed'),
+    rejected: j.objs('rejected').map((r) => (id: r.str('id'), reason: r.str('reason'))).toList(),
+  );
 }
 
 /// `PackResult`.
@@ -396,11 +396,11 @@ class PackResult {
   final bool packed;
   final String? reason;
   factory PackResult.fromJson(Json j) => PackResult(
-        orderId: j.str('orderId'),
-        number: j.strOrNull('number'),
-        packed: j.boolean('packed'),
-        reason: j.strOrNull('reason'),
-      );
+    orderId: j.str('orderId'),
+    number: j.strOrNull('number'),
+    packed: j.boolean('packed'),
+    reason: j.strOrNull('reason'),
+  );
 }
 
 class BulkPackResult {
@@ -442,22 +442,26 @@ class Batch {
   final String? notes;
 
   /// Next forward status, or null when finished.
-  String? get nextStatus => switch (status) { 'PLANNED' => 'COOKING', 'COOKING' => 'DONE', _ => null };
+  String? get nextStatus => switch (status) {
+    'PLANNED' => 'COOKING',
+    'COOKING' => 'DONE',
+    _ => null,
+  };
 
   factory Batch.fromJson(Json j) => Batch(
-        id: j.str('id'),
-        dish: j.str('dish'),
-        status: j.str('status'),
-        date: j.str('date'),
-        station: j.strOrNull('station'),
-        plannedPortions: j.integer('plannedPortions'),
-        bufferPortions: j.integer('bufferPortions'),
-        actualPortions: j.intOrNull('actualPortions'),
-        wastePortions: j.intOrNull('wastePortions'),
-        assignedTo: j.strOrNull('assignedTo'),
-        stockPosted: j.boolean('stockPosted'),
-        notes: j.strOrNull('notes'),
-      );
+    id: j.str('id'),
+    dish: j.str('dish'),
+    status: j.str('status'),
+    date: j.str('date'),
+    station: j.strOrNull('station'),
+    plannedPortions: j.integer('plannedPortions'),
+    bufferPortions: j.integer('bufferPortions'),
+    actualPortions: j.intOrNull('actualPortions'),
+    wastePortions: j.intOrNull('wastePortions'),
+    assignedTo: j.strOrNull('assignedTo'),
+    stockPosted: j.boolean('stockPosted'),
+    notes: j.strOrNull('notes'),
+  );
 }
 
 class Shortage {
@@ -468,12 +472,12 @@ class Shortage {
   final String type;
   final double shortage;
   factory Shortage.fromJson(Json j) => Shortage(
-        dish: j.str('dish'),
-        name: j.str('name'),
-        unit: j.str('unit'),
-        type: j.str('type', 'USAGE'),
-        shortage: j.dblOrNull('shortage') ?? 0,
-      );
+    dish: j.str('dish'),
+    name: j.str('name'),
+    unit: j.str('unit'),
+    type: j.str('type', 'USAGE'),
+    shortage: j.dblOrNull('shortage') ?? 0,
+  );
 }
 
 /// GET /kitchen/batches.
@@ -483,15 +487,23 @@ class BatchDay {
   final List<Batch> batches;
   final List<Shortage> shortages;
   factory BatchDay.fromJson(Json j) => BatchDay(
-        date: j.str('date'),
-        batches: j.list('batches', Batch.fromJson),
-        shortages: j.list('shortages', Shortage.fromJson),
-      );
+    date: j.str('date'),
+    batches: j.list('batches', Batch.fromJson),
+    shortages: j.list('shortages', Shortage.fromJson),
+  );
 }
 
 /// `QcCheck`.
 class QcCheck {
-  const QcCheck({required this.id, required this.type, required this.result, this.value, this.note, this.dish, this.createdAt});
+  const QcCheck({
+    required this.id,
+    required this.type,
+    required this.result,
+    this.value,
+    this.note,
+    this.dish,
+    this.createdAt,
+  });
   final String id;
   final String type;
   final String result;
@@ -500,30 +512,36 @@ class QcCheck {
   final String? dish;
   final DateTime? createdAt;
   factory QcCheck.fromJson(Json j) => QcCheck(
-        id: j.str('id'),
-        type: j.str('type'),
-        result: j.str('result'),
-        value: j.strOrNull('value'),
-        note: j.strOrNull('note'),
-        dish: j.strOrNull('dish'),
-        createdAt: j.date('createdAt'),
-      );
+    id: j.str('id'),
+    type: j.str('type'),
+    result: j.str('result'),
+    value: j.strOrNull('value'),
+    note: j.strOrNull('note'),
+    dish: j.strOrNull('dish'),
+    createdAt: j.date('createdAt'),
+  );
 }
 
 class StockAlert {
-  const StockAlert({required this.type, this.severity = 'info', this.entity = '', this.entityId = '', this.message = ''});
+  const StockAlert({
+    required this.type,
+    this.severity = 'info',
+    this.entity = '',
+    this.entityId = '',
+    this.message = '',
+  });
   final String type;
   final String severity;
   final String entity;
   final String entityId;
   final String message;
   factory StockAlert.fromJson(Json j) => StockAlert(
-        type: j.str('type'),
-        severity: j.str('severity', 'info'),
-        entity: j.str('entity'),
-        entityId: j.str('entityId'),
-        message: j.str('message'),
-      );
+    type: j.str('type'),
+    severity: j.str('severity', 'info'),
+    entity: j.str('entity'),
+    entityId: j.str('entityId'),
+    message: j.str('message'),
+  );
 }
 
 // ───────────── Dispatch ─────────────
@@ -560,16 +578,16 @@ class DispatchOrder {
   final RouteRef? route;
 
   factory DispatchOrder.fromJson(Json j) => DispatchOrder(
-        id: j.str('id'),
-        number: j.str('number'),
-        status: j.str('status'),
-        contactName: j.str('contactName'),
-        contactPhone: j.str('contactPhone'),
-        meals: j.integer('meals'),
-        paymentMethod: j.strOrNull('paymentMethod'),
-        cashDue: j.integer('cashDue'),
-        route: RouteRef.maybe(j.objOrNull('route')),
-      );
+    id: j.str('id'),
+    number: j.str('number'),
+    status: j.str('status'),
+    contactName: j.str('contactName'),
+    contactPhone: j.str('contactPhone'),
+    meals: j.integer('meals'),
+    paymentMethod: j.strOrNull('paymentMethod'),
+    cashDue: j.integer('cashDue'),
+    route: RouteRef.maybe(j.objOrNull('route')),
+  );
 }
 
 class BoardStop {
@@ -597,16 +615,16 @@ class BoardStop {
   String get title => (placeName ?? '').isNotEmpty ? placeName! : area;
 
   factory BoardStop.fromJson(Json j) => BoardStop(
-        key: j.str('key'),
-        placeName: j.strOrNull('placeName'),
-        area: j.str('area'),
-        landmark: j.strOrNull('landmark'),
-        company: j.strOrNull('company'),
-        instructions: j.strOrNull('instructions'),
-        meals: j.integer('meals'),
-        cash: j.integer('cash'),
-        orders: j.list('orders', DispatchOrder.fromJson),
-      );
+    key: j.str('key'),
+    placeName: j.strOrNull('placeName'),
+    area: j.str('area'),
+    landmark: j.strOrNull('landmark'),
+    company: j.strOrNull('company'),
+    instructions: j.strOrNull('instructions'),
+    meals: j.integer('meals'),
+    cash: j.integer('cash'),
+    orders: j.list('orders', DispatchOrder.fromJson),
+  );
 }
 
 class BoardGroup {
@@ -617,15 +635,24 @@ class BoardGroup {
   final List<BoardStop> stops;
   int get meals => stops.fold(0, (a, s) => a + s.meals);
   factory BoardGroup.fromJson(Json j) => BoardGroup(
-        slot: j.str('slot'),
-        zoneId: j.strOrNull('zoneId'),
-        zone: j.str('zone'),
-        stops: j.list('stops', BoardStop.fromJson),
-      );
+    slot: j.str('slot'),
+    zoneId: j.strOrNull('zoneId'),
+    zone: j.str('zone'),
+    stops: j.list('stops', BoardStop.fromJson),
+  );
 }
 
 class RouteStop {
-  const RouteStop({required this.sequence, required this.orderId, required this.number, required this.status, this.area = '', this.placeName, this.contactName = '', this.changed = const []});
+  const RouteStop({
+    required this.sequence,
+    required this.orderId,
+    required this.number,
+    required this.status,
+    this.area = '',
+    this.placeName,
+    this.contactName = '',
+    this.changed = const [],
+  });
   final int sequence;
   final String orderId;
   final String number;
@@ -635,19 +662,26 @@ class RouteStop {
   final String contactName;
   final List<String> changed;
   factory RouteStop.fromJson(Json j) => RouteStop(
-        sequence: j.integer('sequence'),
-        orderId: j.str('orderId'),
-        number: j.str('number'),
-        status: j.str('status'),
-        area: j.str('area'),
-        placeName: j.strOrNull('placeName'),
-        contactName: j.str('contactName'),
-        changed: j.strs('changed'),
-      );
+    sequence: j.integer('sequence'),
+    orderId: j.str('orderId'),
+    number: j.str('number'),
+    status: j.str('status'),
+    area: j.str('area'),
+    placeName: j.strOrNull('placeName'),
+    contactName: j.str('contactName'),
+    changed: j.strs('changed'),
+  );
 }
 
 class Rider {
-  const Rider({required this.id, required this.name, this.phone = '', this.vehicle, this.zoneIds = const [], this.available = true});
+  const Rider({
+    required this.id,
+    required this.name,
+    this.phone = '',
+    this.vehicle,
+    this.zoneIds = const [],
+    this.available = true,
+  });
   final String id;
   final String name;
   final String phone;
@@ -655,13 +689,13 @@ class Rider {
   final List<String> zoneIds;
   final bool available;
   factory Rider.fromJson(Json j) => Rider(
-        id: j.str('id'),
-        name: j.str('name'),
-        phone: j.str('phone'),
-        vehicle: j.strOrNull('vehicle'),
-        zoneIds: j.strs('zoneIds'),
-        available: j.boolean('available', true),
-      );
+    id: j.str('id'),
+    name: j.str('name'),
+    phone: j.str('phone'),
+    vehicle: j.strOrNull('vehicle'),
+    zoneIds: j.strs('zoneIds'),
+    available: j.boolean('available', true),
+  );
 }
 
 class DispatchRoute {
@@ -801,17 +835,17 @@ class FailedDelivery {
   final DateTime? failedAt;
 
   factory FailedDelivery.fromJson(Json j) => FailedDelivery(
-        orderId: j.str('orderId'),
-        number: j.str('number'),
-        deliveryDate: j.str('deliveryDate'),
-        contactName: j.str('contactName'),
-        contactPhone: j.str('contactPhone'),
-        area: j.str('area'),
-        placeName: j.strOrNull('placeName'),
-        route: RouteRef.maybe(j.objOrNull('route')),
-        reason: j.strOrNull('reason'),
-        failedAt: j.date('failedAt'),
-      );
+    orderId: j.str('orderId'),
+    number: j.str('number'),
+    deliveryDate: j.str('deliveryDate'),
+    contactName: j.str('contactName'),
+    contactPhone: j.str('contactPhone'),
+    area: j.str('area'),
+    placeName: j.strOrNull('placeName'),
+    route: RouteRef.maybe(j.objOrNull('route')),
+    reason: j.strOrNull('reason'),
+    failedAt: j.date('failedAt'),
+  );
 }
 
 /// Result of POST /dispatch/routes/{id}/start.
@@ -821,8 +855,8 @@ class RouteStartResult {
   final int notPacked;
   final List<({String id, String reason})> rejected;
   factory RouteStartResult.fromJson(Json j) => RouteStartResult(
-        out: j.integer('out'),
-        notPacked: j.integer('notPacked'),
-        rejected: j.objs('rejected').map((r) => (id: r.str('id'), reason: r.str('reason'))).toList(),
-      );
+    out: j.integer('out'),
+    notPacked: j.integer('notPacked'),
+    rejected: j.objs('rejected').map((r) => (id: r.str('id'), reason: r.str('reason'))).toList(),
+  );
 }

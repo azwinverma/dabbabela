@@ -92,7 +92,9 @@ class _DeliverDialogState extends State<DeliverDialog> {
       );
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
-      if (mounted) setState(() => _error = e is ApiException ? (e.isOffline ? context.l10n.offlineBody : e.message) : '$e');
+      if (mounted) {
+        setState(() => _error = e is ApiException ? (e.isOffline ? context.l10n.offlineBody : e.message) : '$e');
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -129,21 +131,32 @@ class _DeliverDialogState extends State<DeliverDialog> {
               const SizedBox(height: 12),
             ],
             if (due > 0) ...[
-              Notice(l.riderCollect(Money.format(due, locale: context.lang)), tone: Tone.warn, icon: Icons.payments_outlined),
+              Notice(
+                l.riderCollect(Money.format(due, locale: context.lang)),
+                tone: Tone.warn,
+                icon: Icons.payments_outlined,
+              ),
               const SizedBox(height: 8),
               TextFormField(
                 key: const Key('deliver-cash'),
                 controller: _cash,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: InputDecoration(labelText: l.riderCashLabel),
-                validator: (v) => Money.parse(v ?? '') == due ? null : l.riderCashMismatch(Money.format(due, locale: context.lang)),
+                validator:
+                    (v) =>
+                        Money.parse(v ?? '') == due
+                            ? null
+                            : l.riderCashMismatch(Money.format(due, locale: context.lang)),
               ),
               const SizedBox(height: 12),
             ] else if (stop.paymentStatus == 'PAID') ...[
               Text(l.riderPrepaid, style: Theme.of(context).textTheme.bodySmall),
               const SizedBox(height: 12),
             ],
-            Text('${l.riderPhoto}${widget.requires.photo ? '' : ' (${l.optional})'}', style: Theme.of(context).textTheme.labelLarge),
+            Text(
+              '${l.riderPhoto}${widget.requires.photo ? '' : ' (${l.optional})'}',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
             const SizedBox(height: 6),
             if (_photo != null)
               Stack(
@@ -168,8 +181,16 @@ class _DeliverDialogState extends State<DeliverDialog> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  OutlinedButton.icon(onPressed: () => _pick(ImageSource.camera), icon: const Icon(Icons.photo_camera_outlined), label: Text(l.riderTakePhoto)),
-                  OutlinedButton.icon(onPressed: () => _pick(ImageSource.gallery), icon: const Icon(Icons.photo_library_outlined), label: Text(l.riderChoosePhoto)),
+                  OutlinedButton.icon(
+                    onPressed: () => _pick(ImageSource.camera),
+                    icon: const Icon(Icons.photo_camera_outlined),
+                    label: Text(l.riderTakePhoto),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => _pick(ImageSource.gallery),
+                    icon: const Icon(Icons.photo_library_outlined),
+                    label: Text(l.riderChoosePhoto),
+                  ),
                 ],
               ),
             if (_photoMissing)
@@ -191,7 +212,10 @@ class _DeliverDialogState extends State<DeliverDialog> {
         FilledButton(
           key: const Key('deliver-submit'),
           onPressed: _busy ? null : _submit,
-          child: _busy ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5)) : Text(l.riderDeliver),
+          child:
+              _busy
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5))
+                  : Text(l.riderDeliver),
         ),
       ],
     );
@@ -212,7 +236,11 @@ class FailStopDialog extends StatefulWidget {
     required List<String> reasons,
     required Future<void> Function(String reason, String? detail) onSubmit,
   }) async =>
-      await showDialog<bool>(context: context, builder: (_) => FailStopDialog(stop: stop, reasons: reasons, onSubmit: onSubmit)) ?? false;
+      await showDialog<bool>(
+        context: context,
+        builder: (_) => FailStopDialog(stop: stop, reasons: reasons, onSubmit: onSubmit),
+      ) ??
+      false;
 
   @override
   State<FailStopDialog> createState() => _FailStopDialogState();
@@ -258,7 +286,9 @@ class _FailStopDialogState extends State<FailStopDialog> {
               controller: _detail,
               maxLength: 300,
               maxLines: 2,
-              decoration: InputDecoration(labelText: _isOther ? l.riderFailDetail : '${l.riderFailDetail} (${l.optional})'),
+              decoration: InputDecoration(
+                labelText: _isOther ? l.riderFailDetail : '${l.riderFailDetail} (${l.optional})',
+              ),
               validator: (v) => _isOther && (v ?? '').trim().isEmpty ? l.required : null,
             ),
           ],
@@ -267,20 +297,21 @@ class _FailStopDialogState extends State<FailStopDialog> {
       actions: [
         TextButton(onPressed: _busy ? null : () => Navigator.of(context).pop(false), child: Text(l.cancel)),
         FilledButton(
-          onPressed: _busy || _reason == null
-              ? null
-              : () async {
-                  if (!_form.currentState!.validate()) return;
-                  setState(() => _busy = true);
-                  try {
-                    await widget.onSubmit(_reason!, _detail.text.trim().isEmpty ? null : _detail.text.trim());
-                    if (context.mounted) Navigator.of(context).pop(true);
-                  } catch (e) {
-                    if (context.mounted) showError(context, e);
-                  } finally {
-                    if (mounted) setState(() => _busy = false);
-                  }
-                },
+          onPressed:
+              _busy || _reason == null
+                  ? null
+                  : () async {
+                    if (!_form.currentState!.validate()) return;
+                    setState(() => _busy = true);
+                    try {
+                      await widget.onSubmit(_reason!, _detail.text.trim().isEmpty ? null : _detail.text.trim());
+                      if (context.mounted) Navigator.of(context).pop(true);
+                    } catch (e) {
+                      if (context.mounted) showError(context, e);
+                    } finally {
+                      if (mounted) setState(() => _busy = false);
+                    }
+                  },
           child: Text(l.riderFail),
         ),
       ],

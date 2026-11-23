@@ -20,10 +20,10 @@ class DeliverInput {
   final String? photoPath;
 
   Map<String, Object?> toJson() => {
-        if (otp != null && otp!.isNotEmpty) 'otp': otp,
-        if (cash != null) 'cash': cash,
-        if (note != null && note!.isNotEmpty) 'note': note,
-      };
+    if (otp != null && otp!.isNotEmpty) 'otp': otp,
+    if (cash != null) 'cash': cash,
+    if (note != null && note!.isNotEmpty) 'note': note,
+  };
 }
 
 /// Rider endpoints (`rider.view` / `rider.edit`).
@@ -36,7 +36,8 @@ class RiderRepository {
   Future<RiderRoutesDay> routes(String? date) async =>
       RiderRoutesDay.fromJson((await api.get('/rider/routes', query: {'date': date})).map);
 
-  Future<RiderRouteDetail> route(String id) async => RiderRouteDetail.fromJson((await api.get('/rider/routes/$id')).map);
+  Future<RiderRouteDetail> route(String id) async =>
+      RiderRouteDetail.fromJson((await api.get('/rider/routes/$id')).map);
 
   /// Money-moving (cash): Idempotency-Key per delivery action; a retry with the same input reuses it.
   Future<Json> deliver(String orderId, DeliverInput input) async {
@@ -49,16 +50,19 @@ class RiderRepository {
       path,
       idempotent: true,
       fingerprintFields: {...input.toJson(), 'photoPath': photo, 'photoLength': length},
-      buildForm: () async => FormData.fromMap({
-        ...input.toJson().map((k, v) => MapEntry(k, '$v')),
-        'photo': await MultipartFile.fromFile(photo, filename: photo.split(Platform.pathSeparator).last),
-      }),
+      buildForm:
+          () async => FormData.fromMap({
+            ...input.toJson().map((k, v) => MapEntry(k, '$v')),
+            'photo': await MultipartFile.fromFile(photo, filename: photo.split(Platform.pathSeparator).last),
+          }),
     );
     return res.map;
   }
 
-  Future<void> fail(String orderId, String reason, {String? detail}) =>
-      api.post('/rider/stops/$orderId/fail', body: {'reason': reason, if (detail != null && detail.isNotEmpty) 'detail': detail});
+  Future<void> fail(String orderId, String reason, {String? detail}) => api.post(
+    '/rider/stops/$orderId/fail',
+    body: {'reason': reason, if (detail != null && detail.isNotEmpty) 'detail': detail},
+  );
 
   Future<Json> finish(String routeId) async => (await api.post('/rider/routes/$routeId/finish')).map;
 }
@@ -81,7 +85,14 @@ class KitchenRepository {
   Future<BulkPackResult> pack(List<String> orderIds, {String? note}) async {
     final orders = [
       for (final id in orderIds)
-        {'orderId': id, 'itemsOk': true, 'labelOk': true, 'allergenOk': true, 'sealedOk': true, if (note != null && note.isNotEmpty) 'note': note},
+        {
+          'orderId': id,
+          'itemsOk': true,
+          'labelOk': true,
+          'allergenOk': true,
+          'sealedOk': true,
+          if (note != null && note.isNotEmpty) 'note': note,
+        },
     ];
     return BulkPackResult.fromJson((await api.post('/kitchen/orders/pack', body: {'orders': orders})).map);
   }
@@ -89,13 +100,14 @@ class KitchenRepository {
   Future<BatchDay> batches(String? kitchenId, String date) async =>
       BatchDay.fromJson((await api.get('/kitchen/batches', query: {'kitchenId': kitchenId, 'date': date})).map);
 
-  Future<Json> planBatches(String kitchenId, String date, {int? bufferPct}) async => (await api.post(
+  Future<Json> planBatches(String kitchenId, String date, {int? bufferPct}) async =>
+      (await api.post(
         '/kitchen/batches/plan',
         body: {'kitchenId': kitchenId, 'date': date, if (bufferPct != null) 'bufferPct': bufferPct},
-      ))
-          .map;
+      )).map;
 
-  Future<Json> advanceBatch(String id, String to, {int? actualPortions, int? wastePortions, String? notes}) async => (await api.post(
+  Future<Json> advanceBatch(String id, String to, {int? actualPortions, int? wastePortions, String? notes}) async =>
+      (await api.post(
         '/kitchen/batches/$id/advance',
         body: {
           'to': to,
@@ -103,21 +115,31 @@ class KitchenRepository {
           if (wastePortions != null) 'wastePortions': wastePortions,
           if (notes != null && notes.isNotEmpty) 'notes': notes,
         },
-      ))
-          .map;
+      )).map;
 
-  Future<List<QcCheck>> qc(String? kitchenId, String date) async =>
-      (await api.get('/kitchen/qc', query: {'kitchenId': kitchenId, 'date': date})).map.list('checks', QcCheck.fromJson);
+  Future<List<QcCheck>> qc(String? kitchenId, String date) async => (await api.get(
+    '/kitchen/qc',
+    query: {'kitchenId': kitchenId, 'date': date},
+  )).map.list('checks', QcCheck.fromJson);
 
-  Future<void> logQc({required String kitchenId, required String date, required String type, required String result, String? value, String? note}) =>
-      api.post('/kitchen/qc', body: {
-        'kitchenId': kitchenId,
-        'date': date,
-        'type': type,
-        'result': result,
-        if (value != null && value.isNotEmpty) 'value': value,
-        if (note != null && note.isNotEmpty) 'note': note,
-      });
+  Future<void> logQc({
+    required String kitchenId,
+    required String date,
+    required String type,
+    required String result,
+    String? value,
+    String? note,
+  }) => api.post(
+    '/kitchen/qc',
+    body: {
+      'kitchenId': kitchenId,
+      'date': date,
+      'type': type,
+      'result': result,
+      if (value != null && value.isNotEmpty) 'value': value,
+      if (note != null && note.isNotEmpty) 'note': note,
+    },
+  );
 
   Future<List<StockAlert>> stockAlerts(String? kitchenId) async =>
       (await api.get('/kitchen/stock-alerts', query: {'kitchenId': kitchenId})).map.list('alerts', StockAlert.fromJson);
@@ -140,20 +162,24 @@ class DispatchRepository {
     String? riderId,
     List<String> orderIds = const [],
   }) async =>
-      (await api.post('/dispatch/routes', body: {
-        'kitchenId': kitchenId,
-        'date': date,
-        'name': name,
-        'slotId': slotId,
-        'zoneId': zoneId,
-        'riderId': riderId,
-        'orderIds': orderIds,
-      }))
-          .map;
+      (await api.post(
+        '/dispatch/routes',
+        body: {
+          'kitchenId': kitchenId,
+          'date': date,
+          'name': name,
+          'slotId': slotId,
+          'zoneId': zoneId,
+          'riderId': riderId,
+          'orderIds': orderIds,
+        },
+      )).map;
 
-  Future<void> addOrders(String routeId, List<String> orderIds) => api.post('/dispatch/routes/$routeId/orders', body: {'orderIds': orderIds});
+  Future<void> addOrders(String routeId, List<String> orderIds) =>
+      api.post('/dispatch/routes/$routeId/orders', body: {'orderIds': orderIds});
 
-  Future<void> assignRider(String routeId, String? riderId) => api.put('/dispatch/routes/$routeId/rider', body: {'riderId': riderId});
+  Future<void> assignRider(String routeId, String? riderId) =>
+      api.put('/dispatch/routes/$routeId/rider', body: {'riderId': riderId});
 
   Future<RouteStartResult> startRoute(String routeId) async =>
       RouteStartResult.fromJson((await api.post('/dispatch/routes/$routeId/start')).map);
@@ -165,8 +191,10 @@ class DispatchRepository {
   Future<Json> autoGroup(String kitchenId, String date) async =>
       (await api.post('/dispatch/auto-group', body: {'kitchenId': kitchenId, 'date': date})).map;
 
-  Future<List<FailedDelivery>> failed(String? kitchenId, String date) async =>
-      (await api.get('/dispatch/failed', query: {'kitchenId': kitchenId, 'date': date})).map.list('failed', FailedDelivery.fromJson);
+  Future<List<FailedDelivery>> failed(String? kitchenId, String date) async => (await api.get(
+    '/dispatch/failed',
+    query: {'kitchenId': kitchenId, 'date': date},
+  )).map.list('failed', FailedDelivery.fromJson);
 
   /// RETRY or CANCEL (CANCEL credits the wallet → idempotent).
   Future<void> resolveFailed(String orderId, String action, String reason) =>

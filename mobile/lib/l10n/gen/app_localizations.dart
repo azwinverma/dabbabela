@@ -95,6 +95,324 @@ abstract class AppLocalizations {
     Locale('ne')
   ];
 
+  /// No description provided for @signIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in'**
+  String get signIn;
+
+  /// No description provided for @signInTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Welcome back'**
+  String get signInTitle;
+
+  /// No description provided for @signUp.
+  ///
+  /// In en, this message translates to:
+  /// **'Create account'**
+  String get signUp;
+
+  /// No description provided for @signUpTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Lunch, on time, wherever you are'**
+  String get signUpTitle;
+
+  /// No description provided for @haveAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Already have an account? Sign in'**
+  String get haveAccount;
+
+  /// No description provided for @noAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'New here? Create an account'**
+  String get noAccount;
+
+  /// No description provided for @email.
+  ///
+  /// In en, this message translates to:
+  /// **'Email'**
+  String get email;
+
+  /// No description provided for @password.
+  ///
+  /// In en, this message translates to:
+  /// **'Password'**
+  String get password;
+
+  /// No description provided for @newPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'New password'**
+  String get newPassword;
+
+  /// No description provided for @name.
+  ///
+  /// In en, this message translates to:
+  /// **'Full name'**
+  String get name;
+
+  /// No description provided for @phone.
+  ///
+  /// In en, this message translates to:
+  /// **'Mobile number'**
+  String get phone;
+
+  /// No description provided for @phoneHint.
+  ///
+  /// In en, this message translates to:
+  /// **'98XXXXXXXX'**
+  String get phoneHint;
+
+  /// No description provided for @companyCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Company code'**
+  String get companyCode;
+
+  /// No description provided for @referralCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Referral code'**
+  String get referralCode;
+
+  /// No description provided for @showPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Show password'**
+  String get showPassword;
+
+  /// No description provided for @invalidEmail.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a valid email'**
+  String get invalidEmail;
+
+  /// No description provided for @invalidPhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a Nepal mobile number (98/97/96 + 8 digits)'**
+  String get invalidPhone;
+
+  /// No description provided for @passwordTooShort.
+  ///
+  /// In en, this message translates to:
+  /// **'At least 8 characters'**
+  String get passwordTooShort;
+
+  /// No description provided for @forgotPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Forgot password?'**
+  String get forgotPassword;
+
+  /// No description provided for @forgotTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset your password'**
+  String get forgotTitle;
+
+  /// No description provided for @forgotBody.
+  ///
+  /// In en, this message translates to:
+  /// **'We\'ll email you a link. Open it on this phone, or copy the code from the link into “I have a reset code”.'**
+  String get forgotBody;
+
+  /// No description provided for @sendLink.
+  ///
+  /// In en, this message translates to:
+  /// **'Send reset link'**
+  String get sendLink;
+
+  /// No description provided for @haveResetCode.
+  ///
+  /// In en, this message translates to:
+  /// **'I have a reset code'**
+  String get haveResetCode;
+
+  /// No description provided for @resetCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset code (from the email link)'**
+  String get resetCode;
+
+  /// No description provided for @setPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Set new password'**
+  String get setPassword;
+
+  /// No description provided for @passwordReset.
+  ///
+  /// In en, this message translates to:
+  /// **'Password changed. Sign in with the new one.'**
+  String get passwordReset;
+
+  /// No description provided for @twoFactorTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter your authenticator code'**
+  String get twoFactorTitle;
+
+  /// No description provided for @twoFactorBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Open your authenticator app and type the 6-digit code for Dabba Bela.'**
+  String get twoFactorBody;
+
+  /// No description provided for @code.
+  ///
+  /// In en, this message translates to:
+  /// **'Code'**
+  String get code;
+
+  /// No description provided for @verify.
+  ///
+  /// In en, this message translates to:
+  /// **'Verify'**
+  String get verify;
+
+  /// No description provided for @useBackupCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Use a backup code instead'**
+  String get useBackupCode;
+
+  /// No description provided for @useAuthenticator.
+  ///
+  /// In en, this message translates to:
+  /// **'Use the authenticator app'**
+  String get useAuthenticator;
+
+  /// No description provided for @backupCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Backup code'**
+  String get backupCode;
+
+  /// No description provided for @challengeExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'That sign-in expired. Please sign in again.'**
+  String get challengeExpired;
+
+  /// No description provided for @phoneSignIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in with an SMS code'**
+  String get phoneSignIn;
+
+  /// No description provided for @sendCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Send code'**
+  String get sendCode;
+
+  /// No description provided for @codeSent.
+  ///
+  /// In en, this message translates to:
+  /// **'We sent a code to {phone}'**
+  String codeSent(Object phone);
+
+  /// No description provided for @resendCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Send a new code'**
+  String get resendCode;
+
+  /// No description provided for @enrolTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Set up two-step sign-in'**
+  String get enrolTitle;
+
+  /// No description provided for @enrolIntro.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff accounts need an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password…). Confirm your password to start.'**
+  String get enrolIntro;
+
+  /// No description provided for @enrolScan.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan this QR code with your authenticator app, or enter the key by hand.'**
+  String get enrolScan;
+
+  /// No description provided for @enrolSecret.
+  ///
+  /// In en, this message translates to:
+  /// **'Setup key'**
+  String get enrolSecret;
+
+  /// No description provided for @backupCodesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Backup codes'**
+  String get backupCodesTitle;
+
+  /// No description provided for @backupCodesBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Save these somewhere safe. Each works once if you lose your phone. They won\'t be shown again.'**
+  String get backupCodesBody;
+
+  /// No description provided for @enrolConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the 6-digit code from the app to finish'**
+  String get enrolConfirm;
+
+  /// No description provided for @enrolDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Two-step sign-in is on.'**
+  String get enrolDone;
+
+  /// No description provided for @twoFactorOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Two-step sign-in is on for this account.'**
+  String get twoFactorOn;
+
+  /// No description provided for @sessionsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Signed-in devices'**
+  String get sessionsTitle;
+
+  /// No description provided for @thisDevice.
+  ///
+  /// In en, this message translates to:
+  /// **'This device'**
+  String get thisDevice;
+
+  /// No description provided for @signOutOthers.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign out all other devices'**
+  String get signOutOthers;
+
+  /// No description provided for @revoke.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign out'**
+  String get revoke;
+
+  /// No description provided for @lastActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Last active {when}'**
+  String lastActive(Object when);
+
+  /// No description provided for @maintenance.
+  ///
+  /// In en, this message translates to:
+  /// **'We\'re doing some maintenance'**
+  String get maintenance;
+
   /// No description provided for @appName.
   ///
   /// In en, this message translates to:
@@ -502,6 +820,702 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count, plural, =1{1 order} other{{count} orders}}'**
   String orderCount(int count);
+
+  /// No description provided for @riderRoutesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'My routes'**
+  String get riderRoutesTitle;
+
+  /// No description provided for @riderNoRoutes.
+  ///
+  /// In en, this message translates to:
+  /// **'No routes for this day.'**
+  String get riderNoRoutes;
+
+  /// No description provided for @riderStopsProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'{done} of {total} stops done'**
+  String riderStopsProgress(int done, int total);
+
+  /// No description provided for @riderCashCollected.
+  ///
+  /// In en, this message translates to:
+  /// **'Cash collected: {amount}'**
+  String riderCashCollected(Object amount);
+
+  /// No description provided for @riderReadOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'View only — this route can\'t be changed from here.'**
+  String get riderReadOnly;
+
+  /// No description provided for @riderRouteCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{No routes} =1{1 route} other{{count} routes}}'**
+  String riderRouteCount(int count);
+
+  /// No description provided for @riderStop.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop {n}'**
+  String riderStop(int n);
+
+  /// No description provided for @riderDeliver.
+  ///
+  /// In en, this message translates to:
+  /// **'Delivered'**
+  String get riderDeliver;
+
+  /// No description provided for @riderFail.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t deliver'**
+  String get riderFail;
+
+  /// No description provided for @riderFinishRoute.
+  ///
+  /// In en, this message translates to:
+  /// **'Finish route'**
+  String get riderFinishRoute;
+
+  /// No description provided for @riderFinishConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Finish this route? Make sure every stop is delivered or marked failed.'**
+  String get riderFinishConfirm;
+
+  /// No description provided for @riderRouteFinished.
+  ///
+  /// In en, this message translates to:
+  /// **'Route finished.'**
+  String get riderRouteFinished;
+
+  /// No description provided for @riderOpenStops.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 stop still out} other{{count} stops still out}}'**
+  String riderOpenStops(int count);
+
+  /// No description provided for @riderDeliverTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Mark {number} delivered'**
+  String riderDeliverTitle(Object number);
+
+  /// No description provided for @riderOtpLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer\'s 4-digit code'**
+  String get riderOtpLabel;
+
+  /// No description provided for @riderOtpHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask the customer for the code shown in their app or SMS.'**
+  String get riderOtpHelp;
+
+  /// No description provided for @riderOtpInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the 4-digit code'**
+  String get riderOtpInvalid;
+
+  /// No description provided for @riderCollect.
+  ///
+  /// In en, this message translates to:
+  /// **'Collect {amount} in cash'**
+  String riderCollect(Object amount);
+
+  /// No description provided for @riderCashLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cash collected (Rs)'**
+  String get riderCashLabel;
+
+  /// No description provided for @riderCashMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Must be exactly {amount}'**
+  String riderCashMismatch(Object amount);
+
+  /// No description provided for @riderPhoto.
+  ///
+  /// In en, this message translates to:
+  /// **'Delivery photo'**
+  String get riderPhoto;
+
+  /// No description provided for @riderPhotoRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'A photo of the delivered dabba is required.'**
+  String get riderPhotoRequired;
+
+  /// No description provided for @riderTakePhoto.
+  ///
+  /// In en, this message translates to:
+  /// **'Take photo'**
+  String get riderTakePhoto;
+
+  /// No description provided for @riderChoosePhoto.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose photo'**
+  String get riderChoosePhoto;
+
+  /// No description provided for @riderRemovePhoto.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove photo'**
+  String get riderRemovePhoto;
+
+  /// No description provided for @riderDelivered.
+  ///
+  /// In en, this message translates to:
+  /// **'{number} delivered.'**
+  String riderDelivered(Object number);
+
+  /// No description provided for @riderFailTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Why couldn\'t you deliver?'**
+  String get riderFailTitle;
+
+  /// No description provided for @riderFailDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'What happened?'**
+  String get riderFailDetail;
+
+  /// No description provided for @riderFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'{number} marked failed.'**
+  String riderFailed(Object number);
+
+  /// No description provided for @riderAllergen.
+  ///
+  /// In en, this message translates to:
+  /// **'Allergy note'**
+  String get riderAllergen;
+
+  /// No description provided for @riderInstructions.
+  ///
+  /// In en, this message translates to:
+  /// **'Instructions'**
+  String get riderInstructions;
+
+  /// No description provided for @riderPrepaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid — nothing to collect'**
+  String get riderPrepaid;
+
+  /// No description provided for @riderCantOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t open that app on this phone.'**
+  String get riderCantOpen;
+
+  /// No description provided for @kitchenProduction.
+  ///
+  /// In en, this message translates to:
+  /// **'Production'**
+  String get kitchenProduction;
+
+  /// No description provided for @kitchenBatches.
+  ///
+  /// In en, this message translates to:
+  /// **'Batches'**
+  String get kitchenBatches;
+
+  /// No description provided for @kitchenQc.
+  ///
+  /// In en, this message translates to:
+  /// **'QC log'**
+  String get kitchenQc;
+
+  /// No description provided for @kitchenAlerts.
+  ///
+  /// In en, this message translates to:
+  /// **'Stock alerts'**
+  String get kitchenAlerts;
+
+  /// No description provided for @kitchenOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'Orders'**
+  String get kitchenOrders;
+
+  /// No description provided for @kitchenMeals.
+  ///
+  /// In en, this message translates to:
+  /// **'Meals'**
+  String get kitchenMeals;
+
+  /// No description provided for @kitchenPendingPayment.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment pending'**
+  String get kitchenPendingPayment;
+
+  /// No description provided for @kitchenAllergenFlagged.
+  ///
+  /// In en, this message translates to:
+  /// **'Allergy flags'**
+  String get kitchenAllergenFlagged;
+
+  /// No description provided for @kitchenByDabba.
+  ///
+  /// In en, this message translates to:
+  /// **'By dabba'**
+  String get kitchenByDabba;
+
+  /// No description provided for @kitchenBySlot.
+  ///
+  /// In en, this message translates to:
+  /// **'By delivery slot'**
+  String get kitchenBySlot;
+
+  /// No description provided for @kitchenDishes.
+  ///
+  /// In en, this message translates to:
+  /// **'Dishes to cook'**
+  String get kitchenDishes;
+
+  /// No description provided for @kitchenPortions.
+  ///
+  /// In en, this message translates to:
+  /// **'{portions} + {buffer} buffer = {total}'**
+  String kitchenPortions(int portions, int buffer, int total);
+
+  /// No description provided for @kitchenStartPreparing.
+  ///
+  /// In en, this message translates to:
+  /// **'Start preparing'**
+  String get kitchenStartPreparing;
+
+  /// No description provided for @kitchenPack.
+  ///
+  /// In en, this message translates to:
+  /// **'Pack'**
+  String get kitchenPack;
+
+  /// No description provided for @kitchenPackChecksTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Packing checks'**
+  String get kitchenPackChecksTitle;
+
+  /// No description provided for @kitchenPackChecksBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm for each selected order:'**
+  String get kitchenPackChecksBody;
+
+  /// No description provided for @kitchenCheckItems.
+  ///
+  /// In en, this message translates to:
+  /// **'Items match the ticket'**
+  String get kitchenCheckItems;
+
+  /// No description provided for @kitchenCheckLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Label is on the dabba'**
+  String get kitchenCheckLabel;
+
+  /// No description provided for @kitchenCheckAllergen.
+  ///
+  /// In en, this message translates to:
+  /// **'Allergy notes respected'**
+  String get kitchenCheckAllergen;
+
+  /// No description provided for @kitchenCheckSealed.
+  ///
+  /// In en, this message translates to:
+  /// **'Sealed'**
+  String get kitchenCheckSealed;
+
+  /// No description provided for @kitchenChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 order updated} other{{count} orders updated}}'**
+  String kitchenChanged(int count);
+
+  /// No description provided for @kitchenRejected.
+  ///
+  /// In en, this message translates to:
+  /// **'Not changed:'**
+  String get kitchenRejected;
+
+  /// No description provided for @kitchenSelectOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'Select orders to act on them in bulk.'**
+  String get kitchenSelectOrders;
+
+  /// No description provided for @kitchenNoOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'No orders for this kitchen-day.'**
+  String get kitchenNoOrders;
+
+  /// No description provided for @kitchenPlanBatches.
+  ///
+  /// In en, this message translates to:
+  /// **'Plan batches from forecast'**
+  String get kitchenPlanBatches;
+
+  /// No description provided for @kitchenPlanned.
+  ///
+  /// In en, this message translates to:
+  /// **'{created} created, {updated} updated'**
+  String kitchenPlanned(int created, int updated);
+
+  /// No description provided for @kitchenNoBatches.
+  ///
+  /// In en, this message translates to:
+  /// **'No batches yet. Plan them from the forecast.'**
+  String get kitchenNoBatches;
+
+  /// No description provided for @kitchenBatchPortions.
+  ///
+  /// In en, this message translates to:
+  /// **'{planned} planned (+{buffer} buffer)'**
+  String kitchenBatchPortions(int planned, int buffer);
+
+  /// No description provided for @kitchenStartCooking.
+  ///
+  /// In en, this message translates to:
+  /// **'Start cooking'**
+  String get kitchenStartCooking;
+
+  /// No description provided for @kitchenMarkDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Mark done'**
+  String get kitchenMarkDone;
+
+  /// No description provided for @kitchenCancelBatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel batch'**
+  String get kitchenCancelBatch;
+
+  /// No description provided for @kitchenActualPortions.
+  ///
+  /// In en, this message translates to:
+  /// **'Actual portions'**
+  String get kitchenActualPortions;
+
+  /// No description provided for @kitchenWastePortions.
+  ///
+  /// In en, this message translates to:
+  /// **'Wasted portions'**
+  String get kitchenWastePortions;
+
+  /// No description provided for @kitchenShortages.
+  ///
+  /// In en, this message translates to:
+  /// **'Stock shortages'**
+  String get kitchenShortages;
+
+  /// No description provided for @kitchenLogQc.
+  ///
+  /// In en, this message translates to:
+  /// **'Log a check'**
+  String get kitchenLogQc;
+
+  /// No description provided for @kitchenQcType.
+  ///
+  /// In en, this message translates to:
+  /// **'Check'**
+  String get kitchenQcType;
+
+  /// No description provided for @kitchenQcValue.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading (e.g. 68°C)'**
+  String get kitchenQcValue;
+
+  /// No description provided for @kitchenQcPass.
+  ///
+  /// In en, this message translates to:
+  /// **'Pass'**
+  String get kitchenQcPass;
+
+  /// No description provided for @kitchenQcFail.
+  ///
+  /// In en, this message translates to:
+  /// **'Fail'**
+  String get kitchenQcFail;
+
+  /// No description provided for @kitchenQcNoteRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'A failed check needs a note.'**
+  String get kitchenQcNoteRequired;
+
+  /// No description provided for @kitchenNoQc.
+  ///
+  /// In en, this message translates to:
+  /// **'No checks logged for this day.'**
+  String get kitchenNoQc;
+
+  /// No description provided for @kitchenNoAlerts.
+  ///
+  /// In en, this message translates to:
+  /// **'No stock alerts. All good.'**
+  String get kitchenNoAlerts;
+
+  /// No description provided for @qcTEMPERATURE.
+  ///
+  /// In en, this message translates to:
+  /// **'Temperature'**
+  String get qcTEMPERATURE;
+
+  /// No description provided for @qcTASTE.
+  ///
+  /// In en, this message translates to:
+  /// **'Taste'**
+  String get qcTASTE;
+
+  /// No description provided for @qcHYGIENE.
+  ///
+  /// In en, this message translates to:
+  /// **'Hygiene'**
+  String get qcHYGIENE;
+
+  /// No description provided for @qcPACKAGING.
+  ///
+  /// In en, this message translates to:
+  /// **'Packaging'**
+  String get qcPACKAGING;
+
+  /// No description provided for @qcOTHER.
+  ///
+  /// In en, this message translates to:
+  /// **'Other'**
+  String get qcOTHER;
+
+  /// No description provided for @dispatchBoard.
+  ///
+  /// In en, this message translates to:
+  /// **'Board'**
+  String get dispatchBoard;
+
+  /// No description provided for @dispatchRoutes.
+  ///
+  /// In en, this message translates to:
+  /// **'Routes'**
+  String get dispatchRoutes;
+
+  /// No description provided for @dispatchFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed'**
+  String get dispatchFailed;
+
+  /// No description provided for @dispatchHandOffPoints.
+  ///
+  /// In en, this message translates to:
+  /// **'Hand-off points'**
+  String get dispatchHandOffPoints;
+
+  /// No description provided for @dispatchUnrouted.
+  ///
+  /// In en, this message translates to:
+  /// **'Unrouted'**
+  String get dispatchUnrouted;
+
+  /// No description provided for @dispatchOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Out'**
+  String get dispatchOut;
+
+  /// No description provided for @dispatchChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'Changed after routing'**
+  String get dispatchChanged;
+
+  /// No description provided for @dispatchManifest.
+  ///
+  /// In en, this message translates to:
+  /// **'Manifest (slot × zone)'**
+  String get dispatchManifest;
+
+  /// No description provided for @dispatchUnroutedOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'Unrouted orders'**
+  String get dispatchUnroutedOrders;
+
+  /// No description provided for @dispatchAllRouted.
+  ///
+  /// In en, this message translates to:
+  /// **'Every order is on a route.'**
+  String get dispatchAllRouted;
+
+  /// No description provided for @dispatchCreateRoute.
+  ///
+  /// In en, this message translates to:
+  /// **'New route'**
+  String get dispatchCreateRoute;
+
+  /// No description provided for @dispatchAddToRoute.
+  ///
+  /// In en, this message translates to:
+  /// **'Add to route'**
+  String get dispatchAddToRoute;
+
+  /// No description provided for @dispatchAutoGroup.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-group'**
+  String get dispatchAutoGroup;
+
+  /// No description provided for @dispatchAutoGroupConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Put every unrouted order on one route per slot × zone?'**
+  String get dispatchAutoGroupConfirm;
+
+  /// No description provided for @dispatchAutoGrouped.
+  ///
+  /// In en, this message translates to:
+  /// **'{routes} routes, {stops} stops'**
+  String dispatchAutoGrouped(int routes, int stops);
+
+  /// No description provided for @dispatchRouteName.
+  ///
+  /// In en, this message translates to:
+  /// **'Route name'**
+  String get dispatchRouteName;
+
+  /// No description provided for @dispatchSlot.
+  ///
+  /// In en, this message translates to:
+  /// **'Delivery slot'**
+  String get dispatchSlot;
+
+  /// No description provided for @dispatchZone.
+  ///
+  /// In en, this message translates to:
+  /// **'Zone'**
+  String get dispatchZone;
+
+  /// No description provided for @dispatchRider.
+  ///
+  /// In en, this message translates to:
+  /// **'Rider'**
+  String get dispatchRider;
+
+  /// No description provided for @dispatchNone.
+  ///
+  /// In en, this message translates to:
+  /// **'None'**
+  String get dispatchNone;
+
+  /// No description provided for @dispatchNoRider.
+  ///
+  /// In en, this message translates to:
+  /// **'No rider yet'**
+  String get dispatchNoRider;
+
+  /// No description provided for @dispatchAssignRider.
+  ///
+  /// In en, this message translates to:
+  /// **'Assign rider'**
+  String get dispatchAssignRider;
+
+  /// No description provided for @dispatchUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'busy'**
+  String get dispatchUnavailable;
+
+  /// No description provided for @dispatchStart.
+  ///
+  /// In en, this message translates to:
+  /// **'Dispatch'**
+  String get dispatchStart;
+
+  /// No description provided for @dispatchComplete.
+  ///
+  /// In en, this message translates to:
+  /// **'Close route'**
+  String get dispatchComplete;
+
+  /// No description provided for @dispatchStarted.
+  ///
+  /// In en, this message translates to:
+  /// **'{out} out for delivery, {notPacked} not packed yet'**
+  String dispatchStarted(int out, int notPacked);
+
+  /// No description provided for @dispatchRemoveStop.
+  ///
+  /// In en, this message translates to:
+  /// **'Take off route'**
+  String get dispatchRemoveStop;
+
+  /// No description provided for @dispatchNoRoutes.
+  ///
+  /// In en, this message translates to:
+  /// **'No routes yet for this day.'**
+  String get dispatchNoRoutes;
+
+  /// No description provided for @dispatchCashExpected.
+  ///
+  /// In en, this message translates to:
+  /// **'Cash {collected} of {expected}'**
+  String dispatchCashExpected(Object collected, Object expected);
+
+  /// No description provided for @dispatchNoFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'No failed deliveries for this day.'**
+  String get dispatchNoFailed;
+
+  /// No description provided for @dispatchRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry delivery'**
+  String get dispatchRetry;
+
+  /// No description provided for @dispatchCancelCredit.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel + credit'**
+  String get dispatchCancelCredit;
+
+  /// No description provided for @dispatchCancelCreditBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel this order and credit the customer\'s wallet.'**
+  String get dispatchCancelCreditBody;
+
+  /// No description provided for @dispatchResolved.
+  ///
+  /// In en, this message translates to:
+  /// **'{number} updated.'**
+  String dispatchResolved(Object number);
+
+  /// No description provided for @dispatchPickRoute.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a route'**
+  String get dispatchPickRoute;
+
+  /// No description provided for @dispatchFailedReason.
+  ///
+  /// In en, this message translates to:
+  /// **'Last reason: {reason}'**
+  String dispatchFailedReason(Object reason);
 
   /// No description provided for @stPENDING_PAYMENT.
   ///

@@ -50,20 +50,29 @@ class KitchenHomeScreen extends ConsumerWidget {
           bottom: TabBar(
             isScrollable: true,
             tabAlignment: TabAlignment.start,
-            tabs: [Tab(text: l.kitchenProduction), Tab(text: l.kitchenBatches), Tab(text: l.kitchenQc), Tab(text: l.kitchenAlerts)],
+            tabs: [
+              Tab(text: l.kitchenProduction),
+              Tab(text: l.kitchenBatches),
+              Tab(text: l.kitchenQc),
+              Tab(text: l.kitchenAlerts),
+            ],
           ),
         ),
         body: AsyncView<List<KitchenRef>>(
           value: kitchens,
           onRetry: () => ref.invalidate(kitchensProvider),
-          data: (list) => list.isEmpty
-              ? EmptyView(message: l.noKitchens, icon: Icons.soup_kitchen_outlined)
-              : const Column(
-                  children: [
-                    KitchenDateBar(),
-                    Expanded(child: TabBarView(children: [_ProductionTab(), _BatchesTab(), _QcTab(), _AlertsTab()])),
-                  ],
-                ),
+          data:
+              (list) =>
+                  list.isEmpty
+                      ? EmptyView(message: l.noKitchens, icon: Icons.soup_kitchen_outlined)
+                      : const Column(
+                        children: [
+                          KitchenDateBar(),
+                          Expanded(
+                            child: TabBarView(children: [_ProductionTab(), _BatchesTab(), _QcTab(), _AlertsTab()]),
+                          ),
+                        ],
+                      ),
         ),
       ),
     );
@@ -100,7 +109,10 @@ class _ProductionTabState extends ConsumerState<_ProductionTab> {
     final numbers = {for (final o in p.orderList) o.id: o.number};
     _report(
       l.kitchenChanged(r.packed),
-      r.results.where((x) => !x.packed).map((x) => '${x.number ?? numbers[x.orderId] ?? x.orderId}: ${x.reason ?? ''}').toList(),
+      r.results
+          .where((x) => !x.packed)
+          .map((x) => '${x.number ?? numbers[x.orderId] ?? x.orderId}: ${x.reason ?? ''}')
+          .toList(),
     );
     setState(_selected.clear);
     ref.invalidate(productionProvider);
@@ -113,16 +125,20 @@ class _ProductionTabState extends ConsumerState<_ProductionTab> {
     }
     showDialog<void>(
       context: context,
-      builder: (c) => AlertDialog(
-        title: Text(headline),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [Text(context.l10n.kitchenRejected, style: const TextStyle(fontWeight: FontWeight.w700)), for (final r in rejected) Text('• $r')],
+      builder:
+          (c) => AlertDialog(
+            title: Text(headline),
+            content: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(context.l10n.kitchenRejected, style: const TextStyle(fontWeight: FontWeight.w700)),
+                  for (final r in rejected) Text('• $r'),
+                ],
+              ),
+            ),
+            actions: [TextButton(onPressed: () => Navigator.pop(c), child: Text(context.l10n.close))],
           ),
-        ),
-        actions: [TextButton(onPressed: () => Navigator.pop(c), child: Text(context.l10n.close))],
-      ),
     );
   }
 
@@ -135,92 +151,114 @@ class _ProductionTabState extends ConsumerState<_ProductionTab> {
         Expanded(
           child: ProviderBody<Production>(
             provider: productionProvider,
-            builder: (context, p) => ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(16),
-              children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+            builder:
+                (context, p) => ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
                   children: [
-                    StatTile(l.kitchenOrders, '${p.orders}'),
-                    StatTile(l.kitchenMeals, '${p.meals}', highlight: true),
-                    StatTile(l.kitchenPendingPayment, '${p.pendingPayment}'),
-                    StatTile(l.kitchenAllergenFlagged, '${p.allergenFlagged}'),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                if (p.boxes.isNotEmpty)
-                  SectionCard(
-                    title: l.kitchenByDabba,
-                    child: Column(children: [for (final b in p.boxes) InfoRow(b.name, '${b.meals}')]),
-                  ),
-                if (p.mealsBySlot.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  SectionCard(
-                    title: l.kitchenBySlot,
-                    child: Column(children: [for (final e in p.mealsBySlot.entries) InfoRow(e.key, '${e.value}')]),
-                  ),
-                ],
-                if (p.dishes.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  SectionCard(
-                    title: l.kitchenDishes,
-                    child: Column(
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
                       children: [
-                        for (final d in p.dishes)
-                          InfoRow(d.station.isEmpty ? d.name : '${d.name} · ${d.station}', l.kitchenPortions(d.portions, d.buffer, d.total)),
+                        StatTile(l.kitchenOrders, '${p.orders}'),
+                        StatTile(l.kitchenMeals, '${p.meals}', highlight: true),
+                        StatTile(l.kitchenPendingPayment, '${p.pendingPayment}'),
+                        StatTile(l.kitchenAllergenFlagged, '${p.allergenFlagged}'),
                       ],
                     ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(child: Text(l.kitchenOrders, style: Theme.of(context).textTheme.titleMedium)),
-                    if (p.orderList.isNotEmpty)
-                      TextButton(
-                        onPressed: () => setState(() {
-                          if (_selected.length == p.orderList.length) {
-                            _selected.clear();
-                          } else {
-                            _selected
-                              ..clear()
-                              ..addAll(p.orderList.map((o) => o.id));
-                          }
-                        }),
-                        child: Text(l.selectAll),
+                    const SizedBox(height: 12),
+                    if (p.boxes.isNotEmpty)
+                      SectionCard(
+                        title: l.kitchenByDabba,
+                        child: Column(children: [for (final b in p.boxes) InfoRow(b.name, '${b.meals}')]),
+                      ),
+                    if (p.mealsBySlot.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      SectionCard(
+                        title: l.kitchenBySlot,
+                        child: Column(children: [for (final e in p.mealsBySlot.entries) InfoRow(e.key, '${e.value}')]),
+                      ),
+                    ],
+                    if (p.dishes.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      SectionCard(
+                        title: l.kitchenDishes,
+                        child: Column(
+                          children: [
+                            for (final d in p.dishes)
+                              InfoRow(
+                                d.station.isEmpty ? d.name : '${d.name} · ${d.station}',
+                                l.kitchenPortions(d.portions, d.buffer, d.total),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(child: Text(l.kitchenOrders, style: Theme.of(context).textTheme.titleMedium)),
+                        if (p.orderList.isNotEmpty)
+                          TextButton(
+                            onPressed:
+                                () => setState(() {
+                                  if (_selected.length == p.orderList.length) {
+                                    _selected.clear();
+                                  } else {
+                                    _selected
+                                      ..clear()
+                                      ..addAll(p.orderList.map((o) => o.id));
+                                  }
+                                }),
+                            child: Text(l.selectAll),
+                          ),
+                      ],
+                    ),
+                    if (p.orderList.isEmpty)
+                      EmptyView(message: l.kitchenNoOrders)
+                    else
+                      Text(l.kitchenSelectOrders, style: Theme.of(context).textTheme.bodySmall),
+                    for (final o in p.orderList)
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: _selected.contains(o.id),
+                        onChanged: (v) => setState(() => v == true ? _selected.add(o.id) : _selected.remove(o.id)),
+                        title: Row(
+                          children: [
+                            Expanded(child: Text(o.number, style: const TextStyle(fontWeight: FontWeight.w700))),
+                            StatusChip(o.status),
+                          ],
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              [
+                                o.customerName,
+                                if (o.slotLabel != null) o.slotLabel!,
+                                o.placeName ?? o.area,
+                              ].join(' · '),
+                            ),
+                            Text(
+                              o.items
+                                  .map(
+                                    (i) =>
+                                        '${i.quantity}× ${i.name}${i.customizations.isEmpty ? '' : ' (${i.customizations.join(', ')})'}',
+                                  )
+                                  .join(', '),
+                            ),
+                            if (o.hasAllergenFlag)
+                              Text(
+                                '⚠ ${[...o.allergenContains, if (o.allergenNote != null) o.allergenNote!].join(' · ')}',
+                                style: const TextStyle(color: BrandColors.sindoor, fontWeight: FontWeight.w600),
+                              ),
+                            if (o.lastPackingOk == false && (o.lastPackingNote ?? '').isNotEmpty)
+                              Text(o.lastPackingNote!),
+                          ],
+                        ),
                       ),
                   ],
                 ),
-                if (p.orderList.isEmpty) EmptyView(message: l.kitchenNoOrders) else Text(l.kitchenSelectOrders, style: Theme.of(context).textTheme.bodySmall),
-                for (final o in p.orderList)
-                  CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: _selected.contains(o.id),
-                    onChanged: (v) => setState(() => v == true ? _selected.add(o.id) : _selected.remove(o.id)),
-                    title: Row(
-                      children: [
-                        Expanded(child: Text(o.number, style: const TextStyle(fontWeight: FontWeight.w700))),
-                        StatusChip(o.status),
-                      ],
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text([o.customerName, if (o.slotLabel != null) o.slotLabel!, o.placeName ?? o.area].join(' · ')),
-                        Text(o.items.map((i) => '${i.quantity}× ${i.name}${i.customizations.isEmpty ? '' : ' (${i.customizations.join(', ')})'}').join(', ')),
-                        if (o.hasAllergenFlag)
-                          Text(
-                            '⚠ ${[...o.allergenContains, if (o.allergenNote != null) o.allergenNote!].join(' · ')}',
-                            style: const TextStyle(color: BrandColors.sindoor, fontWeight: FontWeight.w600),
-                          ),
-                        if (o.lastPackingOk == false && (o.lastPackingNote ?? '').isNotEmpty) Text(o.lastPackingNote!),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
           ),
         ),
         if (_selected.isNotEmpty && p != null)
@@ -274,7 +312,10 @@ class _PackChecksDialogState extends State<_PackChecksDialog> {
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l.cancel)),
-        FilledButton(onPressed: _checks.every((c) => c) ? () => Navigator.pop(context, true) : null, child: Text(l.kitchenPack)),
+        FilledButton(
+          onPressed: _checks.every((c) => c) ? () => Navigator.pop(context, true) : null,
+          child: Text(l.kitchenPack),
+        ),
       ],
     );
   }
@@ -289,7 +330,10 @@ class _BatchesTab extends ConsumerWidget {
     final l = context.l10n;
     final repo = ref.read(kitchenRepositoryProvider);
     if (to == 'DONE') {
-      final res = await showDialog<(int?, int?)>(context: context, builder: (_) => _PortionsDialog(planned: b.plannedPortions + b.bufferPortions));
+      final res = await showDialog<(int?, int?)>(
+        context: context,
+        builder: (_) => _PortionsDialog(planned: b.plannedPortions + b.bufferPortions),
+      );
       if (res == null) return;
       await repo.advanceBatch(b.id, 'DONE', actualPortions: res.$1, wastePortions: res.$2);
     } else if (to == 'CANCELLED') {
@@ -308,67 +352,84 @@ class _BatchesTab extends ConsumerWidget {
     final l = context.l10n;
     return ProviderBody<BatchDay>(
       provider: batchesProvider,
-      builder: (context, day) => ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(16),
-        children: [
-          BusyButton(
-            label: l.kitchenPlanBatches,
-            icon: Icons.auto_awesome_outlined,
-            outlined: true,
-            onPressed: () async {
-              final k = await ref.read(currentKitchenProvider.future);
-              if (k == null) return;
-              final r = await ref.read(kitchenRepositoryProvider).planBatches(k.id, ref.read(staffDateProvider));
-              ref.invalidate(batchesProvider);
-              if (context.mounted) showSnack(context, l.kitchenPlanned(r.integer('created'), r.integer('updated')));
-            },
-          ),
-          const SizedBox(height: 12),
-          if (day.batches.isEmpty) EmptyView(message: l.kitchenNoBatches, icon: Icons.outdoor_grill_outlined),
-          for (final b in day.batches)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: SectionCard(
-                title: b.dish,
-                trailing: StatusChip(b.status),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text([if (b.station != null) b.station!, l.kitchenBatchPortions(b.plannedPortions, b.bufferPortions)].join(' · ')),
-                    if (b.actualPortions != null) Text('${l.kitchenActualPortions}: ${b.actualPortions}  ·  ${l.kitchenWastePortions}: ${b.wastePortions ?? 0}'),
-                    if ((b.notes ?? '').isNotEmpty) Text(b.notes!, style: Theme.of(context).textTheme.bodySmall),
-                    if (b.nextStatus != null) ...[
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          BusyButton(
-                            expand: false,
-                            label: b.nextStatus == 'COOKING' ? l.kitchenStartCooking : l.kitchenMarkDone,
-                            onPressed: () => _advance(context, ref, b, b.nextStatus!),
+      builder:
+          (context, day) => ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(16),
+            children: [
+              BusyButton(
+                label: l.kitchenPlanBatches,
+                icon: Icons.auto_awesome_outlined,
+                outlined: true,
+                onPressed: () async {
+                  final k = await ref.read(currentKitchenProvider.future);
+                  if (k == null) return;
+                  final r = await ref.read(kitchenRepositoryProvider).planBatches(k.id, ref.read(staffDateProvider));
+                  ref.invalidate(batchesProvider);
+                  if (context.mounted) showSnack(context, l.kitchenPlanned(r.integer('created'), r.integer('updated')));
+                },
+              ),
+              const SizedBox(height: 12),
+              if (day.batches.isEmpty) EmptyView(message: l.kitchenNoBatches, icon: Icons.outdoor_grill_outlined),
+              for (final b in day.batches)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: SectionCard(
+                    title: b.dish,
+                    trailing: StatusChip(b.status),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          [
+                            if (b.station != null) b.station!,
+                            l.kitchenBatchPortions(b.plannedPortions, b.bufferPortions),
+                          ].join(' · '),
+                        ),
+                        if (b.actualPortions != null)
+                          Text(
+                            '${l.kitchenActualPortions}: ${b.actualPortions}  ·  ${l.kitchenWastePortions}: ${b.wastePortions ?? 0}',
                           ),
-                          BusyButton(expand: false, outlined: true, label: l.kitchenCancelBatch, onPressed: () => _advance(context, ref, b, 'CANCELLED')),
+                        if ((b.notes ?? '').isNotEmpty) Text(b.notes!, style: Theme.of(context).textTheme.bodySmall),
+                        if (b.nextStatus != null) ...[
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              BusyButton(
+                                expand: false,
+                                label: b.nextStatus == 'COOKING' ? l.kitchenStartCooking : l.kitchenMarkDone,
+                                onPressed: () => _advance(context, ref, b, b.nextStatus!),
+                              ),
+                              BusyButton(
+                                expand: false,
+                                outlined: true,
+                                label: l.kitchenCancelBatch,
+                                onPressed: () => _advance(context, ref, b, 'CANCELLED'),
+                              ),
+                            ],
+                          ),
                         ],
-                      ),
-                    ],
-                  ],
+                      ],
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          if (day.shortages.isNotEmpty)
-            SectionCard(
-              title: l.kitchenShortages,
-              child: Column(
-                children: [
-                  for (final s in day.shortages)
-                    InfoRow('${s.name} (${s.dish})', '${s.shortage.toStringAsFixed(s.shortage % 1 == 0 ? 0 : 2)} ${s.unit}'),
-                ],
-              ),
-            ),
-        ],
-      ),
+              if (day.shortages.isNotEmpty)
+                SectionCard(
+                  title: l.kitchenShortages,
+                  child: Column(
+                    children: [
+                      for (final s in day.shortages)
+                        InfoRow(
+                          '${s.name} (${s.dish})',
+                          '${s.shortage.toStringAsFixed(s.shortage % 1 == 0 ? 0 : 2)} ${s.unit}',
+                        ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
     );
   }
 }
@@ -401,15 +462,26 @@ class _PortionsDialogState extends State<_PortionsDialog> {
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          TextField(controller: _actual, keyboardType: TextInputType.number, inputFormatters: digits, decoration: InputDecoration(labelText: l.kitchenActualPortions)),
+          TextField(
+            controller: _actual,
+            keyboardType: TextInputType.number,
+            inputFormatters: digits,
+            decoration: InputDecoration(labelText: l.kitchenActualPortions),
+          ),
           const SizedBox(height: 12),
-          TextField(controller: _waste, keyboardType: TextInputType.number, inputFormatters: digits, decoration: InputDecoration(labelText: l.kitchenWastePortions)),
+          TextField(
+            controller: _waste,
+            keyboardType: TextInputType.number,
+            inputFormatters: digits,
+            decoration: InputDecoration(labelText: l.kitchenWastePortions),
+          ),
         ],
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: Text(l.cancel)),
         FilledButton(
-          onPressed: () => Navigator.pop<(int?, int?)>(context, (int.tryParse(_actual.text), int.tryParse(_waste.text))),
+          onPressed:
+              () => Navigator.pop<(int?, int?)>(context, (int.tryParse(_actual.text), int.tryParse(_waste.text))),
           child: Text(l.save),
         ),
       ],
@@ -422,13 +494,13 @@ class _PortionsDialogState extends State<_PortionsDialog> {
 const qcTypes = ['TEMPERATURE', 'TASTE', 'HYGIENE', 'PACKAGING', 'OTHER'];
 
 String qcTypeLabel(AppLocalizations l, String t) => switch (t) {
-      'TEMPERATURE' => l.qcTEMPERATURE,
-      'TASTE' => l.qcTASTE,
-      'HYGIENE' => l.qcHYGIENE,
-      'PACKAGING' => l.qcPACKAGING,
-      'OTHER' => l.qcOTHER,
-      _ => humanize(t),
-    };
+  'TEMPERATURE' => l.qcTEMPERATURE,
+  'TASTE' => l.qcTASTE,
+  'HYGIENE' => l.qcHYGIENE,
+  'PACKAGING' => l.qcPACKAGING,
+  'OTHER' => l.qcOTHER,
+  _ => humanize(t),
+};
 
 class _QcTab extends ConsumerWidget {
   const _QcTab();
@@ -447,22 +519,35 @@ class _QcTab extends ConsumerWidget {
       ),
       body: ProviderBody<List<QcCheck>>(
         provider: qcProvider,
-        builder: (context, checks) => checks.isEmpty
-            ? ScrollFill(child: EmptyView(message: l.kitchenNoQc, icon: Icons.fact_check_outlined))
-            : ListView.separated(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(0, 8, 0, 96),
-                itemCount: checks.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
-                itemBuilder: (c, i) {
-                  final q = checks[i];
-                  return ListTile(
-                    title: Text([qcTypeLabel(l, q.type), if (q.dish != null) q.dish!, if (q.value != null) q.value!].join(' · ')),
-                    subtitle: Text([KtmDates.timestamp(q.createdAt, locale: context.lang), if (q.note != null) q.note!].join('\n')),
-                    trailing: StatusChip(q.result, label: q.result == 'PASS' ? l.kitchenQcPass : l.kitchenQcFail),
-                  );
-                },
-              ),
+        builder:
+            (context, checks) =>
+                checks.isEmpty
+                    ? ScrollFill(child: EmptyView(message: l.kitchenNoQc, icon: Icons.fact_check_outlined))
+                    : ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(0, 8, 0, 96),
+                      itemCount: checks.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (c, i) {
+                        final q = checks[i];
+                        return ListTile(
+                          title: Text(
+                            [
+                              qcTypeLabel(l, q.type),
+                              if (q.dish != null) q.dish!,
+                              if (q.value != null) q.value!,
+                            ].join(' · '),
+                          ),
+                          subtitle: Text(
+                            [
+                              KtmDates.timestamp(q.createdAt, locale: context.lang),
+                              if (q.note != null) q.note!,
+                            ].join('\n'),
+                          ),
+                          trailing: StatusChip(q.result, label: q.result == 'PASS' ? l.kitchenQcPass : l.kitchenQcFail),
+                        );
+                      },
+                    ),
       ),
     );
   }
@@ -517,7 +602,11 @@ class _QcDialogState extends ConsumerState<_QcDialog> {
               onSelectionChanged: (s) => setState(() => _result = s.first),
             ),
             const SizedBox(height: 12),
-            TextFormField(controller: _value, maxLength: 60, decoration: InputDecoration(labelText: '${l.kitchenQcValue} (${l.optional})')),
+            TextFormField(
+              controller: _value,
+              maxLength: 60,
+              decoration: InputDecoration(labelText: '${l.kitchenQcValue} (${l.optional})'),
+            ),
             TextFormField(
               controller: _note,
               maxLength: 500,
@@ -537,7 +626,9 @@ class _QcDialogState extends ConsumerState<_QcDialog> {
             if (!_form.currentState!.validate()) return;
             final k = await ref.read(currentKitchenProvider.future);
             if (k == null) return;
-            await ref.read(kitchenRepositoryProvider).logQc(
+            await ref
+                .read(kitchenRepositoryProvider)
+                .logQc(
                   kitchenId: k.id,
                   date: ref.read(staffDateProvider),
                   type: _type,
@@ -563,19 +654,25 @@ class _AlertsTab extends ConsumerWidget {
     final l = context.l10n;
     return ProviderBody<List<StockAlert>>(
       provider: stockAlertsProvider,
-      builder: (context, alerts) => alerts.isEmpty
-          ? ScrollFill(child: EmptyView(message: l.kitchenNoAlerts, icon: Icons.inventory_2_outlined))
-          : ListView.separated(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(16),
-              itemCount: alerts.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (c, i) {
-                final a = alerts[i];
-                final tone = switch (a.severity) { 'critical' => Tone.bad, 'warning' => Tone.warn, _ => Tone.info };
-                return Notice(a.message.isEmpty ? humanize(a.type) : a.message, tone: tone);
-              },
-            ),
+      builder:
+          (context, alerts) =>
+              alerts.isEmpty
+                  ? ScrollFill(child: EmptyView(message: l.kitchenNoAlerts, icon: Icons.inventory_2_outlined))
+                  : ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(16),
+                    itemCount: alerts.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (c, i) {
+                      final a = alerts[i];
+                      final tone = switch (a.severity) {
+                        'critical' => Tone.bad,
+                        'warning' => Tone.warn,
+                        _ => Tone.info,
+                      };
+                      return Notice(a.message.isEmpty ? humanize(a.type) : a.message, tone: tone);
+                    },
+                  ),
     );
   }
 }
