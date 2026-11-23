@@ -25,7 +25,7 @@ class AuthRepository {
       'password': password,
       if (companyCode != null && companyCode.trim().isNotEmpty) 'companyCode': companyCode.trim(),
       if (ref != null && ref.trim().isNotEmpty) 'ref': ref.trim(),
-    });
+    },);
     return SignInResult.fromJson(r.map);
   }
 

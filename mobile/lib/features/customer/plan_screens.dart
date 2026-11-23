@@ -140,7 +140,10 @@ class _PlanDetailScreenState extends ConsumerState<PlanDetailScreen> {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 350), () {
       if (!mounted || _start == null || _days.length < d.plan.minDaysPerWeek) return;
-      setState(() => _quote = ref.read(customerRepositoryProvider).planQuote(_input(d)));
+      final f = ref.read(customerRepositoryProvider).planQuote(_input(d));
+      setState(() {
+        _quote = f;
+      });
     });
   }
 

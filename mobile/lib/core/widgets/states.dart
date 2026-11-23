@@ -142,7 +142,7 @@ Future<void> refreshProvider<T>(WidgetRef ref, ProviderBase<AsyncValue<T>> provi
   final done = Completer<void>();
   final sub = ref.listenManual<AsyncValue<T>>(provider, (_, next) {
     if (!next.isLoading && !done.isCompleted) done.complete();
-  }, fireImmediately: true);
+  }, fireImmediately: true,);
   try {
     await done.future.timeout(const Duration(seconds: 30));
   } catch (_) {

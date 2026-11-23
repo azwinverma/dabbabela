@@ -87,7 +87,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   void _requote() {
     final lines = _lines;
     if (lines.isEmpty) return;
-    setState(() => _quote = ref.read(customerRepositoryProvider).quote(lines, addressId: _addressId, coupon: _coupon));
+    final f = ref.read(customerRepositoryProvider).quote(lines, addressId: _addressId, coupon: _coupon);
+    setState(() {
+      _quote = f;
+    });
   }
 
   Future<void> _selectAddress(Address a) async {
