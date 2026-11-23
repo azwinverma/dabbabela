@@ -495,8 +495,9 @@ async function currentScopes(userId: string) {
 
 /**
  * Add a staff member to a kitchen (an extra StaffScope row through access.setScopes, which checks staff.edit,
- * escalation and audits `staff.scope`). Note: a staff member with no scope sees every kitchen; once assigned they
- * see only their assigned kitchens.
+ * escalation and audits `staff.scope`). Note: with no kitchen at all, business-wide roles (owner, ops, finance) see
+ * every kitchen and kitchen-bound staff (chef, stores, dispatch, rider) see none (user-context kitchenScope); once
+ * assigned they see only their assigned kitchens.
  */
 export async function assignStaffToKitchen(actor: KitchenActor & { role: Role }, kitchenId: string, userId: string) {
   requireKitchenInScope(actor, kitchenId);
@@ -518,7 +519,7 @@ export async function removeStaffFromKitchen(actor: KitchenActor & { role: Role 
   const s = await currentScopes(userId);
   if (!s.kitchenIds.includes(kitchenId)) return false;
   const rest = s.kitchenIds.filter((k) => k !== kitchenId);
-  if (!rest.length && !u.kitchenId) throw new KitchenError("This is their only kitchen — removing it would give them every kitchen. Change it on the staff page.");
+  if (!rest.length && !u.kitchenId) throw new KitchenError("This is their only kitchen — removing it would leave them unscoped (every kitchen, or none for kitchen staff). Change it on the staff page.");
   await setScopes(actor as AccessActor, userId, { kitchenIds: rest, companyIds: s.companyIds });
   return true;
 }

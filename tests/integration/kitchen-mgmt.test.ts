@@ -224,6 +224,9 @@ describe("performance", () => {
 describe("manager, staff and scoping", () => {
   it("assigns a manager (audited) and staff via scopes; refuses unsafe removals", async () => {
     const chef = await db.user.findUniqueOrThrow({ where: { email: "chef@demo.dabbabela.local" } });
+    // Start from a chef with no kitchen at all (the demo seed gives them one; kitchen-bound staff without a kitchen
+    // have no kitchen access — user-context kitchenScope).
+    await db.user.update({ where: { id: chef.id }, data: { kitchenId: null } });
     expect(await assignStaffToKitchen(owner, kB, chef.id)).toBe(true);
     expect((await kitchenStaff(kB)).map((s) => s.id)).toContain(chef.id);
     expect(await assignKitchenManager(owner, kB, chef.id)).toBe(true);
@@ -235,6 +238,7 @@ describe("manager, staff and scoping", () => {
     await assignStaffToKitchen(owner, kA, chef.id);
     expect(await removeStaffFromKitchen(owner, kB, chef.id)).toBe(true);
     await db.staffScope.deleteMany({ where: { userId: chef.id } });
+    await db.user.update({ where: { id: chef.id }, data: { kitchenId: chef.kitchenId } });
     const customer = await db.user.findUniqueOrThrow({ where: { email: B } });
     await expect(assignKitchenManager(owner, kB, customer.id)).rejects.toThrow(/staff member/);
   });

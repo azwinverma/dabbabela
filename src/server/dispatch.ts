@@ -8,6 +8,8 @@ import { recordCashCollected } from "./payments";
 import { notify } from "./notify";
 
 export class DispatchError extends Error {}
+/** The stop's hand-off code is locked after too many wrong tries (API: 423 HANDOFF_LOCKED). */
+export class HandoffLockedError extends DispatchError {}
 
 /** Orders ready to go out (or already out) for a kitchen-day. */
 const DISPATCH_STATUSES = ["SCHEDULED", "CONFIRMED", "PREPARING", "PACKED", "OUT_FOR_DELIVERY", "DELIVERED", "FAILED_DELIVERY"] as const;
@@ -152,21 +154,60 @@ export function otpMatches(expected: string | null | undefined, typed: string | 
   return t.length === expected.length && t === expected;
 }
 
+/** Wrong hand-off codes allowed per order before the stop locks (security review M3: 4 digits = 10,000 codes). */
+export const HANDOFF_MAX_WRONG = 5;
+export const HANDOFF_UNLOCK_NOTE = "Hand-off code unlocked by dispatch";
+export const HANDOFF_LOCKED_MESSAGE = "Too many wrong codes — this stop is locked. Call dispatch: they can unlock it or confirm the hand-off themselves.";
+
+/** Wrong codes entered on an order since dispatch last unlocked it (the DeliveryEvent log is the counter — no schema change). */
+export async function wrongHandoffCodes(orderId: string, client: Pick<typeof db, "deliveryEvent"> = db) {
+  const unlock = await client.deliveryEvent.findFirst({ where: { orderId, type: "NOTE", note: HANDOFF_UNLOCK_NOTE }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
+  return client.deliveryEvent.count({ where: { orderId, otpOk: false, ...(unlock ? { createdAt: { gt: unlock.createdAt } } : {}) } });
+}
+
+/**
+ * Check a typed hand-off code under a per-order lock: refused once HANDOFF_MAX_WRONG wrong codes were entered (until
+ * dispatch unlocks), and each wrong code is logged. Per rider, tries are also rate-limited (fail closed).
+ */
+async function checkHandoffCode(o: { id: string; number: string; deliveryOtp: string | null }, riderId: string, typed: string | undefined) {
+  const { rateLimit, LIMITS } = await import("@/lib/rate-limit");
+  if (!(await rateLimit("handoff-otp:rider", riderId, LIMITS.handoffOtp.max, LIMITS.handoffOtp.windowMs, { failClosed: true }))) throw new DispatchError("Too many code attempts — wait a few minutes or call dispatch");
+  const outcome = await db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`handoff:${o.id}`}))`;
+    const wrong = await wrongHandoffCodes(o.id, tx);
+    if (wrong >= HANDOFF_MAX_WRONG) return "locked" as const;
+    if (otpMatches(o.deliveryOtp, typed)) return "ok" as const;
+    await tx.deliveryEvent.create({ data: { orderId: o.id, type: "NOTE", otpOk: false, actorId: riderId, note: "Wrong hand-off code entered" } });
+    return wrong + 1 >= HANDOFF_MAX_WRONG ? ("locked_now" as const) : ("wrong" as const);
+  });
+  if (outcome === "ok") return;
+  if (outcome === "locked_now") {
+    await audit({ actorId: riderId, action: "delivery.otp_locked", entity: "Order", entityId: o.id, summary: `${o.number}: hand-off locked after ${HANDOFF_MAX_WRONG} wrong codes` });
+    const { log } = await import("@/lib/logger");
+    log.warn("delivery.otp_locked", { orderId: o.id, riderId });
+  }
+  if (outcome === "wrong") throw new DispatchError("That code doesn't match — ask the customer to check the SMS / their account");
+  throw new HandoffLockedError(HANDOFF_LOCKED_MESSAGE);
+}
+
+/** Dispatch override after a lock: resets the wrong-code counter for one order (audited, reason required). */
+export async function unlockHandoffCode(orderId: string, actor: { id: string }, reason: string) {
+  if (reason.trim().length < 3) throw new DispatchError("Say why you're unlocking the hand-off code");
+  const o = await db.order.findUniqueOrThrow({ where: { id: orderId }, select: { id: true, number: true } });
+  await db.deliveryEvent.create({ data: { orderId, type: "NOTE", actorId: actor.id, note: HANDOFF_UNLOCK_NOTE } });
+  await audit({ actorId: actor.id, action: "delivery.otp_unlock", entity: "Order", entityId: orderId, summary: `${o.number}: hand-off code unlocked`, reason });
+}
+
 /**
  * Rider marks a stop delivered. With the deliveryOtp flag on, the customer's 4-digit code is
- * required (wrong codes are logged and refused). Cash orders must record collection first.
+ * required (wrong codes are logged and refused; 5 wrong codes lock the stop until dispatch unlocks it).
+ * Cash orders must record collection first.
  */
 export async function deliverStop(orderId: string, rider: { id: string; isStaff: boolean }, input: { otp?: string; photoUrl?: string | null; note?: string; cashCollected?: number | null }) {
   const settings = await getSettings();
   const o = await riderOrder(orderId, rider.isStaff ? null : rider.id);
   if (o.status !== "OUT_FOR_DELIVERY" && o.status !== "FAILED_DELIVERY") throw new DispatchError("This order isn't out for delivery");
-  if (settings.flags.deliveryOtp && !rider.isStaff) {
-    const ok = otpMatches(o.deliveryOtp, input.otp);
-    if (!ok) {
-      await db.deliveryEvent.create({ data: { orderId, type: "NOTE", otpOk: false, actorId: rider.id, note: "Wrong hand-off code entered" } });
-      throw new DispatchError("That code doesn't match — ask the customer to check the SMS / their account");
-    }
-  }
+  if (settings.flags.deliveryOtp && !rider.isStaff) await checkHandoffCode(o, rider.id, input.otp);
   if (settings.flags.deliveryPhoto && !rider.isStaff && !input.photoUrl) throw new DispatchError("Add a photo of the hand-off");
   if (o.payment?.method === "CASH" && o.paymentStatus !== "PAID") {
     if (input.cashCollected == null) throw new DispatchError(`Collect cash first`);
@@ -175,6 +216,8 @@ export async function deliverStop(orderId: string, rider: { id: string; isStaff:
   const r = await setOrderStatus([orderId], "DELIVERED", rider.id, input.note || "Delivered");
   if (!r.changed.length) throw new DispatchError(r.rejected[0]?.reason ?? "Couldn't update the order");
   await db.deliveryEvent.create({ data: { orderId, type: "DELIVERED", otpOk: settings.flags.deliveryOtp ? !rider.isStaff || undefined : undefined, photoUrl: input.photoUrl || null, note: input.note || null, actorId: rider.id } });
+  // Staff confirming a hand-off without the customer's code (e.g. after a lock) is an override — on the audit trail.
+  if (settings.flags.deliveryOtp && rider.isStaff) await audit({ actorId: rider.id, action: "delivery.otp_override", entity: "Order", entityId: orderId, summary: `${o.number}: delivered without the hand-off code (staff)`, reason: input.note || null });
 }
 
 /** Reasons the rider app offers. Free text is still accepted (staff, "Other"), but a reason is always required. */

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { apiRoute } from "@/server/api/route";
 import { readJson, tooMany } from "@/server/api/http";
@@ -16,7 +17,9 @@ const schema = z.object({
 /** Second sign-in step for accounts with an authenticator app: TOTP (or a backup code) → `{ token, user }`. */
 export const POST = apiRoute({ auth: "public" }, async ({ req, ip }) => {
   const body = await readJson(req, schema);
-  if (!(await hit("twoFactor", ip))) throw tooMany();
+  // Per IP and per challenge (the signed two_factor cookie = the pending user), so rotating IPs gives no extra guesses.
+  const challenge = createHash("sha256").update(body.challengeToken).digest("hex").slice(0, 32);
+  if (!(await hit("twoFactor", ip)) || !(await hit("twoFactor", `2fa:${challenge}`))) throw tooMany();
   const headers = challengeHeaders(req, body.challengeToken);
   const code = body.code.replace(/\s/g, "");
   try {

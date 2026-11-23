@@ -22,11 +22,20 @@ export function appFlags(s: SiteSettings) {
   };
 }
 
-/** Origin used for gateway return URLs (eSewa/Khalti redirect back to the website's return routes). */
+/**
+ * Origin used for gateway return URLs (eSewa/Khalti redirect back to the website's return routes). Configured URL
+ * first (NEXT_PUBLIC_SITE_URL, then BETTER_AUTH_URL). X-Forwarded-Host is never trusted in production (security
+ * review L8 — a forged header would send the customer back to someone else's site); dev/tests may use it.
+ */
 export function apiOrigin(req: Request) {
-  const env = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
-  if (env && !env.includes("localhost")) return env;
-  const host = req.headers.get("x-forwarded-host");
-  if (host) return `${req.headers.get("x-forwarded-proto") ?? "https"}://${host}`;
+  for (const v of [process.env.NEXT_PUBLIC_SITE_URL, process.env.BETTER_AUTH_URL]) {
+    const env = v?.trim().replace(/\/$/, "");
+    if (env && /^https?:\/\//.test(env)) return env;
+  }
+  if (process.env.NODE_ENV !== "production") {
+    const host = req.headers.get("x-forwarded-host");
+    if (host) return `${req.headers.get("x-forwarded-proto") ?? "https"}://${host}`;
+  }
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
   return new URL(req.url).origin;
 }

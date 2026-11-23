@@ -34,7 +34,8 @@ export async function verifyTurnstile(token: string | null | undefined, ip?: str
     if (!res.ok) throw new Error(`siteverify HTTP ${res.status}`);
     const data = (await res.json()) as { success?: boolean; action?: string; "error-codes"?: string[] };
     if (!data.success) return { ok: false, codes: data["error-codes"] ?? [] };
-    if (opts.expectedAction && data.action && data.action !== opts.expectedAction) return { ok: false, codes: ["action-mismatch"] };
+    // A token minted for another widget (or with no action at all) must not pass a check that names one (L4).
+    if (opts.expectedAction && data.action !== opts.expectedAction) return { ok: false, codes: ["action-mismatch"] };
     return { ok: true };
   } catch (e) {
     log.warn("turnstile.verify_failed", { error: e instanceof Error ? e.message : String(e) });

@@ -17,7 +17,9 @@ export const API_LIMITS = {
   resetSubmit: { ...LIMITS.resetSubmit, auth: true },
   otpSend: { ...LIMITS.otpSend, auth: true }, // per IP and per phone
   otpVerify: { ...LIMITS.otpVerify, auth: true },
-  twoFactor: { ...LIMITS.twoFactor, auth: true },
+  twoFactor: { ...LIMITS.twoFactor, auth: true }, // per IP, and per challenge token (= the pending user)
+  signUpApi: { ...LIMITS.signUpApi, auth: true }, // per IP and per email — stricter than the web (no Turnstile in the app)
+  handoffOtp: { ...LIMITS.handoffOtp, auth: false }, // hand-off code tries per rider
   checkout: { ...LIMITS.checkout, auth: false }, // place order / subscribe / add meal / renew / top-up, per user
   payStart: { ...LIMITS.payStart, auth: false }, // start / switch a payment, per user
   upload: { ...LIMITS.proofUpload, auth: false }, // proof / delivery photo uploads, per user
@@ -27,9 +29,12 @@ export const API_LIMITS = {
 
 export type LimitName = keyof typeof API_LIMITS;
 
+/** Buckets that refuse when the limiter itself fails (auth, OTP, 2FA and money) — the rest fail open (L2). */
+const FAIL_CLOSED: ReadonlySet<LimitName> = new Set<LimitName>(["signIn", "signInEmail", "signUp", "signUpApi", "reset", "resetSubmit", "otpSend", "otpVerify", "twoFactor", "checkout", "payStart", "upload", "handoffOtp"]);
+
 /** true = allowed. */
 export async function hit(name: LimitName, id: string) {
   const l = API_LIMITS[name];
   if (l.auth && !authLimitsOn()) return true;
-  return rateLimit(`api:${name}`, id, l.max, l.windowMs);
+  return rateLimit(`api:${name}`, id, l.max, l.windowMs, { failClosed: FAIL_CLOSED.has(name) });
 }

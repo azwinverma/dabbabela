@@ -8,7 +8,7 @@ import { PaymentError } from "@/server/payments";
 import { CapacityError } from "@/server/capacity";
 import { CrmError } from "@/server/crm";
 import { TopupError } from "@/server/wallet-topup";
-import { DispatchError } from "@/server/dispatch";
+import { DispatchError, HandoffLockedError } from "@/server/dispatch";
 import { KitchenError } from "@/server/kitchen";
 import { CoverageError } from "@/server/coverage";
 import { PinError } from "@/server/customer-dashboard";
@@ -77,6 +77,7 @@ const DOMAIN_ERRORS: [new (...a: never[]) => Error, string, number][] = [
   [CapacityError, "CAPACITY_REJECTED", 422],
   [CrmError, "ACCOUNT_REJECTED", 422],
   [TopupError, "TOPUP_REJECTED", 422],
+  [HandoffLockedError, "HANDOFF_LOCKED", 423], // before DispatchError (subclass)
   [DispatchError, "DISPATCH_REJECTED", 422],
   [KitchenError, "KITCHEN_REJECTED", 422],
   [CoverageError, "COVERAGE_REJECTED", 422],

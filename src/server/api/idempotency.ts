@@ -20,7 +20,10 @@ import { ApiError, badRequest, conflict } from "./http";
 
 const KEY_OK = /^[A-Za-z0-9_\-:.]{8,80}$/;
 const TTL_MS = 24 * 60 * 60 * 1000;
-const PENDING_STALE_MS = 2 * 60 * 1000; // a crashed request's claim stops blocking after this
+// A crashed request's claim stops blocking after this. Longer than any serverless function can run (300 s), so a
+// slow first request is never re-run by a retry (L9); the money operations behind it are guarded state transitions
+// too (skip / cancel / swap / deliver change state at most once), so even a re-run can't double-apply.
+const PENDING_STALE_MS = 6 * 60 * 1000;
 
 type Stored = { state: "pending"; hash: string; at: number } | { state: "done"; hash: string; status: number; body: string };
 

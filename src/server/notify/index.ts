@@ -108,6 +108,13 @@ export const TEMPLATES = {
     },
     sms: null,
   },
+  "device.moved": {
+    // A push token registered by this account was re-registered by another account (security review L7).
+    topic: "SECURITY",
+    inApp: { title: "Notifications moved to another account", body: "A {{platform}} device (…{{suffix}}) that got your notifications is now signed in to a different account. If that wasn't you, sign out your other sessions and change your password." },
+    email: null,
+    sms: null,
+  },
   "approval.decided": {
     topic: "SECURITY",
     inApp: { title: "{{summary}}: {{decision}}", body: "Your approval request was {{decision}}." },

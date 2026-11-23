@@ -1,12 +1,18 @@
 import "server-only";
 import crypto from "node:crypto";
 
-/** eSewa ePay v2. Sandbox values are eSewa's published test credentials. */
+const live = () => process.env.NODE_ENV === "production" && process.env.PAYMENTS_SANDBOX !== "true";
+
+/**
+ * eSewa ePay v2. Sandbox values are eSewa's published test credentials — used only outside live mode. Live
+ * (production without PAYMENTS_SANDBOX=true) nothing defaults to the sandbox: unset values stay empty, so a
+ * misconfigured deployment fails instead of quietly talking to the test gateway (methods.gatewayConfigProblem).
+ */
 export const esewaConfig = () => ({
-  productCode: process.env.ESEWA_PRODUCT_CODE || "EPAYTEST",
-  secret: process.env.ESEWA_SECRET_KEY || "8gBm/:&EnhH.1/q",
-  formUrl: process.env.ESEWA_FORM_URL || "https://rc-epay.esewa.com.np/api/epay/main/v2/form",
-  statusUrl: process.env.ESEWA_STATUS_URL || "https://rc.esewa.com.np/api/epay/transaction/status/",
+  productCode: process.env.ESEWA_PRODUCT_CODE || (live() ? "" : "EPAYTEST"),
+  secret: process.env.ESEWA_SECRET_KEY || (live() ? "" : "8gBm/:&EnhH.1/q"),
+  formUrl: process.env.ESEWA_FORM_URL || (live() ? "" : "https://rc-epay.esewa.com.np/api/epay/main/v2/form"),
+  statusUrl: process.env.ESEWA_STATUS_URL || (live() ? "" : "https://rc.esewa.com.np/api/epay/transaction/status/"),
 });
 
 export function esewaSign(message: string, secret = esewaConfig().secret) {

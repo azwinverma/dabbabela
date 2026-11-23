@@ -1,5 +1,6 @@
 /* Catalogue + demo seed. Shared by `prisma/seed.ts` and the one-time /setup screen. No "server-only" here. */
 import { ensureFoundationData } from "./foundation";
+import { KITCHEN_BOUND_ROLES } from "../lib/user-context";
 import type { Diet, ItemCategory, PrismaClient, StockUnit, Weekday, Role } from "@prisma/client";
 import { hashPassword } from "better-auth/crypto";
 import { addDays, dateOnly, todayKTM, weekStartOf } from "../lib/dates";
@@ -646,7 +647,12 @@ async function seedDemo(db: PrismaClient, kitchenId: string, boxId: Map<string, 
     ["Content Editor (demo)", "content@demo.dabbabela.local", "CONTENT_EDITOR"],
     ["Menu Manager (demo)", "menu@demo.dabbabela.local", "MENU_MANAGER"],
   ];
-  for (const [name, email, role] of staff) await createUserWithPassword(db, { name, email, password: "demo-pass-123", role });
+  for (const [name, email, role] of staff) {
+    const u = await createUserWithPassword(db, { name, email, password: "demo-pass-123", role });
+    // Kitchen-bound roles get NO kitchen access until assigned one (user-context kitchenScope, fail closed) — give the
+    // demo chef / store keeper / dispatcher / rider the seeded kitchen.
+    if (KITCHEN_BOUND_ROLES.includes(role)) await db.user.updateMany({ where: { id: u.id, kitchenId: null }, data: { kitchenId } });
+  }
 
   const zones = await db.deliveryZone.findMany({ orderBy: { sortOrder: "asc" } });
   const company =
@@ -672,7 +678,6 @@ async function seedDemo(db: PrismaClient, kitchenId: string, boxId: Map<string, 
     if (c.company)
       await db.companyMember.upsert({ where: { userId: u.id }, create: { companyId: company.id, userId: u.id, role: c.admin ? "ADMIN" : "MEMBER", status: "ACTIVE", department: "Sample team", officeLocationId: location.id }, update: {} });
   }
-  void kitchenId;
   void boxId;
   void addDays;
   void weekStartOf;

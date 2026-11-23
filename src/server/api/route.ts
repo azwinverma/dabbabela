@@ -5,6 +5,7 @@ import { ApiError, errorResponse, forbidden, ok, toErrorResponse, tooMany } from
 import { assertStaff2fa, getApiUser, requireApiPermission, requireApiUser, type ApiUser } from "./auth";
 import { bodyHash, readIdempotencyKey, withIdempotency } from "./idempotency";
 import { hit, type LimitName } from "./rate-limit";
+import { clientIpFrom } from "@/lib/rate-limit";
 
 /**
  * Every /api/v1 handler is built with `apiRoute(options, fn)`. The options make the guard explicit and testable
@@ -40,9 +41,9 @@ export type RouteOptions<A extends AuthSpec> = {
 
 type Handler<A extends AuthSpec, P> = (ctx: ApiContext<A, P>) => Promise<Response | unknown>;
 
+/** Platform-provided client IP, never the spoofable left-most X-Forwarded-For value (lib/rate-limit clientIpFrom). */
 function clientIp(req: Request) {
-  const raw = (req.headers.get("x-forwarded-for")?.split(",")[0] ?? req.headers.get("x-real-ip") ?? "").trim();
-  return /^[0-9a-fA-F:.]{3,45}$/.test(raw) ? raw : "local";
+  return clientIpFrom(req.headers);
 }
 
 /**

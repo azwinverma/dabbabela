@@ -1,8 +1,11 @@
 import "server-only";
 
+const live = () => process.env.NODE_ENV === "production" && process.env.PAYMENTS_SANDBOX !== "true";
+
+/** Live mode never defaults to Khalti's sandbox (dev.khalti.com): KHALTI_BASE_URL must be set (methods.gatewayConfigProblem). */
 const cfg = () => ({
   secret: process.env.KHALTI_SECRET_KEY || "",
-  base: (process.env.KHALTI_BASE_URL || "https://dev.khalti.com/api/v2").replace(/\/$/, ""),
+  base: (process.env.KHALTI_BASE_URL || (live() ? "" : "https://dev.khalti.com/api/v2")).replace(/\/$/, ""),
 });
 
 /** Khalti ePayment initiate. Amount in paisa (Khalti's native unit). */

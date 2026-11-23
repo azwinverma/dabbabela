@@ -88,6 +88,7 @@ paths:
       tags:
         - Auth
       summary: Second sign-in step (TOTP or backup code)
+      description: Rate-limited per IP and per challenge token (the pending sign-in), so rotating IPs gives no extra guesses (429 RATE_LIMITED).
       security: []
       requestBody:
         required: true
@@ -134,6 +135,10 @@ paths:
       tags:
         - Auth
       summary: Create a customer account and sign in
+      description: |
+        Same rules as the web register form. The app can't show the web's Turnstile bot check, so this endpoint is
+        limited more strictly instead: the web sign-up limit per IP plus 3 per hour per IP and per email (429
+        RATE_LIMITED). App attestation is a planned addition.
       security: []
       requestBody:
         required: true
@@ -578,6 +583,7 @@ paths:
       tags:
         - Auth
       summary: Register / refresh this device's push token (moves it from another account)
+      description: A token registered by another account moves to the caller; the move is audited and the previous account gets an in-app security notice.
       requestBody:
         required: true
         content:
@@ -3169,7 +3175,9 @@ paths:
       summary: Mark a stop delivered (OTP / cash / photo per settings)
       description: |
         Permission rider.edit. Riders: own current routes only; with flag deliveryOtp the customer's code is required
-        (a wrong code → 422 DISPATCH_REJECTED, logged); with deliveryPhoto a `photo` is required; unpaid CASH orders need
+        (a wrong code → 422 DISPATCH_REJECTED, logged; after 5 wrong codes the stop locks → 423 HANDOFF_LOCKED until
+        dispatch unlocks it from the dispatch board or confirms the hand-off itself; code tries are also rate-limited per
+        rider → 429); with deliveryPhoto a `photo` is required; unpaid CASH orders need
         `cash` equal to the amount due (paisa). Staff acting from the app (dispatch.edit + kitchen scope) skip OTP/photo.
         Money-moving: Idempotency-Key required.
       security:
@@ -3233,6 +3241,12 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+        '423':
+          description: HANDOFF_LOCKED — too many wrong hand-off codes on this stop; call dispatch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '429':
           $ref: '#/components/responses/RateLimited'
   /rider/stops/{orderId}/fail:
@@ -4519,6 +4533,7 @@ components:
                 - IDEMPOTENCY_KEY_REQUIRED
                 - IDEMPOTENCY_KEY_REUSED
                 - RATE_LIMITED
+                - HANDOFF_LOCKED
                 - INTERNAL
             message:
               type: string

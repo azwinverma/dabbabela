@@ -1,5 +1,6 @@
 "use server";
 
+import { createHash } from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -32,9 +33,16 @@ async function limited(name: keyof typeof LIMITS, ...ids: (string | null | undef
   if (!authLimitsOn()) return false;
   const { max, windowMs } = LIMITS[name];
   const ip = await requestIp();
-  if (!(await rateLimit(`auth:${name}:ip`, ip, name === "signInEmail" ? LIMITS.signIn.max : max, windowMs))) return true;
-  for (const id of ids) if (id && !(await rateLimit(`auth:${name}:id`, id.toLowerCase(), max, windowMs))) return true;
+  // Fail closed: a limiter outage must not open unlimited password / OTP / 2FA guessing (L2).
+  if (!(await rateLimit(`auth:${name}:ip`, ip, name === "signInEmail" ? LIMITS.signIn.max : max, windowMs, { failClosed: true }))) return true;
+  for (const id of ids) if (id && !(await rateLimit(`auth:${name}:id`, id.toLowerCase(), max, windowMs, { failClosed: true }))) return true;
   return false;
+}
+
+/** Stable id of the pending 2FA sign-in: a hash of Better Auth's signed two_factor cookie (never the raw value). */
+async function twoFactorChallengeId() {
+  const c = (await cookies()).getAll().find((x) => /two_factor$/.test(x.name));
+  return c?.value ? `2fa:${createHash("sha256").update(c.value).digest("hex").slice(0, 32)}` : null;
 }
 
 /** Only same-site relative paths are allowed as ?next= targets. */
@@ -101,7 +109,9 @@ export async function verifyTwoFactorAction(_: ActionResult, fd: FormData): Prom
   const backup = fd.get("mode") === "backup";
   const next = safeNext(str(fd.get("next")));
   if (!code) return fail("Enter the code");
-  if (await limited("twoFactor")) return fail(TOO_MANY);
+  // Per IP and per pending sign-in (the signed two_factor cookie identifies the user being verified), so rotating IPs
+  // doesn't give an attacker more guesses at one account's code.
+  if (await limited("twoFactor", await twoFactorChallengeId())) return fail(TOO_MANY);
   try {
     const h = await headers();
     const res = (backup

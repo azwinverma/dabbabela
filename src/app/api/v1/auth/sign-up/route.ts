@@ -10,10 +10,15 @@ export const dynamic = "force-dynamic";
 
 const schema = registerSchema.extend({ ref: z.string().trim().max(20).optional() });
 
-/** Create a customer account (same rules as the web register form) and sign in → `{ token, user }` (201). */
+/**
+ * Create a customer account (same rules as the web register form) and sign in → `{ token, user }` (201).
+ * Bot protection (security review L3): the app can't render Turnstile, so the API uses stricter limits than the web
+ * form instead — the web sign-up limit per IP plus `signUpApi` (3 per hour) per IP and per email. TODO: app
+ * attestation (Play Integrity / App Attest) once the store builds exist.
+ */
 export const POST = apiRoute({ auth: "public" }, async ({ req, ip }) => {
   const d = await readJson(req, schema);
-  if (!(await hit("signUp", ip))) throw tooMany();
+  if (!(await hit("signUp", ip)) || !(await hit("signUpApi", ip)) || !(await hit("signUpApi", `email:${d.email.toLowerCase()}`))) throw tooMany();
   const check = await preRegisterCheck(d);
   if (!check.ok) throw new ApiError(422, "VALIDATION_FAILED", check.message, { [check.field]: check.hint });
   let r;

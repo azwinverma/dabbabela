@@ -7,7 +7,7 @@ import { audit } from "@/lib/audit";
 import { done, fail, type ActionResult } from "@/lib/action";
 import { parseRupees, rs } from "@/lib/money";
 import { isValidISODate } from "@/lib/dates";
-import { acknowledgeChange, assignOrders, autoGroupRoutes, completeRoute, createRoute, moveStop, recordHandIn, resolveFailed, routeCash, setRouteCost, setRouteRider, startRoute, unassignOrder } from "@/server/dispatch";
+import { acknowledgeChange, assignOrders, autoGroupRoutes, completeRoute, createRoute, moveStop, recordHandIn, resolveFailed, routeCash, setRouteCost, setRouteRider, startRoute, unassignOrder, unlockHandoffCode } from "@/server/dispatch";
 import { assertKitchen, guard, reasonOf } from "@/components/admin/ops/scope";
 
 async function route(id: string, user: { kitchenId: string | null }) {
@@ -166,5 +166,17 @@ export async function acknowledgeChangeAction(orderId: string): Promise<ActionRe
     await audit({ actorId: user.id, action: "dispatch.change_checked", entity: "Order", entityId: orderId, summary: `${o.number}: changed delivery checked against its route` });
     revalidatePath("/admin/dispatch");
     return done("Marked as checked");
+  });
+}
+
+/** Dispatch override after 5 wrong hand-off codes (M3): resets the stop's counter; audited. */
+export async function unlockHandoffAction(orderId: string): Promise<ActionResult> {
+  return guard(async () => {
+    const user = await requirePermission("dispatch.edit");
+    const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
+    assertKitchen(user, o.kitchenId);
+    await unlockHandoffCode(orderId, user, "Unlocked from the dispatch board after calling the customer");
+    revalidatePath("/admin/dispatch");
+    return done("Unlocked — the rider can enter the code again");
   });
 }

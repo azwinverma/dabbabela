@@ -45,6 +45,7 @@ permission checks, kitchen scope, ownership checks, rate limits and audit rows.
 | 409 | `ACCOUNT_EXISTS`, `IDEMPOTENCY_IN_PROGRESS`, `TRANSITION_REJECTED` | conflict |
 | 422 | `VALIDATION_FAILED` (+`fields`) | input invalid |
 | 422 | `ORDER_REJECTED`, `PAYMENT_REJECTED`, `CAPACITY_REJECTED`, `TOPUP_REJECTED`, `DISPATCH_REJECTED`, `KITCHEN_REJECTED`, `COUPON_REJECTED`, `REQUEST_REJECTED`, `IDEMPOTENCY_KEY_REUSED`, … | business rule said no (cut-off passed, sold out, wrong hand-off code …) — show `message` |
+| 423 | `HANDOFF_LOCKED` | 5 wrong hand-off codes on this stop — the rider must call dispatch |
 | 429 | `RATE_LIMITED` | slow down, retry later |
 | 500 | `INTERNAL` | logged server-side; retry |
 
@@ -129,9 +130,12 @@ Lists that grow (orders, payments, wallet ledger, notifications) use cursors: `?
 ## Rate limits
 
 Per IP / account / email-or-phone, shared with the website's limiter (Postgres, all instances): sign-in 10 per 5 min
-per IP + 6 per 5 min per email; sign-up 5 per 10 min; reset 3 per 10 min; OTP send 3 per 5 min (per IP and per phone);
-OTP verify 8 per 5 min; 2FA 8 per 5 min; checkout 12/min; payment start 15/min; uploads 10 per 10 min; other writes
-60/min per user; public catalogue reads 300/min per IP. → `429 RATE_LIMITED`.
+per IP + 6 per 5 min per email; sign-up 5 per 10 min per IP plus 3 per hour per IP and per email (the app has no
+Turnstile); reset 3 per 10 min; OTP send 3 per 5 min (per IP and per phone); OTP verify 8 per 5 min; 2FA 8 per 5 min
+per IP and per challenge token; checkout 12/min; payment start 15/min; uploads 10 per 10 min; hand-off codes 30 per
+10 min per rider (and 5 wrong codes lock the stop → `423 HANDOFF_LOCKED`); other writes 60/min per user; public
+catalogue reads 300/min per IP. → `429 RATE_LIMITED`. The IP is the platform-provided client address, never the
+left-most `X-Forwarded-For` value. Auth, OTP, 2FA and money buckets refuse (fail closed) if the limiter itself errors.
 
 ## Browsers / CORS
 

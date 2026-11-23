@@ -53,12 +53,16 @@ export async function createReturnCredit(
   return { credit, created: true };
 }
 
-/** Value of returns posted on a PO that no (non-void) supplier credit covers yet. */
+/**
+ * Value of returns posted on a PO that no supplier credit covers yet. VOID credits still count as covering their
+ * returns (security review L1): voiding writes off the unapplied remainder and keeps the return "used" — otherwise
+ * void + "credit uncredited returns" would credit the same goods twice (the applied part included).
+ */
 export async function uncreditedReturnValue(poId: string, client: Tx | typeof db = db) {
   const po = await client.purchaseOrder.findUniqueOrThrow({ where: { id: poId }, select: { number: true } });
   const rows = await client.stockMovement.findMany({ where: { type: "RETURN", reference: { startsWith: `${po.number}#return:` } }, select: { quantity: true, unitCost: true } });
   const returned = rows.reduce((a, r) => a + Math.round(-r.quantity * (r.unitCost ?? 0)), 0);
-  const credited = await client.supplierCredit.aggregate({ where: { poId, status: { not: "VOID" } }, _sum: { amount: true } });
+  const credited = await client.supplierCredit.aggregate({ where: { poId }, _sum: { amount: true } });
   return { returned, credited: credited._sum.amount ?? 0, uncredited: Math.max(0, returned - (credited._sum.amount ?? 0)) };
 }
 

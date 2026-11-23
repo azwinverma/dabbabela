@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { requirePermission } from "@/lib/auth";
 import { dateOnly } from "@/lib/dates";
 import { rs } from "@/lib/money";
-import { manifest, ridersForKitchen, routeCash, routeChanges } from "@/server/dispatch";
+import { HANDOFF_MAX_WRONG, manifest, ridersForKitchen, routeCash, routeChanges, wrongHandoffCodes } from "@/server/dispatch";
 import { PageHeader, Panel, StatCard, OrderBadge } from "@/components/admin/ui";
 import { rupeesInput } from "@/lib/money";
 import { Badge } from "@/components/ui/Badge";
@@ -12,7 +12,7 @@ import { ConfirmAction } from "@/components/admin/ConfirmAction";
 import { DayPicker } from "@/components/admin/ops/DayPicker";
 import { ReasonForm } from "@/components/admin/ops/ReasonForm";
 import { pickDate, pickKitchen, piiFor } from "@/components/admin/ops/scope";
-import { acknowledgeChangeAction, assignAction, autoGroupAction, completeRouteAction, handInAction, moveAction, resolveFailedAction, riderAction, routeCostAction, startRouteAction, unassignAction } from "./actions";
+import { acknowledgeChangeAction, assignAction, autoGroupAction, completeRouteAction, handInAction, moveAction, resolveFailedAction, riderAction, routeCostAction, startRouteAction, unassignAction, unlockHandoffAction } from "./actions";
 
 export const metadata = { title: "Dispatch" };
 
@@ -37,6 +37,9 @@ export default async function DispatchPage({ searchParams }: { searchParams: Pro
   ]);
   const cash = new Map(await Promise.all(routes.map(async (r) => [r.id, await routeCash(r.id)] as const)));
   const changes = await routeChanges(routes.map((r) => r.id));
+  // Stops whose hand-off code locked after too many wrong tries (M3): dispatch unlocks or confirms the hand-off.
+  const outIds = routes.flatMap((r) => r.assignments.filter((a) => a.order.status === "OUT_FOR_DELIVERY" || a.order.status === "FAILED_DELIVERY").map((a) => a.orderId));
+  const lockedStops = new Set((await Promise.all(outIds.map(async (id) => ((await wrongHandoffCodes(id)) >= HANDOFF_MAX_WRONG ? id : null)))).filter(Boolean) as string[]);
   const all = groups.flatMap((g) => g.stops.flatMap((s) => s.orders));
   const unassigned = all.filter((o) => !o.assignment && !["DELIVERED"].includes(o.status));
 
@@ -143,6 +146,12 @@ export default async function DispatchPage({ searchParams }: { searchParams: Pro
                       <OrderBadge status={a.order.status} />
                       {a.order.deliveryEvents[0]?.photoUrl && <a href={a.order.deliveryEvents[0].photoUrl} target="_blank" rel="noreferrer" className="text-xs font-semibold text-akash underline">proof</a>}
                       {a.order.deliveryEvents[0]?.otpOk && <Badge tone="good">code ✓</Badge>}
+                      {lockedStops.has(a.orderId) && (
+                        <span className="flex items-center gap-1">
+                          <Badge tone="bad">code locked</Badge>
+                          <ConfirmAction action={unlockHandoffAction.bind(null, a.orderId)} label="Unlock" variant="ghost" className="h-7 px-1.5" confirm={`${HANDOFF_MAX_WRONG} wrong hand-off codes were entered for this stop. Call the customer first. Unlock so the rider can try again?`} />
+                        </span>
+                      )}
                       {changes.has(a.orderId) && (
                         <span className="flex items-center gap-1" title={changes.get(a.orderId)!.join(" · ")}>
                           <Badge tone="warn">changed</Badge>
