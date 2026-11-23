@@ -13,7 +13,7 @@ extension L10nContext on BuildContext {
 
 /// Localised labels for API enum codes; unknown codes fall back to a readable version of the code.
 extension CodeLabels on AppLocalizations {
-  String status(String code) {
+  String statusLabel(String code) {
     switch (code) {
       case 'PENDING_PAYMENT':
         return stPENDING_PAYMENT;

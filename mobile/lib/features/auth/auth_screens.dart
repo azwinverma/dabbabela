@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/api/api_exception.dart';
 import '../../core/l10n.dart';
 import '../../core/validators.dart';
+import '../../core/theme/brand.dart';
 import '../../core/widgets/common.dart';
 import 'session.dart';
 
@@ -202,7 +203,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
           onPressed: () async {
             if (!_form.currentState!.validate()) return;
             await ref.read(authRepositoryProvider).resetPassword(_token.text, _password.text);
-            if (!mounted) return;
+            if (!context.mounted) return;
             showSnack(context, l.passwordReset);
             context.go('/auth/sign-in');
           },

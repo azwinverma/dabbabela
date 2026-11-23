@@ -88,7 +88,7 @@ class _BoardTabState extends ConsumerState<_BoardTab> {
       context,
       title: l.dispatchPickRoute,
       items: open,
-      label: (r) => '${r.name} · ${CodeLabels(l).status(r.status)}',
+      label: (r) => '${r.name} · ${CodeLabels(l).statusLabel(r.status)}',
     );
     if (route == null) return;
     await ref.read(dispatchRepositoryProvider).addOrders(route.id, _selected.toList());
