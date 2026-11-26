@@ -18,6 +18,7 @@ import { CorporateError, CorporateForbidden } from "@/server/corporate";
 import { CouponError } from "@/server/coupons";
 import { TransitionError } from "@/server/transitions";
 import { ApprovalError } from "@/server/approvals";
+import { CustomBoxError } from "@/server/custom-boxes";
 
 /**
  * Mobile API (/api/v1) response envelope and error mapping.
@@ -88,6 +89,7 @@ const DOMAIN_ERRORS: [new (...a: never[]) => Error, string, number][] = [
   [CouponError, "COUPON_REJECTED", 422],
   [TransitionError, "TRANSITION_REJECTED", 409],
   [ApprovalError, "APPROVAL_REJECTED", 422],
+  [CustomBoxError, "BUILD_REJECTED", 422],
 ];
 
 function zodFields(e: ZodError) {

@@ -206,3 +206,25 @@ export const planInput = z.object({
   couponCode: z.string().max(30).nullable().optional(),
 });
 
+
+// ───────────── Build-a-Dabba ─────────────
+
+/** One Build-a-Dabba pick (POST /builder/quote, /saved-boxes). */
+export const buildPick = z.object({ menuItemId: z.string().min(1).max(40), qty: z.number().int().min(1).max(25), portionId: z.string().max(40).nullable().optional() });
+export const buildDiet = z.enum(["VEGAN", "VEG", "EGG_OK"]).nullable().optional();
+
+/** Saved-box DTO. `price` = price now (re-computed when listed); `savedPrice` = price when last saved. */
+export function savedBoxDto(b: { id: string; name: string; price: number; items: unknown; updatedAt: Date }, now?: { price: number; problem: string | null; details: string; diet: string; allergens: string[] }) {
+  return {
+    id: b.id,
+    name: b.name,
+    price: now?.price ?? b.price,
+    savedPrice: b.price,
+    items: Array.isArray(b.items) ? b.items : [],
+    details: now?.details ?? null,
+    diet: now?.diet ?? null,
+    allergens: now?.allergens ?? [],
+    problem: now?.problem ?? null,
+    updatedAt: b.updatedAt.toISOString(),
+  };
+}

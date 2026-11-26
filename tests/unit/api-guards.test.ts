@@ -33,6 +33,9 @@ const PUBLIC: Record<string, { methods: string[]; why: string }> = {
   plans: { methods: ["GET"], why: "public plan list" },
   "plans/[slug]": { methods: ["GET"], why: "public plan page data" },
   coverage: { methods: ["GET"], why: "public coverage lookup" },
+  allergens: { methods: ["GET"], why: "public allergen list" },
+  builder: { methods: ["GET"], why: "public Build-a-Dabba catalogue; token only adds the company note" },
+  "builder/quote": { methods: ["POST"], why: "price preview only (no writes); ordering/saving re-prices with a session" },
   "openapi.json": { methods: ["GET"], why: "the API spec" },
 };
 

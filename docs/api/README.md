@@ -44,7 +44,7 @@ permission checks, kitchen scope, ownership checks, rate limits and audit rows.
 | 404 | `FEATURE_DISABLED` | feature flag off (phone OTP, wallet top-up) |
 | 409 | `ACCOUNT_EXISTS`, `IDEMPOTENCY_IN_PROGRESS`, `TRANSITION_REJECTED` | conflict |
 | 422 | `VALIDATION_FAILED` (+`fields`) | input invalid |
-| 422 | `ORDER_REJECTED`, `PAYMENT_REJECTED`, `CAPACITY_REJECTED`, `TOPUP_REJECTED`, `DISPATCH_REJECTED`, `KITCHEN_REJECTED`, `COUPON_REJECTED`, `REQUEST_REJECTED`, `IDEMPOTENCY_KEY_REUSED`, … | business rule said no (cut-off passed, sold out, wrong hand-off code …) — show `message` |
+| 422 | `ORDER_REJECTED`, `PAYMENT_REJECTED`, `CAPACITY_REJECTED`, `TOPUP_REJECTED`, `BUILD_REJECTED`, `DISPATCH_REJECTED`, `KITCHEN_REJECTED`, `COUPON_REJECTED`, `REQUEST_REJECTED`, `IDEMPOTENCY_KEY_REUSED`, … | business rule said no (cut-off passed, sold out, wrong hand-off code …) — show `message` |
 | 423 | `HANDOFF_LOCKED` | 5 wrong hand-off codes on this stop — the rider must call dispatch |
 | 429 | `RATE_LIMITED` | slow down, retry later |
 | 500 | `INTERNAL` | logged server-side; retry |
@@ -91,6 +91,38 @@ With `flags.staff2fa` on (production default) every staff role (incl. riders) mu
 * Push: `POST /devices { token, platform: IOS|ANDROID, appVersion }` after sign-in and whenever FCM rotates the
   token; `DELETE /devices { token }` (or pass `deviceToken` to sign-out). A token re-registered by another account
   moves to it.
+* Push messages (FCM; iOS through FCM's APNs bridge) are sent for: order out for delivery / delivered / delivery
+  failed, payment received / failed, plan ending reminders, approval requests (staff) and new rider routes. Each has a
+  `notification { title, body }` and `data { type, link?, targetType?, targetId? }` (all strings) — `targetType` /
+  `targetId` are the same values as `target` in `GET /notifications`. Push follows the user's `IN_APP` switch for the
+  topic (`/profile/notification-preferences`). The hand-off code is never in the push text (open the order for it).
+  A token FCM reports as unregistered is deleted server-side: register again on next launch. Push is off when the
+  server has no `FCM_SERVICE_ACCOUNT_JSON` (`/api/health` → `integrations.push`).
+
+## Deep links (`target`)
+
+Every notification in `GET /notifications` has `link` (website path, unchanged) and `target`:
+`{ "type": "order" | "plan" | "payment" | "wallet" | "ticket" | "url", "id"?: string }` (null when there is no link).
+`order` → `GET /orders/{id}`, `plan` → `GET /subscriptions/{id}`, `payment` → `GET /payments/{id}` (incl. wallet
+top-ups), `wallet` → `GET /wallet`, `ticket` → `GET /support/tickets/{id}`, `url` → no native screen (staff links such
+as approvals, company invoices): open `link` on the website or ignore it.
+
+## Build-a-Dabba from the app
+
+1. `GET /builder` — steps (`groups`: `minSelect`/`maxSelect`, `dietRule`) and options (`menuItemId`, `price` paisa,
+   `portions[{ id, label, priceDelta }]`, `diet`, allergen codes), plus `minPrice` (floor) and `maxQtyPerDish`. With a
+   token, `companyBuildBlocked: { companyName }` for members of a company that bills its own menu.
+2. `POST /builder/quote { picks: [{ menuItemId, qty, portionId? }], diet?: VEGAN|VEG|EGG_OK }` — live price and
+   validation (same engine as the website): `price`, `rawPrice`, `floorApplied`, `problem` (null = OK), `problems[]`,
+   `warnings[]`, `lines[]`, `allergens[]`. Debounce it; it is rate-limited like other reads.
+3. `POST /saved-boxes { name?, picks, diet? }` → `201 SavedBox` (refused `422 BUILD_REJECTED` with the problem, or at
+   30 saved boxes). `PATCH /saved-boxes/{id} { name?, picks?, diet? }`, `DELETE /saved-boxes/{id}` (refused while an
+   active plan has it booked). `GET /saved-boxes` re-prices every box (`price` now, `savedPrice`, `problem`).
+4. Order it like any dabba: cart line `{ "kind": "custom", "id": "<saved box id>", "date", "qty" }` in
+   `POST /cart/quote` and `POST /orders`. Checkout re-prices it; on a company-billed order the line comes back with a
+   `problem` ("Build-a-Dabba isn't part of … company-billed lunches").
+
+`GET /allergens` lists `{ code, name, nameNe }` for showing allergen codes and editing the profile's `allergies`.
 
 ## Idempotency
 
@@ -147,8 +179,8 @@ Native apps only. No CORS headers are ever sent; a request with an `Origin` head
 | Area | Endpoints | Guard |
 |---|---|---|
 | Auth | `/auth/*`, `/me`, `/devices`, `/auth/sessions` | public (sign-in family) / signed in |
-| Public | `GET /settings`, `/menu?date|week`, `/boxes/{slug}`, `/plans`, `/plans/{slug}`, `/coverage?q|area`, `/openapi.json` | none (token only narrows menu to the company menu) |
-| Customer | `/profile*`, `/addresses*`, `/cart/quote`, `/orders*`, `/payments*`, `/subscriptions*`, `/wallet*`, `/notifications*`, `/referrals*`, `/support/tickets*`, `/saved-boxes`, `/privacy/*` | signed in, own records only (others → 404) |
+| Public | `GET /settings`, `/menu?date|week`, `/boxes/{slug}`, `/plans`, `/plans/{slug}`, `/coverage?q|area`, `/allergens`, `/builder`, `POST /builder/quote`, `/openapi.json` | none (token only narrows menu to the company menu) |
+| Customer | `/profile*`, `/addresses*`, `/cart/quote`, `/orders*`, `/payments*`, `/subscriptions*`, `/wallet*`, `/notifications*`, `/referrals*`, `/support/tickets*`, `/saved-boxes*` (GET/POST, PATCH/DELETE `{id}`), `/privacy/*` | signed in, own records only (others → 404) |
 | Rider | `/rider/routes`, `/rider/days`, `/rider/routes/{id}`, `/rider/stops/{orderId}/deliver|fail`, `/rider/routes/{id}/finish` | `rider.view` / `rider.edit` (+2FA); riders: own routes only, OTP/photo rules; other staff need `dispatch.edit` + kitchen scope |
 | Kitchen | `/kitchen/kitchens`, `/kitchen/production`, `/kitchen/orders/start`, `/kitchen/orders/pack`, `/kitchen/orders/{id}/pack`, `/kitchen/batches*`, `/kitchen/qc`, `/kitchen/stock-alerts` | `kitchen.view` / `kitchen.edit` (+2FA), kitchen scope |
 | Dispatch | `/dispatch/board`, `/dispatch/routes*`, `/dispatch/orders/{orderId}/assignment`, `/dispatch/auto-group`, `/dispatch/failed*` | `dispatch.view` / `dispatch.edit` (+2FA), kitchen scope, PII masked without `customers.pii` |

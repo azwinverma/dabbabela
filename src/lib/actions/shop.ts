@@ -6,7 +6,6 @@ import { z } from "zod";
 import type { PaymentMethod } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
-import { getSettings } from "@/lib/settings";
 import { siteUrl } from "@/lib/site-url";
 import { storeUpload } from "@/lib/upload";
 import { log } from "@/lib/logger";
@@ -15,7 +14,8 @@ import { done, fail, type ActionResult } from "@/lib/action";
 import { str } from "@/lib/utils";
 import { quoteCart, placeCartOrder, OrderError, type CartLine } from "@/server/orders";
 import { startPayment, switchPaymentMethod, submitTransferProof, PaymentError, type StartResult } from "@/server/payments";
-import { priceCustomBox, type CustomPick } from "@/server/builder";
+import type { CustomPick } from "@/server/builder";
+import { CustomBoxError, deleteCustomBox, saveBuiltBox, updateBuiltBox } from "@/server/custom-boxes";
 import { CapacityError } from "@/server/capacity";
 import { assertCustomerCanOrder, campaignIdFor, CrmError } from "@/server/crm";
 import { orderTouch, readAttribution } from "@/lib/attribution";
@@ -241,23 +241,27 @@ export async function saveCustomBoxAction(input: { name: string; items: CustomPi
   if (!user) return { ok: false, error: "Log in to save your dabba", redirectTo: "/login?next=/build" };
   const items = pickSchema.safeParse(input.items);
   if (!items.success) return { ok: false, error: "Add something to your dabba first" };
-  const settings = await getSettings();
-  const priced = await priceCustomBox(items.data.map((i) => ({ menuItemId: i.menuItemId, qty: i.qty, portionId: typeof i.portionId === "string" && i.portionId ? i.portionId : null })), settings);
-  if (priced.problem) return { ok: false, error: priced.problem };
-  const name = (input.name || "My dabba").trim().slice(0, 60);
-  const data = { name, items: priced.picks, price: priced.price };
-  if (!input.id && (await db.customBox.count({ where: { userId: user.id } })) >= 12) return { ok: false, error: "You can keep up to 12 saved dabbas — delete one first" };
-  const box = input.id ? await db.customBox.update({ where: { id: input.id, userId: user.id }, data }) : await db.customBox.create({ data: { ...data, userId: user.id } });
-  revalidatePath("/account/boxes");
-  return { ok: true, data: { id: box.id, price: box.price, name: box.name } };
+  const picks = items.data.map((i) => ({ menuItemId: i.menuItemId, qty: i.qty, portionId: typeof i.portionId === "string" && i.portionId ? i.portionId : null }));
+  try {
+    const name = (input.name || "My dabba").trim().slice(0, 60);
+    const box = input.id ? await updateBuiltBox(user.id, input.id, { name: name.length >= 2 ? name : undefined, picks }) : await saveBuiltBox(user.id, { name, picks });
+    revalidatePath("/account/boxes");
+    return { ok: true, data: { id: box.id, price: box.price, name: box.name } };
+  } catch (e) {
+    if (e instanceof CustomBoxError) return { ok: false, error: e.message };
+    throw e;
+  }
 }
 
 export async function deleteCustomBoxAction(id: string) {
   const user = await getCurrentUser();
   if (!user) return { ok: false, message: "Log in first" };
-  const used = await db.subscription.findFirst({ where: { userId: user.id, status: { in: ["ACTIVE", "PAUSED", "PENDING_PAYMENT"] }, orders: { some: { items: { some: { customBoxId: id } }, status: { in: ["SCHEDULED", "PENDING_PAYMENT"] } } } } });
-  if (used) return { ok: false, message: "This dabba is booked in an active plan — it stays until those days pass" };
-  await db.customBox.deleteMany({ where: { id, userId: user.id } });
+  try {
+    await deleteCustomBox(user.id, String(id));
+  } catch (e) {
+    if (e instanceof CustomBoxError) return { ok: false, message: e.message };
+    throw e;
+  }
   revalidatePath("/account/boxes");
   return { ok: true };
 }
