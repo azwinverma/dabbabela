@@ -52,7 +52,14 @@ export default async function TeamInvoices() {
                   <Badge tone={INVOICE_STATUS[i.status].tone}>{INVOICE_STATUS[i.status].label}</Badge>
                 </Td>
                 <Td className="text-right tabular-nums">{rs(i.total)}</Td>
-                <Td className="text-right tabular-nums">{i.kind === "INVOICE" ? rs(i.total - i.paidAmount) : "—"}</Td>
+                <Td className="text-right tabular-nums">
+                  {i.kind === "INVOICE" ? rs(i.total - i.paidAmount) : "—"}
+                  {i.kind === "INVOICE" && (i.status === "ISSUED" || i.status === "PARTIALLY_PAID") && i.total > i.paidAmount && (
+                    <Link href={`/team/invoices/${i.id}`} className="ml-2 text-xs font-semibold text-sindoor hover:underline">
+                      Pay
+                    </Link>
+                  )}
+                </Td>
                 <Td className="text-xs">{i.dueDate ? formatDay(isoDate(i.dueDate)) : "—"}</Td>
               </tr>
             ))

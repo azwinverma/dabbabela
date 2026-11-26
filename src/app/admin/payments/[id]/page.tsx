@@ -8,6 +8,7 @@ import { formatDay, formatStamp, isoDate } from "@/lib/dates";
 import { METHOD_LABEL, PURPOSE_LABEL, REFUND_STATUS } from "@/lib/labels";
 import { ledgerReasonLabel } from "@/lib/ledger-labels";
 import { topupRefundable } from "@/server/wallet-topup";
+import { invoiceIdOfPayment } from "@/server/invoices";
 import { PageHeader, Panel, KV, Table, Th, Td, EmptyRow, PaymentBadge, OrderBadge } from "@/components/admin/ui";
 import { Badge } from "@/components/ui/Badge";
 import { VerifyForms } from "../VerifyForms";
@@ -55,6 +56,7 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
               ["Statement lines", p.statementLines.length ? p.statementLines.map((l) => `${l.provider} ${l.providerRef} ${rs(l.amount)}`).join(" · ") + (p.statementLines.length > 1 ? " ⚠ settled more than once" : "") : "—"],
               ["Verified by", p.verifiedById ? "Staff (see audit log)" : p.paidAt ? "Gateway server check" : "—"],
               ["Plan", p.subscription?.reference ?? "—"],
+              ...(p.purpose === "INVOICE" && invoiceIdOfPayment(p) ? ([["Invoice", <Link key="inv" className="text-sindoor underline" href={`/admin/invoices/${invoiceIdOfPayment(p)}`}>{p.note?.replace(/^Invoice /, "") || "Open invoice"}</Link>]] as [string, React.ReactNode][]) : []),
               ["Note", p.note],
               ["Created", formatStamp(p.createdAt)],
             ]}

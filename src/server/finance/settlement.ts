@@ -166,7 +166,7 @@ export async function cashFlow(from: string, to: string) {
   if (daysBetween(from, to) > 366) throw new FinanceError("Pick at most a year");
   const stamp = { gte: new Date(`${from}T00:00:00+05:45`), lt: new Date(`${addDays(to, 1)}T00:00:00+05:45`) };
   const [payments, refunds, expenses, supplierPays, receipts] = await Promise.all([
-    db.payment.findMany({ where: { status: PAID, paidAt: stamp, method: { in: ["ESEWA", "KHALTI", "BANK_TRANSFER", "CASH"] } }, select: { paidAt: true, amount: true, gatewayFee: true, feeActual: true } }),
+    db.payment.findMany({ where: { status: PAID, paidAt: stamp, method: { in: ["ESEWA", "KHALTI", "BANK_TRANSFER", "CASH"] } }, select: { paidAt: true, amount: true, gatewayFee: true, feeActual: true, purpose: true } }),
     db.refund.findMany({ where: { status: "PROCESSED", processedAt: stamp, method: { not: "WALLET_CREDIT" } }, select: { processedAt: true, amount: true } }),
     db.expense.findMany({ where: { status: "PAID", date: { gte: day(from), lte: day(to) } }, select: { date: true, amount: true, tax: true } }),
     db.supplierPayment.findMany({ where: { paidAt: stamp }, select: { paidAt: true, amount: true } }),
@@ -179,6 +179,8 @@ export async function cashFlow(from: string, to: string) {
     const r = at(p.paidAt!);
     if (!r) continue;
     r.inflow += p.amount;
+    // A company invoice paid online is a company receipt too (its InvoiceReceipt is skipped below — counted here once).
+    if (p.purpose === "INVOICE") r.companyReceipts += p.amount;
     r.fees += p.feeActual ?? p.gatewayFee;
   }
   for (const x of receipts) {

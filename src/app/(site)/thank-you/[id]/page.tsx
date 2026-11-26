@@ -10,6 +10,7 @@ import { getLocale } from "@/lib/i18n/server";
 import { accountDict } from "@/lib/i18n/account";
 import { LinkButton } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { invoiceIdOfPayment } from "@/server/invoices";
 
 export const metadata: Metadata = { title: "Order received", robots: { index: false } };
 
@@ -25,6 +26,10 @@ export default async function ThankYou({ params }: { params: Promise<{ id: strin
   });
   if (!payment) notFound();
   if (payment.purpose === "WALLET_TOPUP") redirect(`/account/wallet/topup/${payment.id}`);
+  if (payment.purpose === "INVOICE") {
+    const invoiceId = invoiceIdOfPayment(payment);
+    redirect(invoiceId ? `/team/invoices/${invoiceId}?payment=${payment.status === "PAID" ? "paid" : "pending"}` : "/team/invoices");
+  }
   const [t, settings] = [accountDict(await getLocale()).thanks, await getSettings()];
   const swap = payment.purpose === "SWAP_DIFFERENCE";
   const settled = payment.status === "PAID" || payment.method === "CASH" || payment.method === "COMPANY_INVOICE" || (swap && ["PARTIALLY_REFUNDED", "REFUNDED"].includes(payment.status));

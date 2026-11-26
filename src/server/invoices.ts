@@ -5,6 +5,7 @@ import { audit } from "@/lib/audit";
 import { rs } from "@/lib/money";
 import { REVENUE_STATUSES } from "./transitions";
 import { COMPANY_SHARE_PREFIX, CorporateError, UNBILLED_ADJUSTMENT, generateCompanyInvoice, issueCompanyInvoice, type StaffActor } from "./corporate";
+import { expireOpenAttempts } from "./payments/attempts";
 
 type Tx = Prisma.TransactionClient;
 
@@ -72,9 +73,65 @@ export const RECEIPT_METHODS = ["BANK_TRANSFER", "CHEQUE", "CASH", "ESEWA", "KHA
 export type ReceiptMethod = (typeof RECEIPT_METHODS)[number];
 
 /**
+ * Serialise every change to one invoice's balance: manual receipts, credit notes, void, and online payment
+ * (start + verification). Lock order where a payment is involved: invoice → payment (markPaymentPaid takes the
+ * invoice lock first for a purpose-INVOICE payment).
+ */
+export async function lockInvoice(tx: Tx, invoiceId: string) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`invoice:${invoiceId}`}))`;
+}
+
+/** Idempotency-key prefix that links an online payment (purpose INVOICE) to its invoice before any receipt exists. */
+export const invoicePaymentKeyPrefix = (invoiceId: string) => `invoice:${invoiceId}:`;
+/** The invoice an online invoice payment is for (from its idempotency key), or null. */
+export function invoiceIdOfPayment(p: { purpose?: string | null; idempotencyKey: string | null }): string | null {
+  if (p.purpose && p.purpose !== "INVOICE") return null;
+  const m = /^invoice:([^:]+):/.exec(p.idempotencyKey ?? "");
+  return m ? m[1] : null;
+}
+
+/**
+ * The invoice's balance is about to change (manual receipt, credit note, void): cancel every unpaid online payment
+ * for it and expire their gateway sessions. Their amount was fixed at start = the old outstanding; a session still
+ * paid at the gateway afterwards is refused by markPaymentPaid (INVOICE_CANCELLED + GATEWAY_MISMATCH alert) and
+ * finance refunds it at the gateway. Call under the invoice lock. No payment lock (lock order invoice → payment is
+ * kept by markPaymentPaid; the guarded update + version bump makes a concurrent method switch fail cleanly).
+ */
+export async function cancelOpenInvoicePayments(tx: Tx, invoiceId: string) {
+  const open = await tx.payment.findMany({ where: { purpose: "INVOICE", idempotencyKey: { startsWith: invoicePaymentKeyPrefix(invoiceId) }, status: { in: ["PENDING", "FAILED"] } }, select: { id: true } });
+  let cancelled = 0;
+  for (const p of open) {
+    await expireOpenAttempts(tx, p.id);
+    const u = await tx.payment.updateMany({ where: { id: p.id, status: { in: ["PENDING", "FAILED"] } }, data: { status: "CANCELLED", version: { increment: 1 }, note: "Cancelled: the invoice changed before payment" } });
+    cancelled += u.count;
+  }
+  return cancelled;
+}
+
+type ReceiptInput = { amount: number; method: string; reference: string; receivedAt: Date; receivedOn: string; recordedById: string | null; note?: string | null; paymentId?: string | null };
+
+/**
+ * Write one dated `InvoiceReceipt` and move the invoice's `paidAmount` / status — the shared core of manual receipts
+ * (recordInvoicePayment) and online payments (markPaymentPaid → INVOICE). Caller holds the invoice lock and has
+ * checked the invoice is open and `amount` ≤ outstanding.
+ */
+export async function applyInvoiceReceiptTx(tx: Tx, i: { id: string; total: number; paidAmount: number; note: string | null }, r: ReceiptInput) {
+  const paid = i.paidAmount + r.amount;
+  const receipt = await tx.invoiceReceipt.create({
+    data: { invoiceId: i.id, amount: r.amount, method: r.method, reference: r.reference.trim().slice(0, 120), receivedAt: r.receivedAt, recordedById: r.recordedById, note: r.note?.trim().slice(0, 500) || null, paymentId: r.paymentId ?? null },
+  });
+  const inv = await tx.invoice.update({
+    where: { id: i.id },
+    data: { paidAmount: paid, status: paid >= i.total ? "PAID" : "PARTIALLY_PAID", note: [i.note, `${r.receivedOn} received ${rs(r.amount)} (${r.reference.trim()})`].filter(Boolean).join("\n") },
+  });
+  return { inv, receipt };
+}
+
+/**
  * Record money received against an issued invoice. Writes a dated `InvoiceReceipt` (the cash record: method,
  * reference, the day the money arrived) and moves `paidAmount` / status in the same transaction. `paidAmount` also
- * includes credit-note settlements, so cash reports use Σ receipts, never `paidAmount`.
+ * includes credit-note settlements, so cash reports use Σ receipts, never `paidAmount`. Unpaid online payments for
+ * the invoice are cancelled (their amount was the old balance).
  */
 export async function recordInvoicePayment(
   id: string,
@@ -92,22 +149,15 @@ export async function recordInvoicePayment(
   if (!isValidISODate(receivedOn) || receivedOn > today) throw new InvoiceError("The received date can't be in the future");
   // Money that arrived today is stamped now; an earlier day is stamped at noon Kathmandu time on that day.
   const receivedAt = receivedOn === today ? new Date() : new Date(`${receivedOn}T12:00:00+05:45`);
-  const { inv, receipt } = await db.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`invoice:${id}`}))`;
+  const { inv, receipt, cancelled } = await db.$transaction(async (tx) => {
+    await lockInvoice(tx, id);
     const i = await tx.invoice.findUniqueOrThrow({ where: { id } });
     if (i.kind !== "INVOICE" || !["ISSUED", "PARTIALLY_PAID"].includes(i.status)) throw new InvoiceError("Issue the invoice before recording payment");
     if (amount > outstanding(i)) throw new InvoiceError(`Only ${rs(outstanding(i))} is outstanding`);
-    const paid = i.paidAmount + amount;
-    const receipt = await tx.invoiceReceipt.create({
-      data: { invoiceId: id, amount, method, reference: reference.trim().slice(0, 120), receivedAt, recordedById: actorId, note: opts.note?.trim().slice(0, 500) || null },
-    });
-    const inv = await tx.invoice.update({
-      where: { id },
-      data: { paidAmount: paid, status: paid >= i.total ? "PAID" : "PARTIALLY_PAID", note: [i.note, `${receivedOn} received ${rs(amount)} (${reference.trim()})`].filter(Boolean).join("\n") },
-    });
-    return { inv, receipt };
+    const cancelled = await cancelOpenInvoicePayments(tx, id);
+    return { ...(await applyInvoiceReceiptTx(tx, i, { amount, method, reference, receivedAt, receivedOn, recordedById: actorId, note: opts.note })), cancelled };
   });
-  await audit({ actorId, action: "invoice.payment", entity: "Invoice", entityId: id, summary: `${rs(amount)} · ${reference}`, after: { receiptId: receipt.id, method, receivedOn } });
+  await audit({ actorId, action: "invoice.payment", entity: "Invoice", entityId: id, summary: `${rs(amount)} · ${reference}`, after: { receiptId: receipt.id, method, receivedOn, ...(cancelled ? { onlinePaymentsCancelled: cancelled } : {}) } });
   return inv;
 }
 
@@ -120,9 +170,11 @@ export async function invoiceReceipts(invoiceId: string) {
 export async function voidInvoice(id: string, actorId: string, reason: string) {
   if (!reason.trim()) throw new InvoiceError("Give a reason");
   const inv = await db.$transaction(async (tx) => {
+    await lockInvoice(tx, id);
     const i = await tx.invoice.findUniqueOrThrow({ where: { id } });
     if (i.status === "VOID") throw new InvoiceError("Already void");
     if (i.paidAmount > 0) throw new InvoiceError("Money has been received on this invoice — issue a credit note instead");
+    await cancelOpenInvoicePayments(tx, id);
     await tx.order.updateMany({ where: { invoiceId: id }, data: { invoiceId: null } });
     return tx.invoice.update({ where: { id }, data: { status: "VOID", note: [i.note, `VOID: ${reason}`].filter(Boolean).join("\n") } });
   });
@@ -138,7 +190,7 @@ export async function createCreditNote(invoiceId: string, actorId: string, amoun
   if (amount <= 0) throw new InvoiceError("Enter an amount");
   if (!reason.trim()) throw new InvoiceError("Give a reason");
   const cn = await db.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`invoice:${invoiceId}`}))`;
+    await lockInvoice(tx, invoiceId);
     const i = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
     if (i.kind !== "INVOICE" || !["ISSUED", "PARTIALLY_PAID", "PAID"].includes(i.status)) throw new InvoiceError("Credit notes need an issued invoice");
     const credited = await tx.invoice.aggregate({ where: { relatedId: i.id, kind: "CREDIT_NOTE", status: { not: "VOID" } }, _sum: { total: true } });
@@ -170,6 +222,8 @@ export async function createCreditNote(invoiceId: string, actorId: string, amoun
     // Settle the original by the credited amount (what is still unpaid first).
     const settle = Math.min(amount, outstanding(i));
     if (settle > 0) {
+      // The balance shrinks: an online payment started for the old balance must not be completed.
+      await cancelOpenInvoicePayments(tx, i.id);
       const paid = i.paidAmount + settle;
       await tx.invoice.update({ where: { id: i.id }, data: { paidAmount: paid, status: paid >= i.total ? "PAID" : "PARTIALLY_PAID", note: [i.note, `${note.number} credited ${rs(amount)}`].join("\n") } });
     }

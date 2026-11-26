@@ -6,6 +6,10 @@ import { isValidISODate } from "@/lib/dates";
 import { fail, done, type ActionResult } from "@/lib/action";
 import { parseRupees } from "@/lib/money";
 import { cleanWeekdays } from "@/server/corporate";
+import { InvoicePaymentError, startInvoicePayment } from "@/server/invoice-payments";
+import { PaymentError, startPayment, type StartResult } from "@/server/payments";
+import { LIMITS, rateLimit } from "@/lib/rate-limit";
+import { log } from "@/lib/logger";
 import { commitImport, createInvite, parseRosterCsv, placeTeamOrder, revokeInvite, setTeamBudget, setTeamDeliveryInstructions, updateMember, type ImportRow, type TeamOrderResult } from "@/server/team";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong");
@@ -112,5 +116,22 @@ export async function saveDeliveryInstructionsAction(_: ActionResult, fd: FormDa
     return done("Delivery instructions saved — they go on every delivery to your offices");
   } catch (e) {
     return fail(msg(e));
+  }
+}
+
+/**
+ * Pay an issued invoice's outstanding balance online (eSewa / Khalti). Company admin only; the invoice must belong to
+ * the admin's company (checked again in startInvoicePayment and in startPayment). Returns the gateway start.
+ */
+export async function startInvoicePaymentAction(invoiceId: string, method: string): Promise<{ ok: boolean; error?: string; start?: StartResult; paymentId?: string }> {
+  const { user, company } = await requireCompanyAdmin();
+  if (!(await rateLimit("shop:payStart", user.id, LIMITS.payStart.max, LIMITS.payStart.windowMs))) return { ok: false, error: "Too many attempts — wait a minute and try again" };
+  try {
+    const { payment } = await startInvoicePayment(user, { invoiceId: String(invoiceId).slice(0, 64), method: String(method), companyId: company.id });
+    return { ok: true, paymentId: payment.id, start: await startPayment(payment.id, user.id, await siteUrl()) };
+  } catch (e) {
+    if (e instanceof InvoicePaymentError || e instanceof PaymentError) return { ok: false, error: e.message };
+    log.error("team.invoice_pay_failed", { invoiceId, error: e });
+    return { ok: false, error: "We couldn't reach the payment provider — try again in a minute" };
   }
 }

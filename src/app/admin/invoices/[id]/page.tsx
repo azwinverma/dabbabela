@@ -9,6 +9,7 @@ import Link from "next/link";
 import { rs } from "@/lib/money";
 import { ktmNow, todayKTM } from "@/lib/dates";
 import { invoiceReceipts } from "@/server/invoices";
+import { openInvoicePayments } from "@/server/invoice-payments";
 import { inCompanyScope, RECEIPT_METHOD_LABEL } from "@/server/corporate";
 
 export default async function InvoicePage({ params }: { params: Promise<{ id: string }> }) {
@@ -16,10 +17,11 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   const { id } = await params;
   const inv = await db.invoice.findUnique({ where: { id }, include: { lines: true, company: true } });
   if (!inv || (inv.companyId && !inCompanyScope(user, inv.companyId))) notFound();
-  const [notes, related, receipts] = await Promise.all([
+  const [notes, related, receipts, online] = await Promise.all([
     db.invoice.findMany({ where: { relatedId: inv.id }, select: { id: true, number: true, total: true } }),
     inv.relatedId ? db.invoice.findUnique({ where: { id: inv.relatedId }, select: { id: true, number: true } }) : null,
     invoiceReceipts(inv.id),
+    openInvoicePayments(inv.id),
   ]);
   const received = receipts.reduce((a, r) => a + r.amount, 0);
   const open = inv.kind === "INVOICE" && ["ISSUED", "PARTIALLY_PAID"].includes(inv.status);
@@ -63,9 +65,33 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
                     <li key={r.id}>
                       {ktmNow(r.receivedAt).date} · {rs(r.amount)} · {RECEIPT_METHOD_LABEL[r.method] ?? r.method} · {r.reference}
                       {r.note ? ` — ${r.note}` : ""}
+                      {r.paymentId && (
+                        <>
+                          {" · "}
+                          <Link className="text-sindoor underline" href={`/admin/payments/${r.paymentId}`}>
+                            online payment
+                          </Link>
+                        </>
+                      )}
                     </li>
                   ))}
                 </ul>
+              </div>
+            )}
+            {online.length > 0 && (
+              <div data-testid="online-invoice-payments">
+                <p className="text-sm font-semibold">Online payment in progress</p>
+                <ul className="mt-1 space-y-0.5 text-xs text-ink-soft">
+                  {online.map((p) => (
+                    <li key={p.id}>
+                      <Link className="text-sindoor underline" href={`/admin/payments/${p.id}`}>
+                        {p.reference}
+                      </Link>{" "}
+                      · {rs(p.amount)} · {p.method === "ESEWA" ? "eSewa" : "Khalti"} · {p.status === "FAILED" ? "last try failed" : "waiting for the gateway"} · started by {p.user.name}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-xs text-ink-mute">Recording a payment, a credit note or voiding cancels it (the company is asked to start again for the new balance).</p>
               </div>
             )}
             {inv.note && <pre className="whitespace-pre-wrap rounded-lg bg-paper p-2 text-xs text-ink-soft">{inv.note}</pre>}

@@ -18,6 +18,8 @@ import { lockUser } from "../capacity";
 import { applySwapDifference } from "../subscriptions";
 import { expireOpenAttempts, lockPayment } from "./attempts";
 import { assertWithinStaffLimits, lockStaffMoney, paymentRefundTotal, staffMoneyUsed24h } from "../money-limits";
+import { acceptInvoicePayment, assertInvoicePaymentStartable, invoiceIdOfPayment, settleInvoicePayment } from "../invoice-payments";
+import { lockInvoice } from "../invoices";
 
 type Tx = Prisma.TransactionClient;
 
@@ -43,7 +45,15 @@ async function recordEvent(provider: string, eventKey: string, paymentId: string
 type PayingPayment = Prisma.PaymentGetPayload<{ include: { orders: true } }>;
 type PaidOpts = { amount?: number | null; attemptId?: string | null; actorId?: string | null; note?: string | null };
 /** `refused` (with mismatch) = verified money we will not accept automatically: underpayment, or a cancelled top-up. */
-export type PaidResult = { already: boolean; payment: PayingPayment; credited: number; mismatch: boolean; refused?: "UNDERPAID" | "TOPUP_AMOUNT" | "TOPUP_CANCELLED" };
+export type PaidResult = {
+  already: boolean;
+  payment: PayingPayment;
+  credited: number;
+  mismatch: boolean;
+  refused?: "UNDERPAID" | "TOPUP_AMOUNT" | "TOPUP_CANCELLED" | "INVOICE_CANCELLED" | "INVOICE_CHANGED" | "INVOICE_OVERPAID";
+  /** INVOICE payments: the receipt written for it. */
+  invoiceReceipt?: { id: string; invoiceId: string; number: string } | null;
+};
 
 /**
  * Mark a payment paid exactly once and fulfil what it pays for. Safe to call repeatedly / concurrently: it runs under
@@ -56,7 +66,10 @@ export type PaidResult = { already: boolean; payment: PayingPayment; credited: n
  *     that has grown since — swap DUE_LATER — or a forged/partial amount);
  *   - a top-up whose verified amount differs at all (credit is sold at face value);
  *   - a top-up the customer cancelled (cancelling expired its sessions; crediting it now would bypass the daily limit
- *     and balance cap — finance refunds it at the gateway instead, see docs/SECURITY.md M2).
+ *     and balance cap — finance refunds it at the gateway instead, see docs/SECURITY.md M2);
+ *   - a company-invoice payment that was cancelled (the invoice changed: credit note / void / manual receipt), whose
+ *     invoice is no longer open or no longer owes exactly the payment amount, or whose verified amount differs at all
+ *     (no partial or surplus receipts — there is no company wallet to hold a surplus).
  */
 export async function markPaymentPaid(paymentId: string, opts: PaidOpts = {}): Promise<PaidResult> {
   const settings = await getSettings();
@@ -67,6 +80,10 @@ export async function markPaymentPaid(paymentId: string, opts: PaidOpts = {}): P
 
 /** markPaymentPaid inside a caller's transaction (the caller runs afterPaid once it has committed). */
 async function markPaymentPaidTx(tx: Tx, paymentId: string, opts: PaidOpts, settings: SiteSettings): Promise<PaidResult> {
+  // Company-invoice payments: lock order invoice → payment (purpose and idempotency key never change, so this peek is safe).
+  const head = await tx.payment.findUnique({ where: { id: paymentId }, select: { purpose: true, idempotencyKey: true } });
+  const invoiceId = head ? invoiceIdOfPayment(head) : null;
+  if (head?.purpose === "INVOICE" && invoiceId) await lockInvoice(tx, invoiceId);
   await lockPayment(tx, paymentId);
   const p = await tx.payment.findUnique({ where: { id: paymentId }, include: { orders: true } });
   if (!p) throw new PaymentError("Payment not found");
@@ -80,10 +97,14 @@ async function markPaymentPaidTx(tx: Tx, paymentId: string, opts: PaidOpts, sett
     if (opts.amount != null && opts.amount !== p.amount) return refuse("TOPUP_AMOUNT");
     if (p.status === "CANCELLED") return refuse("TOPUP_CANCELLED");
   }
+  if (p.purpose === "INVOICE") {
+    const ok = await acceptInvoicePayment(tx, p, opts.amount);
+    if (!ok.ok) return refuse(ok.reason);
+  }
   // Underpayment is never accepted, whatever the purpose: the orders would be released / marked PAID for less.
   if (opts.amount != null && opts.amount < p.amount) return refuse("UNDERPAID");
   const paid = opts.amount ?? p.amount;
-  const plan = p.purpose === "WALLET_TOPUP" || p.purpose === "SWAP_DIFFERENCE" ? null : await planOrderFulfilment(tx, p, settings);
+  const plan = p.purpose === "WALLET_TOPUP" || p.purpose === "SWAP_DIFFERENCE" || p.purpose === "INVOICE" ? null : await planOrderFulfilment(tx, p, settings);
   // Belt and braces: never release orders for less than they still owe (payment.amount should always cover them).
   if (plan && paid < plan.owed) return refuse("UNDERPAID");
   // WP-09: estimated gateway fee from the configured rate for the method; the statement import fills feeActual.
@@ -96,6 +117,10 @@ async function markPaymentPaidTx(tx: Tx, paymentId: string, opts: PaidOpts, sett
   });
   if (!flipped.count) return { already: true, payment: p, credited: 0, mismatch: false };
   if (opts.attemptId) await tx.paymentAttempt.update({ where: { id: opts.attemptId }, data: { status: "SUCCESS" } });
+  if (p.purpose === "INVOICE") {
+    const r = await settleInvoicePayment(tx, p, paid, opts);
+    return { already: false, payment: p, credited: 0, mismatch: false, invoiceReceipt: r ? { id: r.receipt.id, invoiceId: r.invoiceId, number: r.number } : null };
+  }
   const credited = await fulfil(tx, p, paid, plan, opts);
   return { already: false, payment: p, credited, mismatch: false };
 }
@@ -104,10 +129,25 @@ async function markPaymentPaidTx(tx: Tx, paymentId: string, opts: PaidOpts, sett
 async function afterPaid(result: PaidResult, opts: PaidOpts) {
   const paymentId = result.payment.id;
   if (result.mismatch) {
-    await amountMismatch(result.payment, opts.amount ?? result.payment.amount, result.refused === "TOPUP_CANCELLED" ? "cancelled-topup" : result.refused === "UNDERPAID" ? "underpaid" : "verify");
+    const source =
+      result.refused === "TOPUP_CANCELLED" ? "cancelled-topup" : result.refused === "UNDERPAID" ? "underpaid" : result.refused === "INVOICE_CANCELLED" ? "cancelled-invoice-payment" : result.refused === "INVOICE_CHANGED" || result.refused === "INVOICE_OVERPAID" ? "invoice-changed" : "verify";
+    await amountMismatch(result.payment, opts.amount ?? result.payment.amount, source);
     return;
   }
   if (result.already) return;
+  if (result.payment.purpose === "INVOICE") {
+    const r = result.invoiceReceipt;
+    void notify("payment.received", { userId: result.payment.userId }, { amount: rs(opts.amount ?? result.payment.amount), reference: r ? `invoice ${r.number}` : result.payment.reference }, { dedupeKey: `paid:${paymentId}`, link: r ? `/team/invoices/${r.invoiceId}` : undefined });
+    await audit({
+      actorId: opts.actorId ?? result.payment.userId,
+      action: "invoice.payment_online",
+      entity: "Invoice",
+      entityId: r?.invoiceId ?? null,
+      summary: `${rs(opts.amount ?? result.payment.amount)} paid online (${result.payment.method}, ${result.payment.reference})${r ? ` · ${r.number}` : ""}`,
+      after: { paymentId, receiptId: r?.id ?? null, method: result.payment.method },
+    });
+    return;
+  }
   const topup = result.payment.purpose === "WALLET_TOPUP";
   void notify("payment.received", { userId: result.payment.userId }, { amount: rs(opts.amount ?? result.payment.amount), reference: result.payment.reference }, { dedupeKey: `paid:${paymentId}` });
   if (opts.actorId)
@@ -134,6 +174,9 @@ async function fulfil(tx: Tx, p: PayingPayment, paid: number, plan: OrderPlan | 
       return 0;
     case "SWAP_DIFFERENCE":
       return fulfilSwapDifference(tx, p, paid, opts);
+    case "INVOICE":
+      // Settled in markPaymentPaidTx (settleInvoicePayment) — it needs the receipt back. Never reaches the order code.
+      throw new PaymentError("Invoice payments are settled by settleInvoicePayment");
     case "ORDER":
     case "SUBSCRIPTION":
     default:
@@ -269,9 +312,17 @@ export async function startPayment(paymentId: string, userId: string, origin: st
   const p = await db.payment.findFirst({ where: { id: paymentId, userId }, include: { user: true, attempts: true } });
   if (!p) throw new PaymentError("Payment not found");
   if (p.status === "PAID") return { kind: "done" };
-  if (p.status === "CANCELLED") throw new PaymentError("This order expired — please order again");
+  if (p.status === "CANCELLED") throw new PaymentError(p.purpose === "INVOICE" ? "The invoice changed since this payment was started — start again from the invoice" : "This order expired — please order again");
   if (p.amount <= 0) throw new PaymentError("Nothing to pay");
   if (p.purpose === "WALLET_TOPUP" && !topupEnabled(await getSettings())) throw new PaymentError("Adding credit isn't available right now");
+  if (p.purpose === "INVOICE") {
+    if (p.method !== "ESEWA" && p.method !== "KHALTI") throw new PaymentError("Pay invoices online with eSewa or Khalti");
+    try {
+      await assertInvoicePaymentStartable(p);
+    } catch (e) {
+      throw new PaymentError(e instanceof Error ? e.message : "This invoice can't be paid now");
+    }
+  }
   const n = p.attempts.length + 1;
   const providerRef = `${p.reference}-${n}`;
   if (p.method === "ESEWA") {
@@ -417,6 +468,8 @@ export async function switchPaymentMethod(paymentId: string, userId: string, met
   const methods = await availableMethods(settings, { hasCompany: Boolean(p0.companyId), customerShare: p0.amount });
   if (!methods.includes(method)) throw new PaymentError("That payment method isn't available");
   if (p0.purpose === "SWAP_DIFFERENCE" && !["ESEWA", "KHALTI", "WALLET"].includes(method)) throw new PaymentError("Pay a swap difference with eSewa, Khalti or credit");
+  // Company invoices: eSewa / Khalti only (bank transfers are recorded by finance as receipts; never personal credit).
+  if (p0.purpose === "INVOICE" && method !== "ESEWA" && method !== "KHALTI") throw new PaymentError("Pay invoices online with eSewa or Khalti — or by bank transfer to the account shown");
   if (p0.purpose === "WALLET_TOPUP") {
     // Credit is bought with eSewa / Khalti / bank only (never with credit or cash at the door).
     if (!topupEnabled(settings)) throw new PaymentError("Adding credit isn't available right now");
@@ -559,6 +612,9 @@ async function checkRefundTx(tx: Tx, input: RefundInput) {
   // Closed-loop credit (security review L10): what was paid with wallet credit only ever goes back as credit, so
   // goodwill / skip / adjustment credit can't be turned into cash through a refund.
   if (p.method === "WALLET" && input.method !== "WALLET_CREDIT") throw new PaymentError("This was paid with Dabba Bela credit — it can only be refunded as credit");
+  // A company-invoice payment settled the invoice (receipt + paidAmount); money back to a company goes through a credit
+  // note and a bank payment recorded by finance, never a personal refund / wallet credit to the admin who paid.
+  if (p.purpose === "INVOICE") throw new PaymentError("This paid a company invoice — issue a credit note on the invoice instead of a refund");
   if (p.purpose === "WALLET_TOPUP") {
     // A top-up goes back to its source, and only the part the customer hasn't spent (wallet never goes negative).
     // Enforced here, so a maker-checker execution (approvals.ts → requestRefundTx) gets the same cap.

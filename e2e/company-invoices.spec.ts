@@ -78,3 +78,56 @@ test("finance generates a company invoice, issues it and records a receipt", asy
 
   await d.company.update({ where: { id: company.id }, data: { isActive: false } });
 });
+
+/**
+ * Online invoice payment (purpose INVOICE): the company admin sees the outstanding balance with eSewa/Khalti and the
+ * bank details on the invoice; starting eSewa creates a PENDING payment for exactly the balance and posts the signed
+ * form to eSewa (intercepted — the sandbox gateway can't complete in E2E; verification is covered by
+ * tests/integration/invoice-payment.test.ts). The fixture invoice is voided afterwards (it would count toward the
+ * demo company's outstanding balance in other specs).
+ */
+test("company admin pays an issued invoice online (eSewa start) and sees bank details", async ({ page }) => {
+  const stamp = Date.now().toString(36);
+  const d = db();
+  const admin = await d.user.findUniqueOrThrow({ where: { email: "customer.a@demo.dabbabela.local" }, select: { id: true, membership: { select: { companyId: true, role: true } } } });
+  expect(admin.membership?.role).toBe("ADMIN");
+  const today = todayKtm();
+  const invoice = await d.invoice.create({
+    data: {
+      number: `INV-E2E-PAY-${stamp}`.toUpperCase(),
+      companyId: admin.membership!.companyId,
+      status: "PARTIALLY_PAID",
+      periodStart: dateOnly(today),
+      periodEnd: dateOnly(today),
+      billingName: "E2E online pay",
+      subtotal: 250_00,
+      total: 250_00,
+      paidAmount: 50_00,
+      issuedAt: new Date(),
+      dueDate: dateOnly(today),
+    },
+  });
+  try {
+    const errors = watchErrors(page);
+    await page.route(/esewa\.com\.np/, (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<html><body>eSewa sandbox (intercepted)</body></html>" }));
+    await login(page, "customer.a@demo.dabbabela.local", undefined, "/team");
+    await page.goto("/team/invoices");
+    await page.locator("main").getByRole("row").filter({ hasText: invoice.number }).getByRole("link", { name: "Pay" }).click();
+    await page.waitForURL(new RegExp(`/team/invoices/${invoice.id}`));
+    const panel = page.getByTestId("invoice-pay");
+    await expect(panel).toContainText("Pay Rs 200 online");
+    await expect(panel).toContainText("Or pay by bank transfer");
+    const esewa = panel.getByRole("button", { name: "Pay with eSewa" });
+    if (await esewa.count()) {
+      await esewa.click();
+      await page.waitForURL(/esewa\.com\.np/, { timeout: 20_000 });
+      const p = await d.payment.findFirstOrThrow({ where: { purpose: "INVOICE", idempotencyKey: { startsWith: `invoice:${invoice.id}:` } } });
+      expect(p).toMatchObject({ amount: 200_00, method: "ESEWA", status: "PENDING", userId: admin.id });
+      expect(await d.paymentAttempt.count({ where: { paymentId: p.id } })).toBe(1);
+    }
+    errors();
+  } finally {
+    await d.payment.updateMany({ where: { purpose: "INVOICE", idempotencyKey: { startsWith: `invoice:${invoice.id}:` } }, data: { status: "CANCELLED" } });
+    await d.invoice.update({ where: { id: invoice.id }, data: { status: "VOID" } });
+  }
+});

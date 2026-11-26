@@ -11,6 +11,7 @@ import { getLocale } from "@/lib/i18n/server";
 import { accountDict } from "@/lib/i18n/account";
 import { availableMethods } from "@/server/payments/methods";
 import { walletBalance } from "@/server/ledger";
+import { invoiceIdOfPayment } from "@/server/invoices";
 import { PayClient } from "./PayClient";
 
 export const metadata: Metadata = { title: "Payment", robots: { index: false } };
@@ -30,6 +31,12 @@ export default async function PayPage({ params, searchParams }: { params: Promis
   if (!payment) notFound();
   // Wallet top-ups have no orders; their own page shows the result and the ways to pay.
   if (payment.purpose === "WALLET_TOPUP") redirect(`/account/wallet/topup/${payment.id}${sp.status ? `?status=${encodeURIComponent(sp.status)}${sp.reason ? `&reason=${encodeURIComponent(sp.reason)}` : ""}` : ""}`);
+  // Company-invoice payments are shown on the invoice in the corporate portal (gateway returns land here first).
+  if (payment.purpose === "INVOICE") {
+    const invoiceId = invoiceIdOfPayment(payment);
+    const status = payment.status === "PAID" ? "paid" : sp.status === "failed" || sp.status === "pending" ? sp.status : "";
+    redirect(invoiceId ? `/team/invoices/${invoiceId}${status ? `?payment=${status}${sp.reason && status === "failed" ? `&reason=${encodeURIComponent(sp.reason.slice(0, 200))}` : ""}` : ""}` : "/team/invoices");
+  }
   if (payment.status === "PAID") redirect(`/thank-you/${payment.id}`);
   const [settings, locale, balance] = await Promise.all([getSettings(), getLocale(), walletBalance(user.id)]);
   const t = accountDict(locale).pay;

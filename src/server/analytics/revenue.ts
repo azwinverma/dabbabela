@@ -38,8 +38,11 @@ export const refundsWhere = (f: AnalyticsFilters): Prisma.RefundWhereInput => ({
   method: { notIn: NON_CASH_REFUNDS },
   payment: paymentDims({ ...f, method: undefined }),
 });
-/** Money owed to us. An unpaid wallet top-up is not owed (the customer may never pay it), so top-ups are excluded. */
-export const pendingPaymentsWhere = (f: AnalyticsFilters): Prisma.PaymentWhereInput => ({ AND: [{ status: "PENDING", amount: { gt: 0 }, purpose: { not: "WALLET_TOPUP" } }, paymentDims(f)] });
+/**
+ * Money owed to us. An unpaid wallet top-up is not owed (the customer may never pay it), so top-ups are excluded; an
+ * unpaid online company-invoice payment is excluded too — the invoice's outstanding balance is already receivable.
+ */
+export const pendingPaymentsWhere = (f: AnalyticsFilters): Prisma.PaymentWhereInput => ({ AND: [{ status: "PENDING", amount: { gt: 0 }, purpose: { notIn: ["WALLET_TOPUP", "INVOICE"] } }, paymentDims(f)] });
 
 /** Σ(total − tax − refunded) over a where. */
 async function netOf(where: Prisma.OrderWhereInput) {

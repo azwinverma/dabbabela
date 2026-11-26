@@ -79,7 +79,7 @@ export async function collections(r: Range) {
   const [paid, byMethod, pending, failed] = await Promise.all([
     db.payment.aggregate({ where, _sum: { amount: true }, _count: true }),
     db.payment.groupBy({ by: ["method"], where, _sum: { amount: true }, _count: true }),
-    db.payment.aggregate({ where: { status: "PENDING", amount: { gt: 0 }, purpose: { not: "WALLET_TOPUP" } }, _sum: { amount: true }, _count: true }),
+    db.payment.aggregate({ where: { status: "PENDING", amount: { gt: 0 }, purpose: { notIn: ["WALLET_TOPUP", "INVOICE"] } }, _sum: { amount: true }, _count: true }),
     db.payment.count({ where: { status: "FAILED", updatedAt: { gte: dateOnly(r.from) } } }),
   ]);
   return {
