@@ -4,6 +4,8 @@ import { log } from "@/lib/logger";
 import { getSettings } from "@/lib/settings";
 import { deliverEmail, emailShell, escapeHtml } from "./email";
 import { deliverSms } from "./sms";
+import { deliverPush, pushConfigured } from "./push";
+import { notificationTarget } from "@/lib/notification-target";
 
 /**
  * Notification templates. Code defaults below; staff can override any of them per channel/locale
@@ -20,6 +22,19 @@ export const TEMPLATES = {
     topic: "ORDER_UPDATES",
     inApp: { title: "Payment received", body: "{{amount}} for {{reference}}. Thank you!" },
     email: { subject: "Payment received — {{reference}}", body: "<p>We received {{amount}} for {{reference}}.</p>" },
+    sms: null,
+  },
+  "payment.failed": {
+    topic: "ORDER_UPDATES",
+    inApp: { title: "Payment didn't go through", body: "{{reason}} — try again or pick another way to pay ({{reference}})." },
+    email: null,
+    sms: null,
+  },
+  "rider.route_assigned": {
+    // Staff (riders): a dispatcher put them on a route.
+    topic: "ORDER_UPDATES",
+    inApp: { title: "New route: {{route}}", body: "{{date}} · {{stops}} stop(s). Open the rider app for the stops." },
+    email: null,
     sms: null,
   },
   "order.out_for_delivery": {
@@ -124,6 +139,22 @@ export const TEMPLATES = {
 } as const;
 
 export type TemplateKey = keyof typeof TEMPLATES;
+
+/**
+ * Templates that also go to the user's phones as a push notification (FCM, src/server/notify/push.ts), with the
+ * push text. Push is the device delivery of the in-app notification, so it follows the user's IN_APP switch for the
+ * topic (SECURITY topics always). Lock-screen text never carries secrets: the hand-off code stays inside the app.
+ */
+export const PUSH_TEMPLATES: Partial<Record<TemplateKey, { title: string; body: string }>> = {
+  "order.out_for_delivery": { title: "Your dabba is on the way", body: "Order {{number}} left the kitchen. Open the app for your hand-off code." },
+  "order.delivered": { title: "Delivered — enjoy!", body: "Tell us how {{number}} tasted." },
+  "order.failed_delivery": { title: "We couldn't deliver {{number}}", body: "{{reason}} — our team will call you." },
+  "payment.received": { title: "Payment received", body: "{{amount}} for {{reference}}. Thank you!" },
+  "payment.failed": { title: "Payment didn't go through", body: "{{reason}} — try again or pick another way to pay." },
+  "plan.reminder": { title: "Your plan ends on {{date}}", body: "Renew to keep lunches coming." },
+  "approval.requested": { title: "Approval needed", body: "{{requester}}: {{summary}}" },
+  "rider.route_assigned": { title: "New route: {{route}}", body: "{{date}} · {{stops}} stop(s)." },
+};
 type Vars = Record<string, string | number | null | undefined>;
 
 function fill(tpl: string, vars: Vars, html: boolean) {
@@ -218,6 +249,19 @@ export async function notify(
       });
       queued.push(row.id);
     }
+    const push = PUSH_TEMPLATES[key];
+    if (push && target.userId && pushConfigured() && (await prefEnabled(target.userId, t.topic, "IN_APP")) && (await db.deviceToken.count({ where: { userId: target.userId } }))) {
+      const o = await override(key, "PUSH", locale);
+      const tgt = notificationTarget(opts.link);
+      const payload: PushPayload = {
+        body: fill(o?.body ?? push.body, allVars, false),
+        data: { type: key, ...(opts.link ? { link: opts.link } : {}), ...(tgt ? { targetType: tgt.type, ...(tgt.id ? { targetId: tgt.id } : {}) } : {}) },
+      };
+      const row = await db.outboundMessage.create({
+        data: { channel: "PUSH", to: target.userId, templateKey: key, subject: fill(o?.subject ?? push.title, allVars, false), body: JSON.stringify(payload), dedupeKey: opts.dedupeKey ? `${opts.dedupeKey}:push` : undefined },
+      });
+      queued.push(row.id);
+    }
     if (t.sms && phone && (!target.userId || (await prefEnabled(target.userId, t.topic, "SMS")))) {
       const o = await override(key, "SMS", locale);
       const row = await db.outboundMessage.create({
@@ -244,6 +288,27 @@ export async function notify(
 
 const MAX_ATTEMPTS = 5;
 
+/** OutboundMessage.body of a PUSH row (`to` = user id, `subject` = title). */
+type PushPayload = { body: string; data: Record<string, string> };
+
+function parsePush(body: string): PushPayload {
+  try {
+    const j = JSON.parse(body) as Partial<PushPayload>;
+    return { body: String(j.body ?? ""), data: j.data && typeof j.data === "object" ? (j.data as Record<string, string>) : {} };
+  } catch {
+    return { body, data: {} };
+  }
+}
+
+async function deliver(m: { channel: string; to: string; subject: string | null; body: string }) {
+  if (m.channel === "EMAIL") return deliverEmail(m.to, m.subject ?? "", m.body);
+  if (m.channel === "PUSH") {
+    const p = parsePush(m.body);
+    return deliverPush(m.to, { title: m.subject ?? "", body: p.body, data: p.data });
+  }
+  return deliverSms(m.to, m.body);
+}
+
 /** Send queued messages. Safe to run concurrently: each row is claimed with a conditional update. */
 export async function processOutbox(opts: { ids?: string[]; limit?: number } = {}) {
   const rows = await db.outboundMessage.findMany({
@@ -261,13 +326,13 @@ export async function processOutbox(opts: { ids?: string[]; limit?: number } = {
       data: { attempts: { increment: 1 } },
     });
     if (!claim.count) continue;
-    const res = m.channel === "EMAIL" ? await deliverEmail(m.to, m.subject ?? "", m.body) : await deliverSms(m.to, m.body);
+    const res = await deliver(m);
     if (res.ok) {
       sent++;
       await db.outboundMessage.update({ where: { id: m.id }, data: { status: "SENT", sentAt: new Date(), lastError: null } });
     } else if (res.skipped) {
       skipped++;
-      await db.outboundMessage.update({ where: { id: m.id }, data: { status: "SKIPPED", lastError: "No provider configured" } });
+      await db.outboundMessage.update({ where: { id: m.id }, data: { status: "SKIPPED", lastError: m.channel === "PUSH" ? "Push not configured or no registered device" : "No provider configured" } });
     } else {
       failed++;
       const attempts = m.attempts + 1;

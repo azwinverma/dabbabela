@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { emailConfigured } from "@/server/notify/email";
 import { smsConfigured } from "@/server/notify/sms";
+import { pushConfigured } from "@/server/notify/push";
 import { esewaConfigured, gatewayConfigProblem, khaltiConfigured, paymentsLive } from "@/server/payments/methods";
 import { turnstileEnabled } from "@/lib/turnstile";
 import { sentryConfigured } from "@/lib/sentry-options";
@@ -24,7 +25,7 @@ export async function GET() {
     ok: database,
     database,
     latencyMs: Date.now() - started,
-    integrations: { email: emailConfigured(), sms: smsConfigured(), esewa: esewaConfigured(), khalti: khaltiConfigured(), blob: Boolean(process.env.BLOB_READ_WRITE_TOKEN), turnstile: turnstileEnabled(), sentry: sentryConfigured() },
+    integrations: { email: emailConfigured(), sms: smsConfigured(), push: pushConfigured(), esewa: esewaConfigured(), khalti: khaltiConfigured(), blob: Boolean(process.env.BLOB_READ_WRITE_TOKEN), turnstile: turnstileEnabled(), sentry: sentryConfigured() },
     // L5: live mode with a gateway endpoint unset or pointing at a sandbox host → that gateway is switched off.
     paymentsConfig: { live: paymentsLive(), ok: !gatewayConfigProblem("ESEWA") && !gatewayConfigProblem("KHALTI"), problems: [gatewayConfigProblem("ESEWA"), gatewayConfigProblem("KHALTI")].filter(Boolean) },
     alerts: { failedJobs24h: failedJobs, failedMessages: stuckOutbox },

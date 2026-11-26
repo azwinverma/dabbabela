@@ -5,7 +5,7 @@ import { saveNotificationPrefsAction } from "@/lib/actions/account";
 import { PREF_CHANNELS, PREF_TOPICS } from "@/lib/actions/account-constants";
 
 const TOPIC: Record<string, string> = { ORDER_UPDATES: "Order updates", PLAN_REMINDERS: "Plan reminders", MARKETING: "New menus & offers" };
-const CHANNEL: Record<string, string> = { IN_APP: "In account", EMAIL: "Email", SMS: "SMS" };
+const CHANNEL: Record<string, string> = { IN_APP: "In account & app push", EMAIL: "Email", SMS: "SMS" };
 
 export function PrefsForm({ prefs }: { prefs: Record<string, boolean> }) {
   return (

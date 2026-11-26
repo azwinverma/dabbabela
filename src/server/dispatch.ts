@@ -68,7 +68,16 @@ export async function manifest(kitchenId: string, date: string, slotId?: string 
 export async function createRoute(input: { kitchenId: string; date: string; name: string; slotId?: string | null; zoneId?: string | null; riderId?: string | null }) {
   if (!input.name.trim()) throw new DispatchError("Name the route");
   if (input.riderId) await assertRider(input.riderId, input.kitchenId);
-  return db.deliveryRoute.create({ data: { kitchenId: input.kitchenId, date: dateOnly(input.date), name: input.name.trim(), slotId: input.slotId || null, zoneId: input.zoneId || null, riderId: input.riderId || null } });
+  const route = await db.deliveryRoute.create({ data: { kitchenId: input.kitchenId, date: dateOnly(input.date), name: input.name.trim(), slotId: input.slotId || null, zoneId: input.zoneId || null, riderId: input.riderId || null } });
+  if (route.riderId) void notifyRouteAssigned(route.id);
+  return route;
+}
+
+/** Tell a rider they were put on a route (in-app + push). Deduped per route and rider. */
+async function notifyRouteAssigned(routeId: string) {
+  const r = await db.deliveryRoute.findUnique({ where: { id: routeId }, select: { id: true, name: true, date: true, riderId: true, _count: { select: { assignments: true } } } });
+  if (!r?.riderId) return;
+  await notify("rider.route_assigned", { userId: r.riderId }, { route: r.name, date: isoDate(r.date), stops: r._count.assignments }, { link: `/rider/route/${r.id}`, dedupeKey: `route-assigned:${r.id}:${r.riderId}` });
 }
 
 /** Active DELIVERY_AGENT, available (rider profile), and working for this kitchen (or unassigned to one). */
@@ -83,7 +92,9 @@ export async function setRouteRider(routeId: string, riderId: string | null) {
   const route = await db.deliveryRoute.findUniqueOrThrow({ where: { id: routeId } });
   if (route.status === "DONE") throw new DispatchError("This route is finished");
   if (riderId) await assertRider(riderId, route.kitchenId);
-  return db.deliveryRoute.update({ where: { id: routeId }, data: { riderId } });
+  const updated = await db.deliveryRoute.update({ where: { id: routeId }, data: { riderId } });
+  if (riderId && riderId !== route.riderId) void notifyRouteAssigned(routeId);
+  return updated;
 }
 
 /** Estimated route cost (rider pay + fuel), paisa. null clears it. Used by profitability. */
@@ -258,7 +269,7 @@ export async function resolveFailed(orderId: string, actorId: string, action: "R
     await setOrderStatus([orderId], "OUT_FOR_DELIVERY", actorId, `Retry: ${reason}`);
     const ev = await db.deliveryEvent.create({ data: { orderId, type: "RETRY", note: reason, actorId } });
     // the first "on the way" message is de-duplicated per order; a retry gets its own (outbox, prefs respected)
-    void notify("order.out_for_delivery", { userId: o.userId }, { number: o.number, otp: o.deliveryOtp ?? "" }, { dedupeKey: `ofd-retry:${ev.id}` });
+    void notify("order.out_for_delivery", { userId: o.userId }, { number: o.number, otp: o.deliveryOtp ?? "" }, { link: `/account/orders/${orderId}`, dedupeKey: `ofd-retry:${ev.id}` });
     return;
   }
   await cancelOrder(orderId, { id: actorId, isStaff: true }, { reason, settlement: "CREDIT" });

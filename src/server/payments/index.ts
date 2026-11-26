@@ -149,7 +149,7 @@ async function afterPaid(result: PaidResult, opts: PaidOpts) {
     return;
   }
   const topup = result.payment.purpose === "WALLET_TOPUP";
-  void notify("payment.received", { userId: result.payment.userId }, { amount: rs(opts.amount ?? result.payment.amount), reference: result.payment.reference }, { dedupeKey: `paid:${paymentId}` });
+  void notify("payment.received", { userId: result.payment.userId }, { amount: rs(opts.amount ?? result.payment.amount), reference: result.payment.reference }, { dedupeKey: `paid:${paymentId}`, link: topup ? `/account/wallet/topup/${paymentId}` : `/thank-you/${paymentId}` });
   if (opts.actorId)
     await audit({
       actorId: opts.actorId,
@@ -293,11 +293,21 @@ async function amountMismatch(p: Pick<Payment, "id" | "method">, got: number, so
   }
 }
 
-async function markAttemptFailed(attemptId: string, paymentId: string, response: unknown) {
+async function markAttemptFailed(attemptId: string, paymentId: string, response: unknown, reason = "The gateway declined the payment") {
   const live = await db.paymentAttempt.updateMany({ where: { id: attemptId, status: "STARTED" }, data: { status: "FAILED", response: json(response) } });
   // A superseded (EXPIRED) session failing says nothing about the payment's current session.
   if (!live.count) return void (await db.paymentAttempt.updateMany({ where: { id: attemptId, status: "EXPIRED" }, data: { status: "FAILED", response: json(response) } }));
-  await db.payment.updateMany({ where: { id: paymentId, status: "PENDING" }, data: { status: "FAILED" } });
+  const u = await db.payment.updateMany({ where: { id: paymentId, status: "PENDING" }, data: { status: "FAILED" } });
+  if (u.count) await notifyPaymentFailed(paymentId, reason, `failed:${attemptId}`);
+}
+
+/** In-app + push: the customer's payment failed (gateway declined / bank transfer rejected). */
+async function notifyPaymentFailed(paymentId: string, reason: string, dedupeKey: string) {
+  const p = await db.payment.findUnique({ where: { id: paymentId }, select: { id: true, userId: true, reference: true, purpose: true, idempotencyKey: true } });
+  if (!p) return;
+  const invoiceId = p.purpose === "INVOICE" ? invoiceIdOfPayment(p) : null;
+  const link = p.purpose === "WALLET_TOPUP" ? `/account/wallet/topup/${p.id}` : invoiceId ? `/team/invoices/${invoiceId}` : `/pay/${p.id}`;
+  await notify("payment.failed", { userId: p.userId }, { reason: reason.slice(0, 140), reference: p.reference }, { link, dedupeKey });
 }
 
 // ───────────── starting a gateway payment ─────────────
@@ -396,7 +406,7 @@ async function confirmEsewa(attemptId: string, paymentId: string, uuid: string, 
     return { ok: false, pending: true, reason: "eSewa hasn't confirmed yet — we'll keep checking" };
   }
   await recordEvent("esewa", `${eventKey}:status:${s.status}`, paymentId, { callback: payload, status: s.raw }, true, "FAILED");
-  await markAttemptFailed(attemptId, paymentId, s.raw);
+  await markAttemptFailed(attemptId, paymentId, s.raw, `eSewa reported the payment as ${String(s.status).toLowerCase()}`);
   return { ok: false, reason: `eSewa status: ${s.status}` };
 }
 
@@ -424,7 +434,7 @@ async function confirmKhalti(attemptId: string, paymentId: string, pidx: string,
   }
   if (!r.ok || r.status === "Pending" || r.status === "Initiated") return { ok: false, pending: true, reason: "Khalti hasn't confirmed yet" };
   await recordEvent("khalti", `khalti:${pidx}:${r.status}`, paymentId, r, true, "FAILED");
-  await markAttemptFailed(attemptId, paymentId, r);
+  await markAttemptFailed(attemptId, paymentId, r, `Khalti reported the payment as ${String(r.status).toLowerCase()}`);
   return { ok: false, reason: `Khalti status: ${r.status}` };
 }
 
@@ -534,6 +544,7 @@ export async function verifyManualPayment(paymentId: string, actorId: string, ba
 export async function rejectManualPayment(paymentId: string, actorId: string, reason: string) {
   const p = await db.payment.update({ where: { id: paymentId }, data: { status: "FAILED", note: reason } });
   await audit({ actorId, action: "payment.reject", entity: "Payment", entityId: paymentId, summary: `${p.reference} rejected`, reason });
+  void notifyPaymentFailed(paymentId, reason ? `Your transfer couldn't be confirmed: ${reason}` : "Your transfer couldn't be confirmed", `rejected:${paymentId}:${p.version}`);
   return p;
 }
 
