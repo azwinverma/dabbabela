@@ -54,7 +54,7 @@ export function HeaderClient({
             key={l.href}
             href={l.href}
             aria-current={path.startsWith(l.href) ? "page" : undefined}
-            className={cn("rounded-full px-3.5 py-2 text-[0.92rem] font-semibold transition", path.startsWith(l.href) ? "bg-ink text-paper" : "text-ink hover:bg-ink/5")}
+            className={cn("whitespace-nowrap rounded-full px-3.5 py-2 text-[0.92rem] font-semibold transition", path.startsWith(l.href) ? "bg-ink text-paper" : "text-ink hover:bg-ink/5")}
           >
             {l.label}
           </Link>
@@ -63,17 +63,17 @@ export function HeaderClient({
       <div className="flex items-center gap-1.5">
         <LangSwitch locale={locale} label={labels.language} className="hidden md:block" />
         {user?.teamAdmin && (
-          <Link href="/team" className="hidden rounded-full px-3 py-2 text-sm font-semibold hover:bg-ink/5 lg:inline-flex">
+          <Link href="/team" className="hidden whitespace-nowrap rounded-full px-3 py-2 text-sm font-semibold hover:bg-ink/5 2xl:inline-flex">
             {labels.team}
           </Link>
         )}
-        <Link href={accountHref} className="hidden items-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold hover:bg-ink/5 sm:inline-flex">
+        <Link href={accountHref} className="hidden items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-2 text-sm font-semibold hover:bg-ink/5 sm:inline-flex">
           <UserRound className="h-4 w-4" aria-hidden />
           {accountLabel}
         </Link>
         <Link
           href="/checkout"
-          className="relative inline-flex h-11 items-center gap-2 rounded-full border-2 border-ink bg-besar px-4 text-sm font-bold shadow-sticker-sm transition hover:-translate-y-0.5"
+          className="relative inline-flex h-11 items-center gap-2 whitespace-nowrap rounded-full border-2 border-ink bg-besar px-4 text-sm font-bold shadow-sticker-sm transition hover:-translate-y-0.5"
           aria-label={`${labels.cart}: ${ready ? count : 0}`}
         >
           <ShoppingBag className="h-4 w-4" aria-hidden />

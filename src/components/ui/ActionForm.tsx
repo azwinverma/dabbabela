@@ -26,7 +26,10 @@ export function ActionForm({ action, children, className, resetOnSuccess, showMe
   const snapshot = useRef<Map<string, string[]> | null>(null);
 
   useEffect(() => {
-    if (state.ok && state.redirectTo) router.push(state.redirectTo);
+    if (state.ok && state.redirectTo) {
+      router.push(state.redirectTo);
+      router.refresh(); // shared layouts (header: signed-in state, cart) don't re-render on push alone
+    }
     else if (state.ok) {
       if (resetOnSuccess) ref.current?.reset();
       router.refresh();
