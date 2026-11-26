@@ -150,7 +150,8 @@ describe("login activity", () => {
     expect(events.map((e) => e.success)).toEqual([false, true]);
     expect(events[0]!.reason).toBeTruthy();
     expect(events[1]!.userId).toBeTruthy();
-    expect(events[1]!.ip).toBe("203.0.113.7");
+    // Trusted client IP (security review L2): the right-most X-Forwarded-For hop our proxy appended, not the first value.
+    expect(events[1]!.ip).toBe("10.0.0.1");
     expect(events[1]!.userAgent).toBe("vitest-agent");
     const raw = JSON.stringify(events);
     expect(raw).not.toContain("right-pass-123");

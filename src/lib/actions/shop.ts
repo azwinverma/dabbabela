@@ -9,7 +9,8 @@ import { getCurrentUser } from "@/lib/auth";
 import { siteUrl } from "@/lib/site-url";
 import { storeUpload } from "@/lib/upload";
 import { log } from "@/lib/logger";
-import { LIMITS, rateLimit, requestIp } from "@/lib/rate-limit";
+import { LIMITS, rateLimit } from "@/lib/rate-limit";
+import { withCouponGuard } from "@/lib/coupon-guard";
 import { done, fail, type ActionResult } from "@/lib/action";
 import { str } from "@/lib/utils";
 import { quoteCart, placeCartOrder, OrderError, type CartLine } from "@/server/orders";
@@ -29,17 +30,6 @@ const SLOW_DOWN = "Too many attempts — wait a minute and try again";
 /** Per-user limits on checkout / payment actions (LIMITS in src/lib/rate-limit.ts). */
 async function perUser(name: "checkout" | "payStart" | "proofUpload", userId: string) {
   return rateLimit(`shop:${name}`, userId, LIMITS[name].max, LIMITS[name].windowMs);
-}
-
-/** Peek at the wrong-coupon counter for this IP without counting a hit. */
-async function couponAttemptsLeft() {
-  const row = await db.rateLimit.findUnique({ where: { key: `rl:shop:coupon-fail:${await requestIp()}` } });
-  if (!row || Date.now() - Number(row.lastRequest) > LIMITS.couponFail.windowMs) return true;
-  return row.count < LIMITS.couponFail.max;
-}
-
-async function recordCouponFailure() {
-  await rateLimit("shop:coupon-fail", await requestIp(), LIMITS.couponFail.max, LIMITS.couponFail.windowMs);
 }
 
 function errText(e: unknown, fallback = "Something went wrong — please try again") {
@@ -74,13 +64,8 @@ export type CartQuoteDTO = {
 
 export async function quoteCartAction(input: { lines: CartLine[]; addressId?: string | null; couponCode?: string | null }): Promise<CartQuoteDTO> {
   const user = await getCurrentUser();
-  let couponCode = input.couponCode ?? null;
   // Coupon guessing: after LIMITS.couponFail wrong codes per IP in the window, codes are no longer checked.
-  const couponBlocked = Boolean(couponCode) && !(await couponAttemptsLeft());
-  if (couponBlocked) couponCode = null;
-  const q = await quoteCart(user, { lines: input.lines, addressId: input.addressId ?? null, couponCode });
-  if (couponBlocked) q.couponError = "Too many coupon attempts — try again in a few minutes";
-  else if (couponCode && q.couponError) await recordCouponFailure();
+  const q = await withCouponGuard(input.couponCode, (couponCode) => quoteCart(user, { lines: input.lines, addressId: input.addressId ?? null, couponCode }));
   return {
     ok: q.ok && !q.addressProblem,
     error: q.error,

@@ -13,6 +13,7 @@ import { completeAndRemind, expireSwapPayments, syncPlanPriceMirrors } from "./s
 import { processOutbox } from "./notify";
 import { publishDueMenus } from "./menu";
 import { settleReferralRewards } from "./marketing";
+import { pruneRateLimits } from "@/lib/rate-limit";
 import { CUTOFF_DETECTORS, escalateAlerts, runDetectors } from "./alerts";
 
 /**
@@ -62,7 +63,8 @@ export const STEPS: Record<string, JobStep> = {
   referrals: { name: "referrals", label: "Settle referral rewards", run: () => settleReferralRewards() },
   detectors: { name: "detectors", label: "Run alert detectors", run: detectorsStep },
   escalation: { name: "escalation", label: "Escalate unacknowledged alerts", run: ({ now }) => escalateAlerts({ now }) },
-  outbox: { name: "outbox", label: "Send / retry queued email and SMS", run: () => processOutbox({ limit: 200 }) },
+  outbox: { name: "outbox", label: "Send / retry queued email, SMS and push", run: () => processOutbox({ limit: 200 }) },
+  "rate-limits": { name: "rate-limits", label: "Prune expired rate-limit counters", run: () => pruneRateLimits() },
   "cutoff-detectors": { name: "cutoff-detectors", label: "Detectors after the day lock", run: ({ now }) => runDetectors({ now, only: CUTOFF_DETECTORS }).then((r) => ({ raised: r.raised, resolved: r.resolved, failed: r.failed })) },
 };
 
@@ -71,7 +73,7 @@ export type JobName = "cutoff" | "housekeeping" | "frequent" | "alerts";
 /** Scheduled jobs and their steps (docs/DEPLOYMENT.md → Cron). */
 export const JOBS: Record<JobName, { label: string; schedule: string; description: string; steps: string[] }> = {
   cutoff: { label: "Cut-off", schedule: "Daily 04:00 UTC (09:45–10:44 Kathmandu on Hobby)", description: "Locks today for every kitchen, cancels unpaid orders, then re-checks capacity/production alerts.", steps: ["lock-day", "cutoff-detectors"] },
-  housekeeping: { label: "Housekeeping", schedule: "Daily 00:15 UTC (06:00–06:59 Kathmandu on Hobby)", description: "Gateway re-checks, plan completion and reminders, scheduled prices/menus/pages, referral rewards, alert detectors, escalation, outbox.", steps: ["reconcile", "plans", "plan-prices", "menus", "pages", "referrals", "detectors", "escalation", "outbox"] },
+  housekeeping: { label: "Housekeeping", schedule: "Daily 00:15 UTC (06:00–06:59 Kathmandu on Hobby)", description: "Gateway re-checks, plan completion and reminders, scheduled prices/menus/pages, referral rewards, alert detectors, escalation, outbox, rate-limit pruning.", steps: ["reconcile", "plans", "plan-prices", "menus", "pages", "referrals", "detectors", "escalation", "outbox", "rate-limits"] },
   frequent: { label: "Frequent", schedule: "Not scheduled on Hobby — on Pro add */15 * * * *", description: "Scheduled publishes, detectors, escalation and the outbox every 15 minutes.", steps: ["menus", "pages", "detectors", "escalation", "outbox"] },
   alerts: { label: "Alerts", schedule: "Manual", description: "Run every detector and the escalation rules now.", steps: ["detectors", "escalation"] },
 };

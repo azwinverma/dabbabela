@@ -685,9 +685,55 @@ export async function approveRefund(refundId: string, actorId: string) {
 }
 
 export async function rejectRefund(refundId: string, actorId: string, reason: string) {
-  const r = await db.refund.updateMany({ where: { id: refundId, status: { in: ["REQUESTED", "APPROVED"] } }, data: { status: "REJECTED", note: reason, processedById: actorId } });
-  if (!r.count) throw new PaymentError("Refund can't be rejected now");
-  await audit({ actorId, action: "refund.reject", entity: "Refund", entityId: refundId, reason });
+  const rolledBack = await db.$transaction(async (tx) => {
+    const r0 = await tx.refund.findUnique({ where: { id: refundId }, select: { paymentId: true } });
+    if (!r0) throw new PaymentError("Refund can't be rejected now");
+    // Lock order payment → refund requests (as everywhere), so a payout can't run while the meals are rolled back.
+    await lockPayment(tx, r0.paymentId);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`refund:${r0.paymentId}`}))`;
+    const r = await tx.refund.findUniqueOrThrow({ where: { id: refundId } });
+    const u = await tx.refund.updateMany({ where: { id: refundId, status: { in: ["REQUESTED", "APPROVED"] } }, data: { status: "REJECTED", note: reason, processedById: actorId } });
+    if (!u.count) throw new PaymentError("Refund can't be rejected now");
+    return rollbackPlanCancelRefund(tx, r);
+  });
+  await audit({ actorId, action: "refund.reject", entity: "Refund", entityId: refundId, reason, ...(rolledBack ? { after: { mealsRolledBack: rolledBack.orders, amount: rolledBack.amount } } : {}) });
+}
+
+/** `reason` written by cancelSubscription's REFUND settlement (one refund per payment for the plan's meals). */
+const PLAN_CANCEL_REFUND = /^Plan (\S+) cancelled: /;
+
+/**
+ * The cancelled-meal rows a plan-cancel REFUND request covers: the plan's CANCELLED meals on that payment whose
+ * customer share was marked refunded when the request was made but whose money hasn't gone back yet (paymentStatus
+ * still PAID — a processed refund marks them REFUNDED). Empty for any other refund.
+ */
+async function planCancelRefundMeals(tx: Tx, r: { paymentId: string; orderId: string | null; reason: string }) {
+  const m = r.orderId ? null : PLAN_CANCEL_REFUND.exec(r.reason);
+  if (!m) return [];
+  const sub = await tx.subscription.findUnique({ where: { reference: m[1] }, select: { id: true } });
+  if (!sub) return [];
+  return tx.order.findMany({ where: { subscriptionId: sub.id, paymentId: r.paymentId, status: "CANCELLED", paymentStatus: "PAID", refundedAmount: { gt: 0 } }, orderBy: { deliveryDate: "desc" } });
+}
+
+/**
+ * A plan-cancel REFUND request was rejected: the meals' `refundedAmount` (set when the request was made) goes back
+ * down by the refund's amount, so refunded figures aren't overstated and the meals stay refundable / creditable
+ * later through the normal per-order paths (security note in docs/SECURITY.md).
+ */
+async function rollbackPlanCancelRefund(tx: Tx, r: { paymentId: string; orderId: string | null; reason: string; amount: number }) {
+  const meals = await planCancelRefundMeals(tx, r);
+  if (!meals.length) return null;
+  let left = r.amount;
+  const orders: string[] = [];
+  for (const o of meals) {
+    if (left <= 0) break;
+    const back = Math.min(o.refundedAmount, left);
+    const u = await tx.order.updateMany({ where: { id: o.id, refundedAmount: o.refundedAmount, paymentStatus: "PAID" }, data: { refundedAmount: { decrement: back }, version: { increment: 1 } } });
+    if (!u.count) throw new PaymentError("A meal on this refund just changed — reload and try again");
+    left -= back;
+    orders.push(o.number);
+  }
+  return { orders, amount: r.amount - left };
 }
 
 /**
@@ -732,6 +778,15 @@ export async function processRefund(refundId: string, actorId: string, proof: { 
     }
     if (r.method === "WALLET_CREDIT") await addCredit(tx, { userId: r.payment.userId, amount: r.amount, reason: "REFUND", paymentId: r.paymentId, refundId: r.id, orderId: r.orderId, actorId });
     await bumpPaymentRefund(tx, r.paymentId, r.amount);
+    if (!r.orderId) {
+      // Plan-cancel REFUND: the money for the cancelled meals has now actually gone back.
+      let left = r.amount;
+      for (const o of await planCancelRefundMeals(tx, r)) {
+        if (left <= 0) break;
+        left -= o.refundedAmount;
+        await tx.order.updateMany({ where: { id: o.id, paymentStatus: "PAID" }, data: { paymentStatus: o.refundedAmount >= o.customerShare ? "REFUNDED" : "PARTIALLY_REFUNDED" } });
+      }
+    }
     if (r.orderId) {
       const o = await tx.order.findUniqueOrThrow({ where: { id: r.orderId } });
       const refunded = o.refundedAmount + r.amount;

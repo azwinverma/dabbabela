@@ -3,10 +3,19 @@ import { randomUUID } from "node:crypto";
 import { headers } from "next/headers";
 import { db } from "./db";
 import { log } from "./logger";
+import { trustedClientIp } from "./client-ip";
 
 /**
- * Fixed-window rate limiter stored in Postgres (the `RateLimit` table Better Auth also uses), so it works across
- * serverless instances. One atomic upsert per hit: a new window resets the count, otherwise it increments.
+ * Sliding-window rate limiter stored in Postgres (the `RateLimit` table Better Auth also uses), so it works across
+ * serverless instances — no schema change. It is the "sliding window counter" approximation: one row per key per
+ * fixed window (`<key>:w<window index>`), and a hit is allowed while
+ *
+ *     hits in the current window + hits in the previous window × (share of the previous window still inside the
+ *     sliding window)  ≤  max
+ *
+ * so a client can no longer burst 2 × max across a window edge (the old fixed-window weakness). One atomic upsert of
+ * the current row + a read of the previous row per hit. Old rows are pruned by the housekeeping job
+ * (`pruneRateLimits`). Refused hits still count (a client hammering a limited bucket stays limited).
  *
  * Why we need it next to Better Auth's own limiter: Better Auth only rate-limits requests that go through its HTTP
  * handler (/api/auth/*). Our sign-in / sign-up / reset forms are server actions calling `auth.api.*` directly, which
@@ -17,43 +26,60 @@ import { log } from "./logger";
  * limiter error must not get unlimited guesses.
  */
 export async function rateLimit(bucket: string, id: string, max: number, windowMs: number, opts: { failClosed?: boolean } = {}): Promise<boolean> {
-  const key = `rl:${bucket}:${id}`.slice(0, 250);
   const now = Date.now();
+  const w = windowKeys(bucket, id, windowMs, now);
   try {
-    const rows = await db.$queryRaw<{ count: number }[]>`
-      INSERT INTO "RateLimit" ("id", "key", "count", "lastRequest") VALUES (${randomUUID()}, ${key}, 1, ${BigInt(now)})
-      ON CONFLICT ("key") DO UPDATE SET
-        "count" = CASE WHEN ${BigInt(now)} - "RateLimit"."lastRequest" > ${BigInt(windowMs)} THEN 1 ELSE "RateLimit"."count" + 1 END,
-        "lastRequest" = CASE WHEN ${BigInt(now)} - "RateLimit"."lastRequest" > ${BigInt(windowMs)} THEN ${BigInt(now)} ELSE "RateLimit"."lastRequest" END
-      RETURNING "count"`;
-    return Number(rows[0]?.count ?? 1) <= max;
+    const rows = await db.$queryRaw<{ cur: number; prev: number }[]>`
+      WITH cur AS (
+        INSERT INTO "RateLimit" ("id", "key", "count", "lastRequest") VALUES (${randomUUID()}, ${w.cur}, 1, ${BigInt(now)})
+        ON CONFLICT ("key") DO UPDATE SET "count" = "RateLimit"."count" + 1, "lastRequest" = ${BigInt(now)}
+        RETURNING "count"
+      )
+      SELECT (SELECT "count" FROM cur)::int AS cur, COALESCE((SELECT "count" FROM "RateLimit" WHERE "key" = ${w.prev}), 0)::int AS prev`;
+    return slidingCount(Number(rows[0]?.cur ?? 1), Number(rows[0]?.prev ?? 0), w.elapsed, windowMs) <= max;
   } catch (e) {
     log.warn("ratelimit.failed", { bucket, failClosed: Boolean(opts.failClosed), error: e });
     return !opts.failClosed;
   }
 }
 
-const IP_RE = /^[0-9a-fA-F:.]{3,45}$/;
-
-/**
- * The client IP for rate limiting, from headers the platform sets (security review L2). Never the left-most
- * X-Forwarded-For value — a client can put anything there. Order:
- *   1. on Vercel (`VERCEL` env set): `x-vercel-forwarded-for`, then `x-real-ip` — both set by Vercel's edge, which
- *      overwrites client-supplied values;
- *   2. otherwise the RIGHT-most X-Forwarded-For hop, i.e. the address our own nearest proxy saw (TRUSTED_PROXY_HOPS
- *      = how many proxies we run in front of the app that each append one hop; default 1). Off Vercel the app must
- *      sit behind such a proxy (docs/SECURITY.md);
- *   3. "local" when nothing usable is there (dev, tests).
- */
-export function clientIpFrom(h: { get(name: string): string | null }): string {
-  if (process.env.VERCEL) {
-    const platform = (h.get("x-vercel-forwarded-for")?.split(",")[0] ?? h.get("x-real-ip") ?? "").trim();
-    if (IP_RE.test(platform)) return platform;
+/** Would one more hit be allowed? (Read-only — e.g. "stop checking coupon codes" before quoting.) */
+export async function rateLimitPeek(bucket: string, id: string, max: number, windowMs: number): Promise<boolean> {
+  const now = Date.now();
+  const w = windowKeys(bucket, id, windowMs, now);
+  try {
+    const rows = await db.rateLimit.findMany({ where: { key: { in: [w.cur, w.prev] } }, select: { key: true, count: true } });
+    const cur = rows.find((r) => r.key === w.cur)?.count ?? 0;
+    const prev = rows.find((r) => r.key === w.prev)?.count ?? 0;
+    return slidingCount(cur + 1, prev, w.elapsed, windowMs) <= max;
+  } catch {
+    return true;
   }
-  const hops = (h.get("x-forwarded-for") ?? "").split(",").map((x) => x.trim()).filter(Boolean);
-  const trusted = Math.max(1, Number(process.env.TRUSTED_PROXY_HOPS) || 1);
-  const ip = hops.length ? hops[Math.max(0, hops.length - trusted)] : "";
-  return IP_RE.test(ip) ? ip : "local";
+}
+
+/** Current + previous window rows of a key. */
+function windowKeys(bucket: string, id: string, windowMs: number, now: number) {
+  const base = `rl:${bucket}:${id}`.slice(0, 230);
+  const n = Math.floor(now / Math.max(1, windowMs));
+  return { cur: `${base}:w${n}`, prev: `${base}:w${n - 1}`, elapsed: now - n * windowMs };
+}
+
+/** Sliding-window estimate (exported for the unit test). */
+export function slidingCount(cur: number, prev: number, elapsedInWindow: number, windowMs: number) {
+  const weight = Math.max(0, 1 - elapsedInWindow / Math.max(1, windowMs));
+  return cur + Math.floor(prev * weight);
+}
+
+/** Housekeeping: drop our limiter rows older than any window in use (≤ 1 h) plus margin. Better Auth's rows are left alone. */
+export async function pruneRateLimits(olderThanMs = 3 * 3600_000) {
+  const cutoff = BigInt(Date.now() - olderThanMs);
+  const r = await db.rateLimit.deleteMany({ where: { key: { startsWith: "rl:" }, lastRequest: { lt: cutoff } } });
+  return { deleted: r.count };
+}
+
+/** Client IP for rate limiting (lib/client-ip trustedClientIp), or "local" when there is none. */
+export function clientIpFrom(h: { get(name: string): string | null }): string {
+  return trustedClientIp(h) ?? "local";
 }
 
 /** Client IP of the current request (see clientIpFrom), or "local". */

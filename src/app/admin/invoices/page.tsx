@@ -26,9 +26,10 @@ export default async function Invoices({ searchParams }: { searchParams: Promise
     ...(sp.q ? { OR: [{ number: { contains: sp.q, mode: "insensitive" } }, { billingName: { contains: sp.q, mode: "insensitive" } }] } : {}),
   };
   const [companies, pending, ag, invoices] = await Promise.all([
-    db.company.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
-    uninvoicedByCompany(),
-    ageing(),
+    // Company-scoped staff see (and can bill) only their companies — the KPIs and panels too, not just the list.
+    db.company.findMany({ where: { isActive: true, ...(companyIds ? { id: { in: companyIds } } : {}) }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    uninvoicedByCompany(companyIds),
+    ageing(companyIds),
     db.invoice.findMany({ where, include: { company: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 100 }),
   ]);
 

@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { cache } from "react";
+import { trustedClientIp } from "./client-ip";
 
 /**
  * Per-request correlation context (docs/SUPER_ADMIN_ARCHITECTURE.md §3).
@@ -30,19 +31,12 @@ export function sanitizeRequestId(v: string | null | undefined): string | null {
   return ID_OK.test(s) ? s : null;
 }
 
-function firstIp(h: Headers): string | null {
-  const fwd = h.get("x-forwarded-for");
-  const raw = (fwd ? fwd.split(",")[0] : null) ?? h.get("x-real-ip") ?? h.get("cf-connecting-ip");
-  const ip = raw?.trim() ?? "";
-  return /^[0-9a-fA-F:.]{3,45}$/.test(ip) ? ip : null;
-}
-
 /** Build a context from request headers (pure; exported for tests). */
 export function contextFromHeaders(h: Headers | null | undefined): RequestContext {
   if (!h) return { requestId: newRequestId(), ip: null, userAgent: null };
   const requestId = sanitizeRequestId(h.get("x-request-id")) ?? sanitizeRequestId(h.get("x-vercel-id")) ?? sanitizeRequestId(h.get("x-correlation-id")) ?? newRequestId();
   const ua = h.get("user-agent");
-  return { requestId, ip: firstIp(h), userAgent: ua ? ua.slice(0, 300) : null };
+  return { requestId, ip: trustedClientIp(h), userAgent: ua ? ua.slice(0, 300) : null };
 }
 
 const fromRequest = cache(async (): Promise<RequestContext> => {

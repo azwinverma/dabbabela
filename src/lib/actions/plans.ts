@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { z } from "zod";
 import { LIMITS, rateLimit } from "@/lib/rate-limit";
+import { withCouponGuard } from "@/lib/coupon-guard";
 import type { PaymentMethod, Weekday } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth";
 import { log } from "@/lib/logger";
@@ -60,7 +61,8 @@ export async function quotePlanLengthAction(input: z.input<typeof planSchema>): 
   const p = planSchema.safeParse(input);
   if (!p.success) return { ok: false, error: p.error.issues[0]?.message ?? "Check the plan details" };
   try {
-    const q = await quoteSubscription(user, { ...p.data, addressId: p.data.addressId ?? null, couponCode: p.data.couponCode ?? null } as PlanInput);
+    // Wrong coupon codes count toward the same per-IP budget as cart quotes (lib/coupon-guard).
+    const q = await withCouponGuard(p.data.couponCode, (couponCode) => quoteSubscription(user, { ...p.data, addressId: p.data.addressId ?? null, couponCode } as PlanInput));
     return {
       ok: !q.error && !q.addressProblem,
       error: q.error,

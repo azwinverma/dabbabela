@@ -26,7 +26,8 @@ beforeAll(async () => {
 describe("request context", () => {
   it("reads x-request-id, IP and user agent from headers; rejects malformed ids", () => {
     const c = contextFromHeaders(new Headers({ "x-request-id": "abc-123-xyz", "user-agent": "UA", "x-forwarded-for": "198.51.100.4, 10.0.0.2" }));
-    expect(c).toEqual({ requestId: "abc-123-xyz", ip: "198.51.100.4", userAgent: "UA" });
+    // Trusted client IP (right-most hop), the same rule as rate limiting — a client-written first value is ignored.
+    expect(c).toEqual({ requestId: "abc-123-xyz", ip: "10.0.0.2", userAgent: "UA" });
     expect(contextFromHeaders(new Headers({ "x-vercel-id": "bom1::abcde-12345" })).requestId).toBe("bom1::abcde-12345");
     expect(sanitizeRequestId("bad id\nInjected: yes")).toBeNull();
     const gen = contextFromHeaders(new Headers({ "x-request-id": "<script>" }));
@@ -41,7 +42,7 @@ describe("audit() correlation and approval", () => {
     const row = await db.auditLog.findFirstOrThrow({ where: { entityId: `${TAG}-h` } });
     expect(row.requestId).toBe("req-from-header-0001");
     expect(row.userAgent).toBe("Vitest/1.0 (audit)");
-    expect(row.ip).toBe("203.0.113.9");
+    expect(row.ip).toBe("10.0.0.1");
   });
 
   it("shares one request id across every entry of an explicit context and records the approver", async () => {

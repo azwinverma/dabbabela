@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { log } from "@/lib/logger";
+import { trustedClientIp } from "@/lib/client-ip";
 
 /** Better Auth endpoints that are sign-in attempts, and the method we record. */
 export const LOGIN_PATHS: Record<string, string> = {
@@ -17,10 +18,8 @@ type HookCtx = {
   context: { returned?: unknown; newSession?: { user?: { id?: string; email?: string } } | null; session?: { user?: { id?: string; email?: string } } | null };
 };
 
-function clientIp(h?: Headers | null) {
-  const xff = h?.get("x-forwarded-for");
-  return (xff ? xff.split(",")[0]?.trim() : h?.get("x-real-ip")) || null;
-}
+/** Same trusted client-IP rule as rate limiting and audit rows (never the spoofable left-most X-Forwarded-For hop). */
+const clientIp = (h?: Headers | null) => trustedClientIp(h);
 
 /** Error code from a Better Auth APIError-like value, without any secret material. */
 function failureCode(returned: unknown): string | null {

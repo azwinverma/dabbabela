@@ -235,10 +235,14 @@ export async function createCreditNote(invoiceId: string, actorId: string, amoun
 
 export type Ageing = { current: number; d30: number; d60: number; d90: number; over90: number; total: number };
 
-/** Outstanding by days past due (0–30 includes not yet due). */
-export async function ageing(companyId?: string): Promise<{ buckets: Ageing; rows: { id: string; number: string; company: string; due: string | null; days: number; outstanding: number }[] }> {
+/** Company filter: one id, a staff member's company scope (array; [] = none), or undefined/null = every company. */
+type CompanyFilter = string | string[] | null | undefined;
+const companyIn = (f: CompanyFilter) => (f == null ? undefined : typeof f === "string" ? f : { in: f });
+
+/** Outstanding by days past due (0–30 includes not yet due). Pass the staff member's `companyScope` to scope it. */
+export async function ageing(companyId?: CompanyFilter): Promise<{ buckets: Ageing; rows: { id: string; number: string; company: string; due: string | null; days: number; outstanding: number }[] }> {
   const invs = await db.invoice.findMany({
-    where: { kind: "INVOICE", status: { in: ["ISSUED", "PARTIALLY_PAID"] }, ...(companyId ? { companyId } : {}) },
+    where: { kind: "INVOICE", status: { in: ["ISSUED", "PARTIALLY_PAID"] }, ...(companyId != null ? { companyId: companyIn(companyId) } : {}) },
     include: { company: { select: { name: true } } },
     orderBy: { dueDate: "asc" },
   });
@@ -263,12 +267,12 @@ export async function ageing(companyId?: string): Promise<{ buckets: Ageing; row
  * Company-share `OrderAdjustment` rows (staff edits, WP-03) on due, billable orders that no non-void invoice has billed
  * yet (`OrderAdjustment.invoiceLineId`, set by `generateCompanyInvoice`), summed per company.
  */
-export async function unbilledAdjustmentsByCompany(companyId?: string) {
+export async function unbilledAdjustmentsByCompany(companyId?: CompanyFilter) {
   const adjustments = await db.orderAdjustment.findMany({
     where: {
       reason: { startsWith: COMPANY_SHARE_PREFIX },
       ...UNBILLED_ADJUSTMENT,
-      order: { companyId: companyId ?? { not: null }, status: { in: REVENUE_STATUSES }, deliveryDate: { lte: dateOnly(todayKTM()) } },
+      order: { companyId: companyIn(companyId) ?? { not: null }, status: { in: REVENUE_STATUSES }, deliveryDate: { lte: dateOnly(todayKTM()) } },
     },
     select: { id: true, amount: true, order: { select: { companyId: true, deliveryDate: true } } },
   });
@@ -282,18 +286,21 @@ export async function unbilledAdjustmentsByCompany(companyId?: string) {
   return out;
 }
 
-/** Companies with billable employer share that isn't on an invoice yet (meals + unbilled company-share adjustments). */
-export async function uninvoicedByCompany() {
+/**
+ * Companies with billable employer share that isn't on an invoice yet (meals + unbilled company-share adjustments).
+ * `companyIds` = the staff member's company scope (null = all companies).
+ */
+export async function uninvoicedByCompany(companyIds?: string[] | null) {
   const [rows, adjustments] = await Promise.all([
     db.order.groupBy({
       by: ["companyId"],
-      where: { companyId: { not: null }, invoiceId: null, companyShare: { gt: 0 }, status: { in: REVENUE_STATUSES }, deliveryDate: { lte: dateOnly(todayKTM()) } },
+      where: { companyId: companyIds ? { in: companyIds } : { not: null }, invoiceId: null, companyShare: { gt: 0 }, status: { in: REVENUE_STATUSES }, deliveryDate: { lte: dateOnly(todayKTM()) } },
       _sum: { companyShare: true },
       _count: true,
       _min: { deliveryDate: true },
       _max: { deliveryDate: true },
     }),
-    unbilledAdjustmentsByCompany(),
+    unbilledAdjustmentsByCompany(companyIds ?? undefined),
   ]);
   const ids = [...new Set([...rows.map((r) => r.companyId!), ...adjustments.keys()])];
   const companies = await db.company.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });

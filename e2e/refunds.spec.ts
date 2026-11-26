@@ -1,15 +1,30 @@
 import { expect, test } from "@playwright/test";
-import { acceptDialogs, login, placeOrder, watchErrors } from "./helpers";
+import { hashPassword } from "better-auth/crypto";
+import { acceptDialogs, DEMO_PASSWORD, login, placeOrder, watchErrors } from "./helpers";
 import { db } from "./db";
+
+/**
+ * A fresh finance user per run: the seeded finance account would accumulate this test's +Rs 1,000 credit in its
+ * rolling-24 h money total (`staffDailyMoneyLimit`, default Rs 5,000) across runs, and after a few runs the adjustment
+ * would go to maker-checker approval instead. Deactivated at the end.
+ */
+async function freshFinanceUser(stamp: string) {
+  const email = `finance.e2e.${stamp}@test.local`;
+  const user = await db().user.create({ data: { name: `E2E Finance ${stamp}`, email, emailVerified: true, role: "FINANCE" } });
+  await db().account.create({ data: { userId: user.id, accountId: user.id, providerId: "credential", password: await hashPassword(DEMO_PASSWORD) } });
+  return { id: user.id, email };
+}
 
 test("support requests a refund, finance approves it and can only process it with a reference (credit stays credit)", async ({ browser }) => {
   const stamp = Date.now().toString(36);
+  const financeUser = await freshFinanceUser(stamp);
+  test.info().annotations.push({ type: "finance-user", description: financeUser.email });
 
   // finance tops up the customer's credit (audited ledger adjustment)
   const finance = await (await browser.newContext()).newPage();
   const financeErrors = watchErrors(finance);
   acceptDialogs(finance);
-  await login(finance, "finance@demo.dabbabela.local", undefined, "/admin");
+  await login(finance, financeUser.email, DEMO_PASSWORD, "/admin");
   await finance.goto(`/admin/refunds?view=ledger&q=${encodeURIComponent("customer.c@demo.dabbabela.local")}`);
   const fm = finance.locator("main");
   await fm.getByLabel("Amount").fill("+1000");
@@ -79,4 +94,5 @@ test("support requests a refund, finance approves it and can only process it wit
   expect((await db().payment.findUniqueOrThrow({ where: { id: paymentId } })).refundedAmount).toBe(5000);
   financeErrors();
   await finance.context().close();
+  await db().user.update({ where: { id: financeUser.id }, data: { isActive: false } });
 });
