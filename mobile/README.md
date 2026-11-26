@@ -83,7 +83,10 @@ Token only in secure storage; no logging of tokens, bodies or PII; release build
 3. Add `firebase_core` + `firebase_messaging`; apply `com.google.gms.google-services` in Gradle; in Xcode enable Push
    Notifications + Background Modes → Remote notifications; upload an APNs auth key to Firebase.
 4. Implement `PushService` with FirebaseMessaging and return it from `pushServiceProvider`.
-5. Server side: sending (FCM HTTP v1) is not built yet — tokens are already stored via `POST /devices`.
+5. Server side: sending is built (FCM HTTP v1, env `FCM_SERVICE_ACCOUNT_JSON`, docs/DEPLOYMENT.md). Each push has
+   `data { type, link?, targetType?, targetId? }`; open the screen for `targetType` (order / plan / payment / wallet /
+   ticket) like the `target` of `GET /notifications` (docs/api/README.md → Deep links). Re-register the token on launch
+   (the server deletes tokens FCM reports as unregistered).
 
 ## Release (owner steps)
 

@@ -21,7 +21,7 @@ Hosting: **Vercel** (functions pinned to `sin1`, Singapore) + **Neon Postgres** 
    `RESEND_API_KEY` + `EMAIL_FROM`, payment keys when activated, SMS keys when approved.
    Security (Phase 2B, all optional and env-gated — see the table below): `NEXT_PUBLIC_TURNSTILE_SITE_KEY` +
    `TURNSTILE_SECRET_KEY`, `SENTRY_DSN` (+ `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT` for source maps),
-   `STAFF_SESSION_MAX_HOURS`.
+   `STAFF_SESSION_MAX_HOURS`. Mobile push (optional): `FCM_SERVICE_ACCOUNT_JSON` (see "Push notifications" below).
 
 ### Security environment variables (Phase 2B)
 | Variable | Effect when set | When unset |
@@ -32,6 +32,17 @@ Hosting: **Vercel** (functions pinned to `sin1`, Singapore) + **Neon Postgres** 
 | `SENTRY_AUTH_TOKEN` + `SENTRY_ORG` + `SENTRY_PROJECT` | Source maps uploaded (and deleted from the output) during `next build`; release created | No upload; the build never contacts Sentry |
 | `STAFF_SESSION_MAX_HOURS` | Absolute lifetime of a staff session (1–720 h) | 24 h |
 | `AUTH_RATE_LIMIT` | `true` turns the sign-in limits on outside production; `false` turns them off (**E2E server only — never in production**) | On in production, off in dev |
+
+### Push notifications (FCM)
+| Variable | Effect when set | When unset |
+|---|---|---|
+| `FCM_SERVICE_ACCOUNT_JSON` | Push to the Flutter app through Firebase Cloud Messaging HTTP v1 (Android; iOS through FCM's APNs bridge). Value = the Firebase service-account key JSON (Firebase console → Project settings → Service accounts → Generate new private key), pasted as-is or base64-encoded; needs `project_id`, `client_email`, `private_key`. Push rows go through the outbox (`OutboundMessage.channel = PUSH`), retried with backoff; tokens FCM reports as unregistered are deleted. | No push queued or sent (no-op). `/api/health` → `integrations.push: false` |
+
+Firebase setup (owner): create the Firebase project, add the Android app (`com.dabbabela.app`) and the iOS app, upload the
+APNs auth key (.p8) under Cloud Messaging → Apple app configuration, put `google-services.json` /
+`GoogleService-Info.plist` in the app (see `mobile/README.md`), then set `FCM_SERVICE_ACCOUNT_JSON` in Vercel (Production
+only; keep the key out of the repo) and redeploy. Check `/api/health` → `integrations.push: true`, sign in on a device and
+trigger a test (e.g. a payment) — the outbox page shows the PUSH row as SENT.
 
 The maker-checker threshold is a setting, not an env var: Admin → Settings → "Wallet top-up & approvals" → approval threshold
 (default Rs 2,000).
@@ -47,7 +58,7 @@ The maker-checker threshold is a setting, not an env var: Admin → Settings →
 | Schedule (UTC) | Kathmandu | Path |
 |---|---|---|
 | `0 4 * * *` | 09:45 | `/api/cron/daily?job=cutoff` — lock today, expire unpaid |
-| `15 0 * * *` | 06:00 | `/api/cron/daily?job=housekeeping` — reconcile gateways, finish plans + reminders, scheduled plan prices, publish scheduled menus and CMS pages, settle referral rewards, alert detectors, alert escalation, send/retry the outbox |
+| `15 0 * * *` | 06:00 | `/api/cron/daily?job=housekeeping` — reconcile gateways, finish plans + reminders, scheduled plan prices, publish scheduled menus and CMS pages, settle referral rewards, alert detectors, alert escalation, send/retry the outbox (email, SMS, push), prune old rate-limit rows |
 
 The cut-off job also re-runs the capacity/production/unpaid/missing-selection detectors after locking the day.
 Every step runs under its own `JobRun` key (`housekeeping.<step>:<Kathmandu date>`), so calling the cron again the
@@ -124,6 +135,7 @@ reports reconcile with order records. Everything below still needs the owner or 
 - [ ] Sentry DSN set (`sentry: true`); trigger a test error on staging and check the event has no email/phone/payment reference
 - [ ] Browser console on home, menu, checkout, login, admin and rider shows no CSP violations (the `e2e/security.spec.ts` check, against staging)
 - [ ] Approval threshold and per-staff 24 h money limit reviewed in Settings; at least two staff hold "approvals → approve" (gateway/bank/cash refunds are paid out by someone other than the requester)
+- [ ] Firebase project + APNs key; `FCM_SERVICE_ACCOUNT_JSON` set (`/api/health` → `integrations.push: true`); one test push received on Android and iOS
 - [ ] Live eSewa/Khalti URLs set (`/api/health` → `paymentsConfig.ok: true`, `integrations.esewa/khalti: true`)
 - [ ] Every chef / store keeper / dispatcher / rider account has a kitchen (unassigned kitchen staff see no kitchen)
 - [ ] Staging verified (section above), including the acceptance E2E

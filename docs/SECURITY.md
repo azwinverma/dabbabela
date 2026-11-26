@@ -21,7 +21,9 @@
   are addressed by id — tokens are never sent to the browser (before Phase 2B the page embedded other sessions' tokens in hidden
   form fields; fixed). Recent sign-ins (last 15 `LoginEvent`s, success/failure, method, device) are listed too. Admins see and
   revoke a staff member's sessions and login history on `/admin/staff/[id]`. All revocations are audited.
-* **Rate limits** (Postgres `RateLimit` table, atomic upsert, `src/lib/rate-limit.ts`). Better Auth's own limiter only sees
+* **Rate limits** (Postgres `RateLimit` table, `src/lib/rate-limit.ts`; **sliding-window counter** since 2026-11-26 — one row
+  per key per window, the previous window weighted by how much of it is still inside the sliding window, so there is no
+  2× burst at a window edge; no schema change; old rows pruned by the daily housekeeping job). Better Auth's own limiter only sees
   requests to `/api/auth/*`; our forms are server actions calling `auth.api.*`, which bypass it — so the actions limit themselves
   (on in production; `AUTH_RATE_LIMIT=false` only for the E2E server):
 
@@ -35,7 +37,7 @@
   | Place order / start plan | 12 / min per user |
   | Start / switch payment | 15 / min per user; transfer-proof upload 10 / 10 min |
   | Gateway return verification (eSewa/Khalti) | 30 / min per IP (each triggers a server-to-server lookup) |
-  | Wrong coupon codes | 10 / 10 min per IP, then codes aren't checked |
+  | Wrong coupon codes | 10 / 10 min per IP across cart **and plan** quotes, web and API (`src/lib/coupon-guard.ts`), then codes aren't checked |
   | Contact / area / lead / newsletter forms | 4–5 / 10 min per IP (always on) |
 
   Better Auth's HTTP limits stay as a second layer (sign-in 6/min, sign-up 5/5 min, reset 3/5 min, OTP 3/5 min, TOTP 6/min).
@@ -86,7 +88,9 @@
   Verified OK: `/pay/[id]`, `/thank-you/[id]`, receipts and order pages (`userId` filters), wallet pages, gateway returns
   (signature + server lookup), team invoices/reports (company id), admin receipt (scope + PII), other exports, upload route.
 * **Login activity:** every sign-in attempt (email, phone OTP, TOTP, backup code) is recorded in `LoginEvent` with IP, user agent and a
-  failure code — never passwords, codes or tokens. Staff pages list sessions with revoke one / revoke all.
+  failure code — never passwords, codes or tokens. The IP (here and on audit rows) uses the same trusted client-IP rule as the
+  rate limiter (`src/lib/client-ip.ts`: Vercel headers, else the right-most X-Forwarded-For hop) — since 2026-11-26; before, the
+  spoofable first XFF value was stored. Staff pages list sessions with revoke one / revoke all.
 * Customer data is always queried with `userId` from the session, never from the request.
 * Corporate portal: `requireCompanyAdmin()` + every query filtered by that company id (integration test
   proves another company's data can't be read).
@@ -119,6 +123,10 @@
   actor ids omitted, dispatcher phones masked without `customers.pii`. Unknown errors are logged and returned as
   `INTERNAL` without details. Uploads reuse `storeUpload` (sniffed types, 5 MB, no SVG).
 * No refund / wallet-adjustment endpoints exist in v1 (staff money tools stay on the web behind maker-checker).
+* 2026-11-26 additions: public `GET /allergens`, `GET /builder`, `POST /builder/quote` (read-only, rate-limited like other
+  public reads; prices always computed on the server); signed-in `POST /saved-boxes`, `PATCH`/`DELETE /saved-boxes/{id}`
+  (own boxes only — another customer's id answers 404; validated by the same `priceCustomBox` engine as the web;
+  30 per customer). Notification `target` is derived from the stored link (no new data exposed).
 
 ## Maker-checker approvals (Phase 2B)
 * `src/server/approvals.ts`, UI `/admin/approvals` (queue with status/kind/mine filters, detail with requested-vs-now "diff",
@@ -172,6 +180,32 @@ Shared building blocks: `lockPayment` / `expireOpenAttempts` (`src/server/paymen
 | L8 | `apiOrigin` trusted `X-Forwarded-Host` | Fixed | `NEXT_PUBLIC_SITE_URL`, then `BETTER_AUTH_URL`; X-Forwarded-Host only outside production. |
 | L9 | Idempotency claim went stale after 2 min | Fixed | Stale after 6 min (longer than any function can run), and skip / cancel / swap / deliver are guarded state transitions, so a re-run can't double-apply. |
 | L10 | Refunds ignored closed-loop credit | Fixed | See H4: wallet-paid → credit only, in `requestRefundTx` and again at payout. |
+
+## Company invoices paid online (2026-11-26)
+* Company admins (active `ADMIN` member of the invoice's company — `requireCompanyAdmin` on the portal, re-checked in
+  `startInvoicePayment` and again in `startPayment`) pay an issued invoice's **whole outstanding balance** with eSewa/Khalti
+  (`src/server/invoice-payments.ts`). The amount is fixed at start; the payment (purpose `INVOICE`, no orders) is linked to
+  the invoice by its idempotency key `invoice:<id>:<uuid>` (no schema change). Members, other companies' admins and other
+  companies' invoices are refused; only eSewa/Khalti (no cash/wallet/bank switch); refunds of such payments are refused (a
+  credit note + bank payment instead — never personal credit to the admin who paid).
+* Verification goes through the same gateway code (HMAC + attempt + amount + status API). `markPaymentPaid` takes the
+  **invoice lock, then the payment lock** and accepts the money only if the payment isn't cancelled, the invoice is still
+  open and owes exactly the payment amount, and the verified amount equals it. Then exactly one `InvoiceReceipt`
+  (method ESEWA/KHALTI, `paymentId` unique, existence-checked) and `paidAmount`/status move like a manual receipt; audited
+  (`invoice.payment_start`, `invoice.payment_online`). Anything else — underpayment, overpayment, a cancelled payment, an
+  invoice that changed — changes nothing, marks the attempt `MISMATCH` and raises a GATEWAY_MISMATCH alert (finance refunds
+  at the gateway).
+* A manual receipt, credit note or void (all now under the invoice lock) cancels open online payments for the invoice and
+  expires their gateway sessions. A second admin can't start while another admin's session is younger than 20 minutes.
+* Cash: counted once — through the Payment (cash flow, journal; linked receipts are skipped there) and shown as a company
+  receipt in settlements; an unpaid online invoice payment is not a receivable (the invoice balance is).
+
+## Push notifications (2026-11-26)
+* FCM HTTP v1 with a service account (`FCM_SERVICE_ACCOUNT_JSON`, env only; OAuth access token from a self-signed RS256 JWT,
+  kept in memory). Unset = no-op. Messages carry only the in-app title/body and `data { type, link, targetType, targetId }`
+  — no tokens, no PII beyond what the in-app notification shows; the **hand-off code is never in the push text** (lock
+  screen), only inside the app. Push follows the user's IN_APP switch for the topic (SECURITY topics always).
+* Tokens FCM reports as UNREGISTERED (or 404) are deleted; device-token moves between accounts stay audited (L7).
 
 ## Payments
 * Prices recomputed on the server for every quote and order; client totals are ignored.
@@ -282,12 +316,13 @@ zone (fixed in WP-20 for reports, analytics, exports and dish capacity; the reco
 * No penetration test yet; reviews are code review + the automated guard/IDOR tests.
 * `style-src` still allows `'unsafe-inline'` (styles can't execute code; React style attributes need it).
 * Rate limiting keys on the platform client IP (Vercel headers) or the right-most `X-Forwarded-For` hop; off Vercel the app must sit
-  behind a proxy that appends the client IP (`TRUSTED_PROXY_HOPS` = number of such proxies). The limiter is fixed-window (a burst of up
-  to 2× at a window edge).
+  behind a proxy that appends the client IP (`TRUSTED_PROXY_HOPS` = number of such proxies). The limiter is a sliding-window
+  approximation (counts are exact per window; the previous window is weighted linearly).
 * Mobile sign-up relies on stricter rate limits instead of a bot challenge until app attestation is added.
-* Plan-cancel REFUND settlements set the cancelled meals' `refundedAmount` when the request is created (as before); a rejected
-  request leaves that figure overstated — finance should then settle the meals by credit.
-* Plan quotes (`quotePlanLengthAction`) don't count wrong coupon codes yet (cart quotes do).
+* Plan-cancel REFUND settlements still mark the cancelled meals' `refundedAmount` when the request is created; since 2026-11-26
+  rejecting that refund rolls it back (and processing marks the meals REFUNDED), so the figures are no longer overstated.
+  Requests withdrawn some other way (e.g. a direct DB edit) are not covered.
+* Online company-invoice payments can't be refunded through the refund flow (credit note + bank payment instead).
 * Payment-proof uploads are stored in Vercel Blob with `access: "public"` (unguessable URL, not authenticated) — move to private
   blobs/signed URLs when the plan allows.
 * Remaining `npm audit` advisories above (no non-breaking fix).

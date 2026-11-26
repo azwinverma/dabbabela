@@ -1,10 +1,24 @@
 # Implementation status
 
-_Last updated: 2026-11-23 (security review fixes; Phase 4 Flutter app; Phase 3 mobile API; Phase 2C business gaps; earlier: WP-20 acceptance, security and performance pass)._ This is an honest status.
+_Last updated: 2026-11-26 (gap closure: online invoice payment, push sending, mobile API additions; 2026-11-23 security review fixes; Phase 4 Flutter app; Phase 3 mobile API; Phase 2C business gaps; earlier: WP-20 acceptance, security and performance pass)._ This is an honest status.
 "Done" means the flow works against a real Postgres database and the checks listed below cover it.
 **This is not a production-readiness claim.** The app is deployed to Vercel (https://dabbabela.vercel.app) in
 sandbox mode only. There is no production domain, no live payment merchant keys, and no SMS or email provider.
 The external blockers listed further down are still open.
+
+## Gap closure (2026-11-26)
+| Item | Status | Notes |
+|---|---|---|
+| Online company-invoice payment (purpose `INVOICE`) | ✅ code / ⛔ live keys | Company admins pay the outstanding balance on `/team/invoices/[id]` with eSewa/Khalti (bank details shown as the alternative; "Pay" link in the list). Amount fixed at start; exactly one `InvoiceReceipt` (ESEWA/KHALTI, `paymentId`) on verified payment under invoice → payment locks; under/overpayment, cancelled payment or changed invoice refused + GATEWAY_MISMATCH alert; manual receipt / credit note / void cancel open payments and expire sessions. Staff see receipts (with payment link) and in-progress payments on `/admin/invoices/[id]`; settlements count them as company receipts; not a receivable while unpaid; no refund path (credit note). Integration-tested (10) + E2E (portal → eSewa form post, intercepted) |
+| Push sending (FCM HTTP v1) | ✅ code / ⛔ Firebase | `src/server/notify/push.ts`, `PUSH` outbox channel. Env `FCM_SERVICE_ACCOUNT_JSON` (unset = no-op, `push:false` in `/api/health`). Order out-for-delivery/delivered/failed, payment received/failed (new), plan reminders, approval requests, rider route assigned (new). Follows the IN_APP switch; UNREGISTERED tokens deleted; hand-off code never in the push text. Integration-tested with mocked HTTP (7). The Flutter `PushService` is still a no-op (needs the Firebase project) |
+| Mobile API additions | ✅ | `GET /allergens`, `GET /builder`, `POST /builder/quote`, `POST /saved-boxes`, `PATCH`/`DELETE /saved-boxes/{id}`, re-priced `GET /saved-boxes`, notification `target`, full `/settings` + `/coverage` response schemas (OpenAPI 99 paths). Built boxes order through cart lines `kind=custom` (company-billed refusal in `quoteCart`). Web builder and API share `src/server/custom-boxes.ts`. Integration-tested (5) + api-guards |
+| Coupon guessing on plan quotes | ✅ | One per-IP budget for cart + plan quotes, web + API (`src/lib/coupon-guard.ts`) |
+| Invoice page company scope | ✅ | Ageing KPIs, not-yet-invoiced panel and company picker honour staff company scope |
+| Trusted client IP for LoginEvent / audit | ✅ | `src/lib/client-ip.ts` shared with the limiter (tests updated: right-most XFF hop) |
+| Plan-cancel REFUND rejected | ✅ | Rejecting rolls the meals' `refundedAmount` back; processing marks them REFUNDED |
+| Rate limiter | ✅ | Sliding-window counter on the existing table (no schema change), prune step in housekeeping |
+| Refunds E2E | ✅ | Fresh finance user per run (no 24 h limit build-up) |
+| Schema | — | No schema change or migration (invoice payments link through `Payment.idempotencyKey`, like swap payments) |
 
 ## Security review fixes — money paths (2026-11-23)
 An independent review of HEAD `0c4ab02` found 1 critical, 4 high, 4 medium and 10 low issues (most reproduced with PoC tests).
@@ -36,7 +50,7 @@ longer exploit; `next build` ✅; Playwright full suite against that production 
 | Tests / analyzer | ✅ | `flutter analyze` 0 issues; `flutter test` 55 (API client, models, widgets); web compile sanity |
 | Real devices | ❌ not yet | Never run on a physical Android/iOS device or emulator; no Android/iOS release build made (disk space) |
 | Payments in app | ⚠️ untested live | Webview flow + polling unit/widget-tested only; needs sandbox eSewa/Khalti end-to-end on a device |
-| Push | ❌ | `PushService` no-op; needs Firebase project, FCM/APNs keys and server-side sending |
+| Push | ⚠️ server ✅ / app ❌ | Server sending built (2026-11-26, FCM HTTP v1, env-gated). App `PushService` still no-op; needs the Firebase project, APNs key and `firebase_messaging` wiring |
 | Store submission | ❌ owner | Play/App Store accounts, upload key + `key.properties`, iOS signing, listings, data-safety / privacy labels, reviewer demo accounts, launcher icons (`dart run flutter_launcher_icons`) — steps in `mobile/README.md` |
 | Nepali copy | ⚠️ | Hand-written, needs a native-speaker review |
 
@@ -51,7 +65,7 @@ longer exploit; `next build` ✅; Playwright full suite against that production 
 | Idempotency / limits / errors | ✅ | `Idempotency-Key` required on every money-moving POST (24 h replay, in-progress 409, reuse 422; multipart compared by fields + file hash); 2B limiter for auth, checkout, payment start, uploads, writes; one error envelope |
 | OpenAPI | ✅ | `docs/api/openapi.yaml` (95 paths), `GET /api/v1/openapi.json`, `docs/api/README.md` |
 | Tests | ✅ | `api-auth` (10), `api-customer` (16), `api-ops` (11), `api-public` (9), `tests/unit/api-guards` (8: every v1 handler uses `apiRoute({auth})`, public allow-list, runtime 401 sweep, spec covers every handler, JSON in sync) |
-| Not mirrored | — | Build-a-Dabba create/edit (web builder), checkout attribution (cookie-based), dispatch route cost / cash hand-in / stop reorder / change acknowledge, kitchen day lock / draft POs / open-pause / ticket printing (desktop tools). Push sending itself (FCM) is not wired — tokens are stored only |
+| Not mirrored | — | Checkout attribution (cookie-based), dispatch route cost / cash hand-in / stop reorder / change acknowledge, kitchen day lock / draft POs / open-pause / ticket printing (desktop tools). (Build-a-Dabba and push sending were added on 2026-11-26) |
 
 ## Production readiness Phase 2C (2026-11-20)
 - **Swap "pay the difference":** a dearer swap of a paid plan meal can be paid from credit or online (eSewa/Khalti, `SWAP_DIFFERENCE` payment); the swap is applied once on verified payment, credited to the wallet if it can no longer be applied, and cancelled if unpaid at the cut-off. Cheaper swaps credit the wallet (paid) or reduce what's owed (unpaid). Integration-tested (4).
@@ -61,7 +75,7 @@ longer exploit; `next build` ✅; Playwright full suite against that production 
 - **Purchase returns → supplier credit:** optional credit on return (credit-note no., idempotent), apply to supplier invoices with over-apply guards, void the unapplied remainder, net due after credits in ageing; credits are not cash. Integration-tested (6) + E2E `purchasing`.
 - **Analytics:** order adjustments and unbilled company share shown as separate KPIs (not folded into recognised revenue until a VAT split exists).
 - **E2E added:** `purchasing`, `company-invoices`, `disruption` (bandh wizard). Vitest: 401 tests / 39 files (with Phase 2A merged).
-- Not built: online payment of company invoices (purpose `INVOICE`).
+- Online payment of company invoices (purpose `INVOICE`): built 2026-11-26 (see "Gap closure").
 
 ## Production readiness — Phase 2B security hardening (2026-11-20)
 | Item | Status | Notes |

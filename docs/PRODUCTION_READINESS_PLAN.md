@@ -170,3 +170,25 @@ fail on the pre-fix code); review PoCs no longer exploit (F1–F3 assertions now
 credit nothing for cancelled top-ups, F5/F6 refused); `next build` ✅; Playwright **46 / 46** against that build on :3400.
 Deploy note: assign a kitchen to every chef / store keeper / dispatcher / rider account first (unassigned kitchen staff now see no
 kitchen). Left: app attestation for API sign-up; the limiter stays fixed-window.
+
+### 2026-11-26 — Gap closure: invoice payments, push, mobile API additions (done)
+
+Worked on `main` from `3a6cb4e`. **No schema change / no migration** (invoice payments are linked to their invoice through
+`Payment.idempotencyKey = invoice:<id>:<uuid>`, the same pattern as swap payments; the limiter keeps the `RateLimit` table).
+
+| Area | What was built |
+|---|---|
+| Online invoice payment (`INVOICE`) | `src/server/invoice-payments.ts`. Company admins pay an issued invoice's whole outstanding balance with eSewa/Khalti from `/team/invoices/[id]` (bank details alongside; "Pay" link in the list). Amount fixed at start; own open payment reused, another admin's live session (< 20 min) blocks, stale ones cancelled. `markPaymentPaid` locks invoice → payment and accepts only an open payment for an unchanged open invoice with the exact amount → exactly one `InvoiceReceipt` (ESEWA/KHALTI, `paymentId`) + paidAmount/status like `recordInvoicePayment` (shared `applyInvoiceReceiptTx`), audited; otherwise refused + GATEWAY_MISMATCH alert. Manual receipts, credit notes and void (now under the invoice lock) cancel open payments and expire sessions. `/pay` and `/thank-you` redirect invoice payments to the portal; staff invoice page lists receipts with payment links and in-progress payments; payment detail links the invoice. Settlements count them as company receipts (once); unpaid ones are not receivables; refunds refused (credit note instead). |
+| Push sending | `src/server/notify/push.ts` (FCM HTTP v1, RS256 service-account JWT → access token, per-device sends, UNREGISTERED/404 tokens deleted, 401 refresh). `PUSH` channel in the outbox (`PUSH_TEMPLATES`): order out-for-delivery / delivered / failed, payment received / failed (new `payment.failed` on gateway decline + rejected transfer), plan reminders, approval requests, rider route assigned (new `rider.route_assigned` from `createRoute` / `setRouteRider`). Follows the IN_APP switch per topic (web label "In account & app push"); no new pref channel, so old app PUTs can't switch push off by omission. `data { type, link, targetType, targetId }`; hand-off code never in the push text. `FCM_SERVICE_ACCOUNT_JSON` unset = no-op and `push:false` in `/api/health`. Order/payment notifications now carry links. |
+| Mobile API | `GET /allergens`; `GET /builder`, `POST /builder/quote`, `POST /saved-boxes`, `PATCH`/`DELETE /saved-boxes/{id}`; `GET /saved-boxes` re-priced (`price`, `savedPrice`, `problem`, `details`, `diet`, `allergens`); notification `target {type, id?}`; OpenAPI full `Settings`, `CoverageSearch`/`CoverageAddress`, builder/saved-box schemas, `BUILD_REJECTED` (99 paths); README sections (builder, deep links, push). Web builder actions and the API share `src/server/custom-boxes.ts` (saved-box limit now 30 on every path). All changes additive. |
+| Smaller items | Coupon budget shared by cart + plan quotes on web and API (`src/lib/coupon-guard.ts`); `/admin/invoices` ageing, not-yet-invoiced and company picker honour company scope; `LoginEvent` + audit IP use `src/lib/client-ip.ts` (same rule as the limiter; access/audit tests updated to the right-most hop); rejecting a plan-cancel REFUND rolls the meals' `refundedAmount` back, processing marks them REFUNDED; sliding-window limiter (current + weighted previous window rows, `rateLimitPeek`, `rate-limits` housekeeping step); refunds E2E uses a fresh finance user per run. |
+| Found on the way | Order numbers (`DB<yymmdd><4>`, ~1M per day) could collide → failed checkout; now collision-checked (`nextOrderNumber`). Two order-dependent test flakes fixed (bandh closure left open by `commerce`, fire-and-forget notification raced in `approvals`). |
+
+Tests: new `invoice-payment` (10), `push` (7), `api-builder` (5), `gap-closure` (5); E2E `company-invoices` + online-pay test
+(eSewa form post intercepted; the eSewa step runs when the server has `PAYMENTS_SANDBOX=true` — verified once that way).
+Checks: `tsc` 0 errors; eslint 0 errors (same 7 warnings); Vitest **553 / 553** in **53** files, two consecutive green runs
+(after the flake fixes); `next build` ✅ (`.next-gap`); Playwright **47 / 47** against that build on :3400.
+
+Left / owner: Firebase project + APNs key + `FCM_SERVICE_ACCOUNT_JSON`, and the Flutter `PushService` (firebase_messaging,
+route by `targetType`/`targetId`); live gateway keys for invoice payments; refunds of online invoice payments go through a
+credit note + bank payment (no automated reversal receipt); app attestation for API sign-up (unchanged).
