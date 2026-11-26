@@ -366,6 +366,9 @@ describe("kitchen day lock & disruption", () => {
     expect(isoDate(o.deliveryDate) > d || o.status === "CANCELLED").toBe(true);
     const q = await quoteCart(user, { lines: [{ kind: "box", id: b.id, date: d, qty: 1 }], addressId });
     expect(q.ok).toBe(false);
+    // Reopen the day: the closure is this test's fixture, and later files order on near-future service days too
+    // (security-money H1 failed whenever its serviceDay(10, n) landed on this date).
+    await db.holiday.deleteMany({ where: { date: dateOnly(d), name: "Nepal bandh", kitchenId: null } });
   });
 });
 

@@ -23,7 +23,7 @@ import {
   companySplitFor,
   handoffOtp,
   initialState,
-  orderNumber,
+  nextOrderNumber,
   OrderError,
   paymentRef,
   setOrderStatus,
@@ -443,7 +443,7 @@ export async function createSubscription(
           const d = dayTotals.get(m.date)!;
           await tx.order.create({
             data: {
-              number: orderNumber(),
+              number: await nextOrderNumber(tx),
               code: randomCode(4),
               userId: user.id,
               source: "SUBSCRIPTION",
@@ -531,7 +531,7 @@ async function cloneMealOrder(tx: Tx, tpl: Order & { items: Prisma.OrderItemGetP
   }
   return tx.order.create({
     data: {
-      number: orderNumber(),
+      number: await nextOrderNumber(tx),
       code: randomCode(4),
       userId: tpl.userId,
       source: "SUBSCRIPTION",
@@ -1251,7 +1251,7 @@ export async function addMealToPlan(user: CurrentUser, subId: string, input: { d
       if (input.method === "WALLET") await spendCredit(tx, { userId: user.id, amount: total, paymentId: payment.id, note: `Extra meal for ${q.sub.reference}` });
       const order = await tx.order.create({
         data: {
-          number: orderNumber(),
+          number: await nextOrderNumber(tx),
           code: randomCode(4),
           userId: user.id,
           source: "SINGLE",

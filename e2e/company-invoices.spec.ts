@@ -83,8 +83,9 @@ test("finance generates a company invoice, issues it and records a receipt", asy
  * Online invoice payment (purpose INVOICE): the company admin sees the outstanding balance with eSewa/Khalti and the
  * bank details on the invoice; starting eSewa creates a PENDING payment for exactly the balance and posts the signed
  * form to eSewa (intercepted — the sandbox gateway can't complete in E2E; verification is covered by
- * tests/integration/invoice-payment.test.ts). The fixture invoice is voided afterwards (it would count toward the
- * demo company's outstanding balance in other specs).
+ * tests/integration/invoice-payment.test.ts). The eSewa step runs when the server offers eSewa (a production build
+ * needs PAYMENTS_SANDBOX=true for the sandbox keys); otherwise only the panel and bank details are checked. The fixture
+ * invoice is voided afterwards (it would count toward the demo company's outstanding balance in other specs).
  */
 test("company admin pays an issued invoice online (eSewa start) and sees bank details", async ({ page }) => {
   const stamp = Date.now().toString(36);
@@ -112,7 +113,7 @@ test("company admin pays an issued invoice online (eSewa start) and sees bank de
     await page.route(/esewa\.com\.np/, (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<html><body>eSewa sandbox (intercepted)</body></html>" }));
     await login(page, "customer.a@demo.dabbabela.local", undefined, "/team");
     await page.goto("/team/invoices");
-    await page.locator("main").getByRole("row").filter({ hasText: invoice.number }).getByRole("link", { name: "Pay" }).click();
+    await page.locator("main").getByRole("row").filter({ hasText: invoice.number }).getByRole("link", { name: "Pay", exact: true }).click();
     await page.waitForURL(new RegExp(`/team/invoices/${invoice.id}`));
     const panel = page.getByTestId("invoice-pay");
     await expect(panel).toContainText("Pay Rs 200 online");

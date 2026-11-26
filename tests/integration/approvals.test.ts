@@ -145,7 +145,8 @@ describe("refund requests", () => {
     expect(await db.refund.count({ where: { paymentId } })).toBe(1);
     const actions = (await db.auditLog.findMany({ where: { entity: "ApprovalRequest", entityId: reqId } })).map((a) => a.action);
     expect(actions).toEqual(expect.arrayContaining(["approval.request", "approval.approve", "approval.execute"]));
-    expect(await db.notification.count({ where: { userId: ops.id, type: "approval.decided" } })).toBeGreaterThanOrEqual(1);
+    // approveRequest notifies fire-and-forget (`void notify`), so wait for the in-app row instead of racing it.
+    await expect.poll(() => db.notification.count({ where: { userId: ops.id, type: "approval.decided" } })).toBeGreaterThanOrEqual(1);
   });
 
   it("re-validates at execution: a request that no longer fits FAILS with the error and can't run twice", async () => {

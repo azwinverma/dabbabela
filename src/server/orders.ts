@@ -27,6 +27,18 @@ type Tx = Prisma.TransactionClient;
 export function orderNumber() {
   return `DB${todayKTM().slice(2).replace(/-/g, "")}${randomCode(4)}`;
 }
+/**
+ * An order number not used yet. The visible format has only 32^4 ≈ 1M codes per day, so with a few hundred orders a
+ * day a random pick collides now and then (birthday bound) and the insert failed on the unique index. Check first and
+ * re-pick (a race between two simultaneous checkouts on the same new code is astronomically unlikely).
+ */
+export async function nextOrderNumber(client: Pick<Prisma.TransactionClient, "order"> = db) {
+  for (let i = 0; i < 8; i++) {
+    const n = orderNumber();
+    if (!(await client.order.findUnique({ where: { number: n }, select: { id: true } }))) return n;
+  }
+  return `${orderNumber()}${randomCode(2)}`;
+}
 export function paymentRef() {
   return `PAY-${Date.now().toString(36).toUpperCase()}-${randomCode(5)}`;
 }
@@ -530,7 +542,7 @@ export async function placeCartOrder(
           const ls = q.lines.filter((l) => l.date === day.date);
           const order = await tx.order.create({
             data: {
-              number: orderNumber(),
+              number: await nextOrderNumber(tx),
               code: randomCode(4),
               userId: user.id,
               placedById: input.placedById ?? null,
